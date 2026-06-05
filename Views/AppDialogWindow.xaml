@@ -1,0 +1,68 @@
+<Window x:Class="Mystral.Views.AppDialogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Mystral"
+        Icon="pack://siteoforigin:,,,/res/ico.ico"
+        Width="538"
+        MinHeight="163"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#F0F0F0"
+        FontFamily="Segoe UI"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.Background>
+            <ImageBrush ImageSource="pack://siteoforigin:,,,/res/img/dialog_background.png"
+                        Stretch="Fill" />
+        </Grid.Background>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0"
+              Margin="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="32" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Image x:Name="DialogIcon"
+                   Grid.Column="0"
+                   Width="32"
+                   Height="32"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+
+            <StackPanel Grid.Column="1"
+                        Margin="8,0,0,0">
+                <TextBlock x:Name="DialogTitleText"
+                           FontSize="19"
+                           Foreground="#355A88"
+                           TextWrapping="Wrap" />
+                <TextBlock x:Name="DialogDescriptionText"
+                           Margin="0,4,0,0"
+                           Foreground="#333333"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel x:Name="ButtonPanel"
+                    Grid.Row="1"
+                    Margin="15,11"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal" />
+    </Grid>
+</Window>
