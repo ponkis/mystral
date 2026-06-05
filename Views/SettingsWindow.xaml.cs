@@ -79,6 +79,23 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private bool AreSettingsEqual(AppSettings current, AppSettings saved)
+    {
+        if (current.LastFm.Enabled != saved.LastFm.Enabled) return false;
+        if ((current.LastFm.ApiKey ?? "") != (saved.LastFm.ApiKey ?? "")) return false;
+        if ((current.LastFm.ApiSecret ?? "") != (saved.LastFm.ApiSecret ?? "")) return false;
+        if ((current.LastFm.Username ?? "") != (saved.LastFm.Username ?? "")) return false;
+        if ((current.LastFm.Password ?? "") != (saved.LastFm.Password ?? "")) return false;
+        if (current.LastFm.ScrobblingEnabled != saved.LastFm.ScrobblingEnabled) return false;
+
+        if (current.Behavior.CloseToTray != saved.Behavior.CloseToTray) return false;
+        if (current.Behavior.EnableNotifications != saved.Behavior.EnableNotifications) return false;
+        if (current.Behavior.AlwaysOnTop != saved.Behavior.AlwaysOnTop) return false;
+        if (current.Behavior.StartWithWindows != saved.Behavior.StartWithWindows) return false;
+
+        return true;
+    }
+
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
         if (_isLoadingSettings)
@@ -86,7 +103,8 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        _hasUnsavedChanges = true;
+        var current = CreateSettingsFromFields();
+        _hasUnsavedChanges = !AreSettingsEqual(current, _settingsService.Settings);
         UpdateLastFmStatus();
         UpdateDirtyStatus();
     }
@@ -263,10 +281,15 @@ public partial class SettingsWindow : Window
         {
             var records = LocalScrobbleCacheService.Instance.LoadAllRecords();
             HistoryListView.ItemsSource = records;
+
+            bool hasHistory = records != null && records.Count > 0;
+            ClearHistoryButton.IsEnabled = hasHistory;
+            ExportHistoryButton.IsEnabled = hasHistory;
         }
         catch
         {
-            // Suppress
+            ClearHistoryButton.IsEnabled = false;
+            ExportHistoryButton.IsEnabled = false;
         }
     }
 
@@ -295,8 +318,21 @@ public partial class SettingsWindow : Window
 
         if (result == MessageBoxResult.Yes)
         {
-            LocalScrobbleCacheService.Instance.ClearHistory();
-            LoadHistory();
+            if (LocalScrobbleCacheService.Instance.ClearHistory())
+            {
+                LoadHistory();
+                AppDialogWindow.ShowInformation(
+                    this,
+                    "History cleared",
+                    "Playback history has been successfully cleared.");
+            }
+            else
+            {
+                AppDialogWindow.ShowError(
+                    this,
+                    "Error clearing history",
+                    "Failed to clear playback history.");
+            }
         }
     }
 

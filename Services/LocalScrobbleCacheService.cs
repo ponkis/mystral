@@ -198,7 +198,7 @@ public sealed class LocalScrobbleCacheService
         }
     }
 
-    public void ClearHistory()
+    public bool ClearHistory()
     {
         lock (_fileLock)
         {
@@ -208,10 +208,11 @@ public sealed class LocalScrobbleCacheService
                 {
                     File.Delete(_cachePath);
                 }
+                return true;
             }
             catch
             {
-                // Suppress
+                return false;
             }
         }
     }

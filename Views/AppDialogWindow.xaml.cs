@@ -33,6 +33,11 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons());
     }
 
+    public static MessageBoxResult ShowError(Window owner, string title, string message)
+    {
+        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons());
+    }
+
     public static MessageBoxResult ShowQuestion(Window owner, string title, string message)
     {
         return ShowDialog(

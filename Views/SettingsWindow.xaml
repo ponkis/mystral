@@ -7,7 +7,7 @@
         Height="430"
         MinWidth="520"
         MinHeight="430"
-        ResizeMode="CanMinimize"
+        ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="#F0F0F0"
@@ -230,6 +230,7 @@
                                 Width="88"
                                 Height="22"
                                 HorizontalAlignment="Right"
+                                IsEnabled="False"
                                 Click="ClearHistoryButton_Click" />
                     </Grid>
 
@@ -248,6 +249,11 @@
                         <ListView.View>
                             <GridView>
                                 <GridViewColumn Header="" Width="30">
+                                    <GridViewColumn.HeaderContainerStyle>
+                                        <Style TargetType="{x:Type GridViewColumnHeader}">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                        </Style>
+                                    </GridViewColumn.HeaderContainerStyle>
                                     <GridViewColumn.CellTemplate>
                                         <DataTemplate>
                                             <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
@@ -267,6 +273,7 @@
                             HorizontalAlignment="Left"
                             MinWidth="150"
                             Height="24"
+                            IsEnabled="False"
                             Click="ExportHistoryButton_Click" />
                 </StackPanel>
             </Grid>
