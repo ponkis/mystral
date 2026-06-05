@@ -7,7 +7,7 @@ Mystral is a Windows desktop music companion built with WPF. It reads the active
 - Windows 10 1809 or newer.
 - .NET SDK 8.0 or newer for development.
 - Inno Setup 6 for creating the Windows installer.
-- A Last.fm API account for Last.fm links and scrobbling.
+- A Last.fm API account for Last.fm links and scrobbling (optional)
 
 ## First Setup
 
@@ -26,7 +26,7 @@ Mystral is a Windows desktop music companion built with WPF. It reads the active
 
 3. Open `Settings` from the app menu or tray menu.
 
-4. Configure Last.fm under the `Last.fm` category:
+4. Turn on and configure Last.fm under the `Last.fm` category:
 
    - API key
    - API secret
@@ -50,8 +50,6 @@ Release builds store settings in:
 %LOCALAPPDATA%\Mystral\settings.json
 ```
 
-Last.fm credentials are currently stored in that JSON file. This is acceptable for a small beta with trusted testers, but it is not strong credential storage. For wider release, protect secrets with Windows DPAPI or Windows Credential Manager.
-
 ## Versioning
 
 The project version is centralized in `Directory.Build.props`:
@@ -68,8 +66,6 @@ The build environment is selected through MSBuild:
 
 - Debug defaults to `AppEnvironment=Development`.
 - Release defaults to `AppEnvironment=Production`.
-
-You can override it explicitly:
 
 ```powershell
 dotnet build .\Mystral\Mystral.csproj -c Debug /p:AppEnvironment=Development
@@ -125,10 +121,6 @@ The installer is written to:
 ```text
 artifacts\installer\Mystral-1.0.0-win-x64-setup.exe
 ```
-
-## Signing
-
-Unsigned builds can trigger Windows SmartScreen warnings. For open-source indie beta testing, this is common and usually acceptable if testers trust the source and release link. For broader public distribution, sign the installer and executable with an Authenticode code-signing certificate.
 
 ## Runtime Assets
 
