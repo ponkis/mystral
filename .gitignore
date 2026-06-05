@@ -1,3 +1,17 @@
+# Build outputs
 bin/
 obj/
+artifacts/
+
+# Visual Studio / Rider
 .vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

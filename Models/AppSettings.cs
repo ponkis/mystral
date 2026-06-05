@@ -8,6 +8,7 @@ public sealed class AppSettings
 
 public sealed class LastFmCredentials
 {
+    public bool Enabled { get; set; }
     public string ApiKey { get; set; } = string.Empty;
     public string ApiSecret { get; set; } = string.Empty;
     public string Username { get; set; } = string.Empty;
@@ -15,7 +16,8 @@ public sealed class LastFmCredentials
     public bool ScrobblingEnabled { get; set; }
 
     public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(ApiKey)
+        Enabled
+        && !string.IsNullOrWhiteSpace(ApiKey)
         && !string.IsNullOrWhiteSpace(ApiSecret)
         && !string.IsNullOrWhiteSpace(Username)
         && !string.IsNullOrWhiteSpace(Password);

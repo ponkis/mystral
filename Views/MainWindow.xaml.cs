@@ -2957,6 +2957,12 @@ public partial class MainWindow : Window
 
     private void ShowTrayContextMenu()
     {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd != IntPtr.Zero)
+        {
+            SetForegroundWindow(hwnd);
+        }
+
         _trayContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
 
         var menu = new ContextMenu();
@@ -2974,8 +2980,6 @@ public partial class MainWindow : Window
             ShowSettingsWindow();
         };
 
-        var enableScrobblingItem = CreateTrayScrobblingItem();
-        var profileItem = CreateLastFmProfileItem();
         var exitItem = new MenuItem
         {
             Header = "Exit",
@@ -2985,14 +2989,20 @@ public partial class MainWindow : Window
 
         menu.Items.Add(settingsItem);
         menu.Items.Add(new Separator());
-        menu.Items.Add(enableScrobblingItem);
-        if (!string.IsNullOrWhiteSpace(_trayNowPlayingTrackName))
+
+        if (_settingsService.Settings.LastFm.Enabled)
         {
-            menu.Items.Add(CreateNowPlayingHeaderItem());
-            menu.Items.Add(CreateNowPlayingTrackItem(_trayNowPlayingTrackName));
+            var enableScrobblingItem = CreateTrayScrobblingItem();
+            var profileItem = CreateLastFmProfileItem();
+            menu.Items.Add(enableScrobblingItem);
+            if (!string.IsNullOrWhiteSpace(_trayNowPlayingTrackName))
+            {
+                menu.Items.Add(CreateNowPlayingTrackItem(_trayNowPlayingTrackName));
+            }
+            menu.Items.Add(profileItem);
+            menu.Items.Add(new Separator());
         }
-        menu.Items.Add(profileItem);
-        menu.Items.Add(new Separator());
+
         menu.Items.Add(exitItem);
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.AbsolutePoint;
         var cursor = System.Windows.Forms.Cursor.Position;
@@ -3038,22 +3048,11 @@ public partial class MainWindow : Window
         return item;
     }
 
-    private static MenuItem CreateNowPlayingHeaderItem()
-    {
-        return new MenuItem
-        {
-            Header = "Now Playing...",
-            IsEnabled = false,
-            Focusable = false,
-            IsTabStop = false
-        };
-    }
-
     private static MenuItem CreateNowPlayingTrackItem(string trackName)
     {
         return new MenuItem
         {
-            Header = trackName,
+            Header = $"Now Playing: {trackName}",
             Focusable = false,
             IsTabStop = false,
             StaysOpenOnClick = true,
@@ -3093,6 +3092,7 @@ public partial class MainWindow : Window
         {
             LastFm = new LastFmCredentials
             {
+                Enabled = current.LastFm.Enabled,
                 ApiKey = current.LastFm.ApiKey,
                 ApiSecret = current.LastFm.ApiSecret,
                 Username = current.LastFm.Username,
@@ -3327,6 +3327,10 @@ public partial class MainWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);

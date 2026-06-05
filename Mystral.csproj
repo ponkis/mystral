@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -14,8 +14,9 @@
     <ApplicationIcon>res\ico.ico</ApplicationIcon>
     <Title>Mystral</Title>
     <Product>Mystral</Product>
-    <Company>Mystral</Company>
+    <Company>ponkis.xyz</Company>
     <Description>Mystral desktop media controls</Description>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

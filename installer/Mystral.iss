@@ -1,6 +1,6 @@
 #define MyAppName "Mystral"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "Mystral"
+#define MyAppPublisher "ponkis.xyz"
 #define MyAppExeName "Mystral.exe"
 #define MyPublishDir "..\artifacts\publish\Mystral-1.0.0-win-x64-folder"
 
@@ -19,7 +19,7 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-SetupIconFile=..\Mystral\res\ico.ico
+SetupIconFile=..\res\ico.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]

@@ -29,6 +29,7 @@ public partial class SettingsWindow : Window
     {
         _isLoadingSettings = true;
         var settings = _settingsService.Settings;
+        EnableLastFmCheckBox.IsChecked = settings.LastFm.Enabled;
         ApiKeyBox.Text = settings.LastFm.ApiKey;
         ApiSecretBox.Text = settings.LastFm.ApiSecret;
         UsernameBox.Text = settings.LastFm.Username;
@@ -73,13 +74,12 @@ public partial class SettingsWindow : Window
     private async Task<bool> SaveSettingsAsync()
     {
         var settings = CreateSettingsFromFields();
-        var hasAnyLastFmValue = HasAnyLastFmValue(settings.LastFm);
-        if (hasAnyLastFmValue && !settings.LastFm.IsConfigured)
+        if (settings.LastFm.Enabled && !settings.LastFm.IsConfigured)
         {
             AppDialogWindow.ShowWarning(
                 this,
                 "Last.fm incomplete",
-                "Fill in all Last.fm fields or clear them all to disable Last.fm features.");
+                "Fill in all Last.fm fields to enable Last.fm features.");
             return false;
         }
 
@@ -127,6 +127,7 @@ public partial class SettingsWindow : Window
         {
             LastFm = new LastFmCredentials
             {
+                Enabled = EnableLastFmCheckBox.IsChecked == true,
                 ApiKey = ApiKeyBox.Text,
                 ApiSecret = ApiSecretBox.Text,
                 Username = UsernameBox.Text,
@@ -138,15 +139,6 @@ public partial class SettingsWindow : Window
                 CloseToTray = CloseToTrayCheckBox.IsChecked == true
             }
         };
-    }
-
-    private static bool HasAnyLastFmValue(LastFmCredentials credentials)
-    {
-        return !string.IsNullOrWhiteSpace(credentials.ApiKey)
-               || !string.IsNullOrWhiteSpace(credentials.ApiSecret)
-               || !string.IsNullOrWhiteSpace(credentials.Username)
-               || !string.IsNullOrWhiteSpace(credentials.Password)
-               || credentials.ScrobblingEnabled;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -189,6 +181,12 @@ public partial class SettingsWindow : Window
     private void UpdateLastFmStatus()
     {
         var credentials = CreateSettingsFromFields().LastFm;
+        if (!credentials.Enabled)
+        {
+            SetLastFmStatus("Last.fm disabled.", isWarning: false);
+            return;
+        }
+
         if (credentials.IsConfigured)
         {
             SetLastFmStatus(
@@ -200,10 +198,8 @@ public partial class SettingsWindow : Window
         }
 
         SetLastFmStatus(
-            HasAnyLastFmValue(credentials)
-                ? "Last.fm needs every field before it can be enabled."
-                : "Last.fm disabled.",
-            isWarning: HasAnyLastFmValue(credentials));
+            "Last.fm needs every field before it can be enabled.",
+            isWarning: true);
     }
 
     private void SetLastFmStatus(string message, bool isWarning)

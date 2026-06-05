@@ -127,34 +127,44 @@
                                TextWrapping="Wrap"
                                Text="Configure credentials used by Last.fm-dependent options." />
 
-                    <TextBlock Text="API key" />
+                    <CheckBox x:Name="EnableLastFmCheckBox"
+                              Margin="0,0,0,12"
+                              Content="Enable Last.fm integration"
+                              Click="SettingsControl_Changed" />
+
+                    <TextBlock Text="API key" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
                     <TextBox x:Name="ApiKeyBox"
                              Margin="0,4,0,10"
                              Style="{StaticResource SettingTextBoxStyle}"
-                             TextChanged="SettingsControl_Changed" />
+                             TextChanged="SettingsControl_Changed"
+                             IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
-                    <TextBlock Text="API secret" />
+                    <TextBlock Text="API secret" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
                     <TextBox x:Name="ApiSecretBox"
                              Margin="0,4,0,10"
                              Style="{StaticResource SettingTextBoxStyle}"
-                             TextChanged="SettingsControl_Changed" />
+                             TextChanged="SettingsControl_Changed"
+                             IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
-                    <TextBlock Text="Username" />
+                    <TextBlock Text="Username" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
                     <TextBox x:Name="UsernameBox"
                              Margin="0,4,0,10"
                              Style="{StaticResource SettingTextBoxStyle}"
-                             TextChanged="SettingsControl_Changed" />
+                             TextChanged="SettingsControl_Changed"
+                             IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
-                    <TextBlock Text="Password" />
+                    <TextBlock Text="Password" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
                     <PasswordBox x:Name="PasswordBox"
                                  Margin="0,4,0,10"
                                  Style="{StaticResource SettingPasswordBoxStyle}"
-                                 PasswordChanged="SettingsControl_Changed" />
+                                 PasswordChanged="SettingsControl_Changed"
+                                 IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
                     <CheckBox x:Name="ScrobbleCheckBox"
                               Margin="0,0,0,10"
                               Content="Scrobble playback to Last.fm"
-                              Click="SettingsControl_Changed" />
+                              Click="SettingsControl_Changed"
+                              IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
                     <Grid Margin="0,5,0,0">
                         <Grid.ColumnDefinitions>

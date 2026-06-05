@@ -21,8 +21,11 @@ public static class AppMetadata
 
     private static string GetInformationalVersion()
     {
-        return typeof(AppMetadata).Assembly
+        var version = typeof(AppMetadata).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion ?? "1.0.0";
+
+        var plusIndex = version.IndexOf('+');
+        return plusIndex >= 0 ? version[..plusIndex] : version;
     }
 }
