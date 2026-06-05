@@ -103,6 +103,8 @@ public partial class MainWindow : Window
     private bool _hasAppliedArtworkTint;
     private BitmapSource? _lastArtworkTintSource;
     private bool _isExitingFromTray;
+    private string _lastNotificationTrackTitle = string.Empty;
+    private string _lastNotificationTrackArtist = string.Empty;
 
     private MediaSnapshot Snapshot
     {
@@ -345,8 +347,29 @@ public partial class MainWindow : Window
         });
     }
 
+    private void ShowTrackNotification(string title, string artist, ImageSource? coverArt)
+    {
+        var popup = new TrackNotificationWindow(title, artist, coverArt);
+        popup.Show();
+    }
+
     private void ApplySnapshot(MediaSnapshot snapshot)
     {
+        if (snapshot.HasSession && !string.IsNullOrWhiteSpace(snapshot.Title))
+        {
+            if (snapshot.Title != _lastNotificationTrackTitle || snapshot.Description != _lastNotificationTrackArtist)
+            {
+                _lastNotificationTrackTitle = snapshot.Title;
+                _lastNotificationTrackArtist = snapshot.Description;
+                ShowTrackNotification(snapshot.Title, snapshot.Description, snapshot.CoverArt);
+            }
+        }
+        else
+        {
+            _lastNotificationTrackTitle = string.Empty;
+            _lastNotificationTrackArtist = string.Empty;
+        }
+
         TitleText.Text = snapshot.Title;
         ExpandedTitleText.Text = snapshot.Title;
         LyricsTitleText.Text = snapshot.Title;
@@ -3022,18 +3045,23 @@ public partial class MainWindow : Window
         menu.IsOpen = true;
     }
 
-    private static MenuItem CreateTrayHeaderItem()
+    private MenuItem CreateTrayHeaderItem()
     {
-        return new MenuItem
+        var item = new MenuItem
         {
             Header = $"{AppMetadata.Name} {AppMetadata.Version}",
             Icon = CreateMenuIcon("res/ico.ico"),
             FontWeight = FontWeights.Bold,
             Focusable = false,
             IsTabStop = false,
-            StaysOpenOnClick = true,
-            Cursor = Cursors.Arrow
+            Cursor = Cursors.Hand
         };
+        item.Click += (_, _) =>
+        {
+            RestoreFromTray();
+            ShowAboutWindow();
+        };
+        return item;
     }
 
     private MenuItem CreateTrayScrobblingItem()

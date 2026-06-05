@@ -1,8 +1,8 @@
 #define MyAppName "Mystral"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "ponkis.xyz"
 #define MyAppExeName "Mystral.exe"
-#define MyPublishDir "..\artifacts\publish\Mystral-1.0.0-win-x64-folder"
+#define MyPublishDir "..\artifacts\publish\Mystral-1.1.0-win-x64-folder"
 
 [Setup]
 AppId={{9B29E19E-864E-4D26-961B-B44E91D94D44}
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\artifacts\installer
-OutputBaseFilename=Mystral-1.0.0-win-x64-setup
+OutputBaseFilename=Mystral-1.1.0-win-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

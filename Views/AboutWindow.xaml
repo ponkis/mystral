@@ -152,16 +152,12 @@
                         <TextBlock Margin="0,7,0,0"
                                    Foreground="#D4E2DC"
                                    FontSize="13"
-                                   Text="Made with love by ponkis"
-                                   Effect="{StaticResource TextShadow}" />
-
-                        <TextBlock Margin="0,13,0,0"
-                                   Foreground="#D4E2DC"
-                                   FontSize="12.5">
-                            <Run Text="visit " />
+                                   Effect="{StaticResource TextShadow}">
+                            <Run Text="Made with love by " />
                             <Hyperlink NavigateUri="https://ponkis.xyz/"
-                                       RequestNavigate="Hyperlink_RequestNavigate">
-                                <Run Text="https://ponkis.xyz/" />
+                                       RequestNavigate="Hyperlink_RequestNavigate"
+                                       Foreground="#D4E2DC">
+                                <Bold><Run Text="ponkis" /></Bold>
                             </Hyperlink>
                         </TextBlock>
                     </StackPanel>
