@@ -95,6 +95,7 @@
                  SelectionChanged="CategoriesListBox_SelectionChanged">
             <ListBoxItem x:Name="LastFmCategoryItem" Height="28" Content="Last.fm" />
             <ListBoxItem x:Name="BehaviorCategoryItem" Height="28" Content="Behavior" />
+            <ListBoxItem x:Name="HistoryCategoryItem" Height="28" Content="History" />
         </ListBox>
 
         <Grid Grid.Column="1"
@@ -191,6 +192,42 @@
                               Margin="0,12,0,0"
                               Content="Show in tray when closing"
                               Click="SettingsControl_Changed" />
+                    <CheckBox x:Name="EnableNotificationsCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Enable track change notifications"
+                              Click="SettingsControl_Changed" />
+                </StackPanel>
+
+                <StackPanel x:Name="HistoryPanel"
+                            Visibility="Collapsed">
+                    <TextBlock FontWeight="Bold" Text="Playback History" />
+                    <TextBlock Margin="0,5,0,12"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="View locally cached scrobbles and download them for manual upload." />
+
+                    <ListView x:Name="HistoryListView"
+                              Height="220"
+                              BorderThickness="1"
+                              BorderBrush="#7F9DB9"
+                              Background="White"
+                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Title" Width="140" DisplayMemberBinding="{Binding Title}" />
+                                <GridViewColumn Header="Artist" Width="120" DisplayMemberBinding="{Binding Artist}" />
+                                <GridViewColumn Header="Time" Width="140" DisplayMemberBinding="{Binding FormattedTime}" />
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <Button x:Name="ExportHistoryButton"
+                            Content="Export Full History (CSV)"
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Left"
+                            MinWidth="150"
+                            Height="24"
+                            Click="ExportHistoryButton_Click" />
                 </StackPanel>
             </Grid>
 

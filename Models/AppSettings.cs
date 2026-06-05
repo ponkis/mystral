@@ -26,4 +26,5 @@ public sealed class LastFmCredentials
 public sealed class BehaviorSettings
 {
     public bool CloseToTray { get; set; } = true;
+    public bool EnableNotifications { get; set; } = true;
 }

@@ -23,6 +23,12 @@ public partial class SettingsWindow : Window
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("res/img/info.ico", 16);
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
+
+        LocalScrobbleCacheService.Instance.ScrobbleAdded += LocalScrobbleCache_ScrobbleAdded;
+        Closed += (s, e) =>
+        {
+            LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
+        };
     }
 
     private void LoadSettings()
@@ -36,6 +42,7 @@ public partial class SettingsWindow : Window
         PasswordBox.Password = settings.LastFm.Password;
         ScrobbleCheckBox.IsChecked = settings.LastFm.ScrobblingEnabled;
         CloseToTrayCheckBox.IsChecked = settings.Behavior.CloseToTray;
+        EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -45,13 +52,28 @@ public partial class SettingsWindow : Window
 
     private void CategoriesListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
-        var showLastFm = CategoriesListBox.SelectedItem == LastFmCategoryItem;
-        LastFmPanel.Visibility = showLastFm ? Visibility.Visible : Visibility.Collapsed;
-        BehaviorPanel.Visibility = showLastFm ? Visibility.Collapsed : Visibility.Visible;
-        SettingsTitleText.Text = showLastFm ? "Last.fm" : "Behavior";
-        SettingsHeaderIcon.Source = showLastFm
-            ? LoadSiteImage("res/img/lastfm.png")
-            : IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
+        var selectedItem = CategoriesListBox.SelectedItem;
+        
+        LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+
+        if (selectedItem == LastFmCategoryItem)
+        {
+            SettingsTitleText.Text = "Last.fm";
+            SettingsHeaderIcon.Source = LoadSiteImage("res/img/lastfm.png");
+        }
+        else if (selectedItem == BehaviorCategoryItem)
+        {
+            SettingsTitleText.Text = "Behavior";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
+        }
+        else if (selectedItem == HistoryCategoryItem)
+        {
+            SettingsTitleText.Text = "Playback History";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
+            LoadHistory();
+        }
     }
 
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
@@ -136,7 +158,8 @@ public partial class SettingsWindow : Window
             },
             Behavior = new BehaviorSettings
             {
-                CloseToTray = CloseToTrayCheckBox.IsChecked == true
+                CloseToTray = CloseToTrayCheckBox.IsChecked == true,
+                EnableNotifications = EnableNotificationsCheckBox.IsChecked == true
             }
         };
     }
@@ -227,5 +250,72 @@ public partial class SettingsWindow : Window
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    private void LoadHistory()
+    {
+        try
+        {
+            var records = LocalScrobbleCacheService.Instance.LoadAllRecords();
+            HistoryListView.ItemsSource = records;
+        }
+        catch
+        {
+            // Suppress
+        }
+    }
+
+    private void LocalScrobbleCache_ScrobbleAdded(object? sender, ScrobbleRecord record)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (CategoriesListBox.SelectedItem == HistoryCategoryItem)
+            {
+                LoadHistory();
+            }
+        });
+    }
+
+    private void ExportHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var sfd = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "CSV Files (*.csv)|*.csv",
+            FileName = "mystral_scrobbles.csv"
+        };
+
+        if (sfd.ShowDialog() == true)
+        {
+            try
+            {
+                var records = LocalScrobbleCacheService.Instance.LoadAllRecords();
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("Artist,Album,Track,Timestamp");
+                foreach (var record in records)
+                {
+                    var artist = EscapeCsv(record.Artist);
+                    var album = EscapeCsv(record.Album);
+                    var track = EscapeCsv(record.Title);
+                    sb.AppendLine($"{artist},{album},{track},{record.Timestamp}");
+                }
+
+                System.IO.File.WriteAllText(sfd.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                AppDialogWindow.ShowInformation(this, "Export complete", "Playback history exported successfully!");
+            }
+            catch (Exception ex)
+            {
+                AppDialogWindow.ShowWarning(this, "Export failed", $"Failed to export history: {ex.Message}");
+            }
+        }
+    }
+
+    private static string EscapeCsv(string val)
+    {
+        if (string.IsNullOrEmpty(val)) return string.Empty;
+        if (val.Contains(",") || val.Contains("\"") || val.Contains("\n") || val.Contains("\r"))
+        {
+            return $"\"{val.Replace("\"", "\"\"")}\"";
+        }
+        return val;
     }
 }

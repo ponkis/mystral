@@ -349,12 +349,19 @@ public partial class MainWindow : Window
 
     private void ShowTrackNotification(string title, string artist, ImageSource? coverArt)
     {
+        if (!_settingsService.Settings.Behavior.EnableNotifications)
+        {
+            return;
+        }
+
         var popup = new TrackNotificationWindow(title, artist, coverArt);
         popup.Show();
     }
 
     private void ApplySnapshot(MediaSnapshot snapshot)
     {
+        Mystral.Services.LocalScrobbleCacheService.Instance.Update(snapshot);
+
         if (snapshot.HasSession && !string.IsNullOrWhiteSpace(snapshot.Title))
         {
             if (snapshot.Title != _lastNotificationTrackTitle || snapshot.Description != _lastNotificationTrackArtist)
