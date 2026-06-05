@@ -171,7 +171,9 @@ public partial class MainWindow : Window
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         RestoreWindowPlacement();
+        Topmost = _settingsService.Settings.Behavior.AlwaysOnTop;
         SetTopmostUi();
+        SetStartup(_settingsService.Settings.Behavior.StartWithWindows);
         PlayOpenAnimation();
         CompositionTarget.Rendering += TimelineCompositionTarget_Rendering;
         _mediaPollTimer.Start();
@@ -2216,6 +2218,8 @@ public partial class MainWindow : Window
     {
         Topmost = !Topmost;
         SetTopmostUi();
+        _settingsService.Settings.Behavior.AlwaysOnTop = Topmost;
+        _settingsService.Save(_settingsService.Settings);
     }
 
     private void SetTopmostUi()
@@ -2938,6 +2942,28 @@ public partial class MainWindow : Window
         };
     }
 
+    private bool _savedTopmostState;
+    private int _openDialogCount;
+
+    private void PushDisableTopmost()
+    {
+        if (_openDialogCount == 0)
+        {
+            _savedTopmostState = Topmost;
+            Topmost = false;
+        }
+        _openDialogCount++;
+    }
+
+    private void PopRestoreTopmost()
+    {
+        _openDialogCount--;
+        if (_openDialogCount == 0)
+        {
+            Topmost = _savedTopmostState;
+        }
+    }
+
     private void ShowAboutWindow()
     {
         if (_aboutWindow is not null)
@@ -2946,12 +2972,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        PushDisableTopmost();
+
         _aboutWindow = new AboutWindow
         {
             Owner = this,
             WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
-        _aboutWindow.Closed += (_, _) => _aboutWindow = null;
+        _aboutWindow.Closed += (_, _) =>
+        {
+            _aboutWindow = null;
+            PopRestoreTopmost();
+        };
         _aboutWindow.Show();
     }
 
@@ -2965,6 +2997,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        PushDisableTopmost();
+
         _settingsWindow = new SettingsWindow(_settingsService, _lastFmService)
         {
             WindowStartupLocation = IsVisible ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen
@@ -2974,7 +3008,11 @@ public partial class MainWindow : Window
             _settingsWindow.Owner = this;
         }
 
-        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Closed += (_, _) =>
+        {
+            _settingsWindow = null;
+            PopRestoreTopmost();
+        };
         _settingsWindow.Show();
     }
 
@@ -2983,6 +3021,8 @@ public partial class MainWindow : Window
         ResetScrobblingState();
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
+        Topmost = _settingsService.Settings.Behavior.AlwaysOnTop;
+        SetTopmostUi();
     }
 
     private void InitializeTrayIcon()
@@ -3022,6 +3062,20 @@ public partial class MainWindow : Window
             ShowSettingsWindow();
         };
 
+        var startupItem = new MenuItem
+        {
+            Header = "Start with Windows",
+            IsCheckable = true,
+            IsChecked = GetStartup()
+        };
+        startupItem.Click += (_, _) =>
+        {
+            bool newStartupState = !GetStartup();
+            SetStartup(newStartupState);
+            _settingsService.Settings.Behavior.StartWithWindows = newStartupState;
+            _settingsService.Save(_settingsService.Settings);
+        };
+
         var exitItem = new MenuItem
         {
             Header = "Exit",
@@ -3030,6 +3084,7 @@ public partial class MainWindow : Window
         exitItem.Click += (_, _) => ExitApplication();
 
         menu.Items.Add(settingsItem);
+        menu.Items.Add(startupItem);
         menu.Items.Add(new Separator());
 
         if (_settingsService.Settings.LastFm.Enabled)
@@ -3972,5 +4027,48 @@ public partial class MainWindow : Window
                 }
             }
         }
+    }
+
+    private static void SetStartup(bool enable)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            if (key != null)
+            {
+                var appPath = Environment.ProcessPath ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "Mystral.exe");
+
+                if (enable)
+                {
+                    key.SetValue("Mystral", $"\"{appPath}\"");
+                }
+                else
+                {
+                    key.DeleteValue("Mystral", throwOnMissingValue: false);
+                }
+            }
+        }
+        catch
+        {
+            // Suppress registry errors
+        }
+    }
+
+    private static bool GetStartup()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: false);
+            if (key != null)
+            {
+                var value = key.GetValue("Mystral") as string;
+                return !string.IsNullOrEmpty(value);
+            }
+        }
+        catch
+        {
+            // Suppress
+        }
+        return false;
     }
 }

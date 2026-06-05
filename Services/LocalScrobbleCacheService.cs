@@ -147,6 +147,75 @@ public sealed class LocalScrobbleCacheService
         }
     }
 
+    public void RemoveRecord(ScrobbleRecord record)
+    {
+        lock (_fileLock)
+        {
+            try
+            {
+                var records = LoadAllRecordsInternal();
+                var index = records.FindIndex(r => r.Timestamp == record.Timestamp && r.Title == record.Title && r.Artist == record.Artist);
+                if (index >= 0)
+                {
+                    records.RemoveAt(index);
+                    SaveAllRecordsInternal(records);
+                }
+            }
+            catch
+            {
+                // Suppress
+            }
+        }
+    }
+
+    public void RemoveRecords(IEnumerable<ScrobbleRecord> recordsToRemove)
+    {
+        lock (_fileLock)
+        {
+            try
+            {
+                var records = LoadAllRecordsInternal();
+                bool changed = false;
+                foreach (var record in recordsToRemove)
+                {
+                    var index = records.FindIndex(r => r.Timestamp == record.Timestamp && r.Title == record.Title && r.Artist == record.Artist);
+                    if (index >= 0)
+                    {
+                        records.RemoveAt(index);
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    SaveAllRecordsInternal(records);
+                }
+            }
+            catch
+            {
+                // Suppress
+            }
+        }
+    }
+
+    public void ClearHistory()
+    {
+        lock (_fileLock)
+        {
+            try
+            {
+                if (File.Exists(_cachePath))
+                {
+                    File.Delete(_cachePath);
+                }
+            }
+            catch
+            {
+                // Suppress
+            }
+        }
+    }
+
     public List<ScrobbleRecord> LoadAllRecords()
     {
         lock (_fileLock)
@@ -171,5 +240,17 @@ public sealed class LocalScrobbleCacheService
         {
             return new List<ScrobbleRecord>();
         }
+    }
+
+    private void SaveAllRecordsInternal(List<ScrobbleRecord> records)
+    {
+        var dir = Path.GetDirectoryName(_cachePath);
+        if (dir != null)
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        var json = JsonSerializer.Serialize(records, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(_cachePath, json);
     }
 }

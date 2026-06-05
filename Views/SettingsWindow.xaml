@@ -80,6 +80,10 @@
                 <Setter Property="Foreground" Value="#333333" />
             </Style>
 
+            <ContextMenu x:Key="HistoryItemContextMenu">
+                <MenuItem Header="Remove" Click="RemoveHistoryItem_Click" />
+            </ContextMenu>
+
         </ResourceDictionary>
     </Window.Resources>
 
@@ -186,7 +190,7 @@
                 </StackPanel>
 
                 <StackPanel x:Name="BehaviorPanel"
-                            Visibility="Collapsed">
+                             Visibility="Collapsed">
                     <TextBlock FontWeight="Bold" Text="Behavior" />
                     <CheckBox x:Name="CloseToTrayCheckBox"
                               Margin="0,12,0,0"
@@ -195,6 +199,14 @@
                     <CheckBox x:Name="EnableNotificationsCheckBox"
                               Margin="0,8,0,0"
                               Content="Enable track change notifications"
+                              Click="SettingsControl_Changed" />
+                    <CheckBox x:Name="AlwaysOnTopCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Keep window always on top"
+                              Click="SettingsControl_Changed" />
+                    <CheckBox x:Name="StartWithWindowsCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Start Mystral with Windows"
                               Click="SettingsControl_Changed" />
                 </StackPanel>
 
@@ -206,17 +218,45 @@
                                TextWrapping="Wrap"
                                Text="View locally cached scrobbles and download them for manual upload." />
 
+                    <Grid Margin="0,0,0,8">
+                        <Button x:Name="RefreshHistoryButton"
+                                Content="Refresh"
+                                Width="64"
+                                Height="22"
+                                HorizontalAlignment="Left"
+                                Click="RefreshHistoryButton_Click" />
+                        <Button x:Name="ClearHistoryButton"
+                                Content="Clear History"
+                                Width="88"
+                                Height="22"
+                                HorizontalAlignment="Right"
+                                Click="ClearHistoryButton_Click" />
+                    </Grid>
+
                     <ListView x:Name="HistoryListView"
-                              Height="220"
+                              Height="180"
                               BorderThickness="1"
                               BorderBrush="#7F9DB9"
                               Background="White"
                               ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="ContextMenu" Value="{StaticResource HistoryItemContextMenu}" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
                         <ListView.View>
                             <GridView>
-                                <GridViewColumn Header="Title" Width="140" DisplayMemberBinding="{Binding Title}" />
-                                <GridViewColumn Header="Artist" Width="120" DisplayMemberBinding="{Binding Artist}" />
-                                <GridViewColumn Header="Time" Width="140" DisplayMemberBinding="{Binding FormattedTime}" />
+                                <GridViewColumn Header="" Width="30">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="Title" Width="135" DisplayMemberBinding="{Binding Title}" />
+                                <GridViewColumn Header="Artist" Width="110" DisplayMemberBinding="{Binding Artist}" />
+                                <GridViewColumn Header="Time" Width="125" DisplayMemberBinding="{Binding FormattedTime}" />
                             </GridView>
                         </ListView.View>
                     </ListView>

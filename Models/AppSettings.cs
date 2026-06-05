@@ -27,4 +27,6 @@ public sealed class BehaviorSettings
 {
     public bool CloseToTray { get; set; } = true;
     public bool EnableNotifications { get; set; } = true;
+    public bool AlwaysOnTop { get; set; } = true;
+    public bool StartWithWindows { get; set; } = false;
 }

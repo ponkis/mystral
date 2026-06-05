@@ -13,4 +13,7 @@ public sealed class ScrobbleRecord
 
     [JsonIgnore]
     public string FormattedTime => DateTimeOffset.FromUnixTimeSeconds(Timestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+
+    [JsonIgnore]
+    public bool IsSelected { get; set; } = false;
 }

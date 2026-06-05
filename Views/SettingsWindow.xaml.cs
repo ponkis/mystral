@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using Mystral.Models;
 using Mystral.Services;
 
@@ -43,6 +44,8 @@ public partial class SettingsWindow : Window
         ScrobbleCheckBox.IsChecked = settings.LastFm.ScrobblingEnabled;
         CloseToTrayCheckBox.IsChecked = settings.Behavior.CloseToTray;
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
+        AlwaysOnTopCheckBox.IsChecked = settings.Behavior.AlwaysOnTop;
+        StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -159,7 +162,9 @@ public partial class SettingsWindow : Window
             Behavior = new BehaviorSettings
             {
                 CloseToTray = CloseToTrayCheckBox.IsChecked == true,
-                EnableNotifications = EnableNotificationsCheckBox.IsChecked == true
+                EnableNotifications = EnableNotificationsCheckBox.IsChecked == true,
+                AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true,
+                StartWithWindows = StartWithWindowsCheckBox.IsChecked == true
             }
         };
     }
@@ -274,6 +279,67 @@ public partial class SettingsWindow : Window
                 LoadHistory();
             }
         });
+    }
+
+    private void RefreshHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        LoadHistory();
+    }
+
+    private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var result = AppDialogWindow.ShowQuestion(
+            this,
+            "Clear history",
+            "Are you sure you want to delete all scrobble history? This action cannot be undone.");
+
+        if (result == MessageBoxResult.Yes)
+        {
+            LocalScrobbleCacheService.Instance.ClearHistory();
+            LoadHistory();
+        }
+    }
+
+    private void RemoveHistoryItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && menuItem.DataContext is ScrobbleRecord record)
+        {
+            if (HistoryListView.ItemsSource is List<ScrobbleRecord> records)
+            {
+                var selectedRecords = records.Where(r => r.IsSelected).ToList();
+                if (selectedRecords.Count > 0)
+                {
+                    if (!selectedRecords.Contains(record))
+                    {
+                        selectedRecords.Add(record);
+                    }
+
+                    var result = AppDialogWindow.ShowQuestion(
+                        this,
+                        "Delete items",
+                        $"Are you sure you want to delete the {selectedRecords.Count} selected items?");
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        LocalScrobbleCacheService.Instance.RemoveRecords(selectedRecords);
+                        LoadHistory();
+                    }
+                }
+                else
+                {
+                    var result = AppDialogWindow.ShowQuestion(
+                        this,
+                        "Delete item",
+                        $"Are you sure you want to delete this scrobble: \"{record.Title}\"?");
+
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        LocalScrobbleCacheService.Instance.RemoveRecord(record);
+                        LoadHistory();
+                    }
+                }
+            }
+        }
     }
 
     private void ExportHistoryButton_Click(object sender, RoutedEventArgs e)

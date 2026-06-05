@@ -50,10 +50,18 @@ public partial class AppDialogWindow : Window
     private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
-        if (owner.IsVisible)
+        bool originalTopmost = false;
+        bool hasTopmostOwner = owner != null && owner.Topmost;
+
+        if (owner != null && owner.IsVisible)
         {
             dialog.Owner = owner;
             dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            if (hasTopmostOwner)
+            {
+                originalTopmost = owner.Topmost;
+                owner.Topmost = false;
+            }
         }
         else
         {
@@ -61,6 +69,12 @@ public partial class AppDialogWindow : Window
         }
 
         dialog.ShowDialog();
+
+        if (hasTopmostOwner && owner != null)
+        {
+            owner.Topmost = originalTopmost;
+        }
+
         return dialog.Result;
     }
 
