@@ -13,7 +13,7 @@ public partial class AboutWindow : Window
     public AboutWindow()
     {
         InitializeComponent();
-        TitleText.Text = $"{AppMetadata.Name} - Music Player {AppMetadata.Version}";
+        TitleText.Text = $"{AppMetadata.Name} - {AppMetadata.Version}";
         AppLogoImage.Source = IconImageSource.LoadBestFrame("res/ico.ico");
     }
 

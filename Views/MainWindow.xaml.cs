@@ -363,6 +363,18 @@ public partial class MainWindow : Window
                 _lastNotificationTrackArtist = snapshot.Description;
                 ShowTrackNotification(snapshot.Title, snapshot.Description, snapshot.CoverArt);
             }
+            else
+            {
+                // Update any existing notification popups with the latest cover art / tint when they settle
+                foreach (var popup in Application.Current.Windows.OfType<TrackNotificationWindow>().ToArray())
+                {
+                    if (popup.TrackTitleText.Text == snapshot.Title &&
+                        popup.TrackArtistText.Text == snapshot.Description)
+                    {
+                        popup.UpdateArtwork(snapshot.CoverArt);
+                    }
+                }
+            }
         }
         else
         {

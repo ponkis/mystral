@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="About Mystral"
         Width="386"
-        Height="172"
+        Height="138"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -124,7 +124,7 @@
                 </Grid>
 
                 <Grid Grid.Row="1"
-                      Margin="24,19,26,18">
+                      Margin="24,16,26,16">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="88" />
                         <ColumnDefinition Width="18" />
