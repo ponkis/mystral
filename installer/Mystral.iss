@@ -7,16 +7,12 @@
 #define MyAppPublisher "ponkis.xyz"
 #define MyAppExeName "Mystral.exe"
 
-#ifndef MyRuntimeId
-#define MyRuntimeId "win-x64"
-#endif
-
 #ifndef MyPublishDir
-#define MyPublishDir "..\artifacts\publish\Mystral-" + MyAppVersion + "-" + MyRuntimeId + "-folder"
+#error MyPublishDir must be supplied by the release workflow or installer build script.
 #endif
 
 #ifndef MyOutputBaseFilename
-#define MyOutputBaseFilename "Mystral-" + MyAppVersion + "-" + MyRuntimeId + "-setup"
+#error MyOutputBaseFilename must be supplied by the release workflow or installer build script.
 #endif
 
 [Setup]

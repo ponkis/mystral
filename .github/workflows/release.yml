@@ -155,7 +155,13 @@ jobs:
             $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
           }
 
-          & $iscc .\installer\Mystral.iss "/DMyAppVersion=""$env:RELEASE_VERSION""" "/DMyRuntimeId=""$env:RUNTIME_ID"""
+          $publishDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder"
+          $outputBaseFilename = "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-setup"
+
+          & $iscc .\installer\Mystral.iss `
+            "/DMyAppVersion=""$env:RELEASE_VERSION""" `
+            "/DMyPublishDir=""$publishDir""" `
+            "/DMyOutputBaseFilename=""$outputBaseFilename"""
 
       - name: Package release assets
         run: |
