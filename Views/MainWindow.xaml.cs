@@ -3043,20 +3043,6 @@ public partial class MainWindow : Window
             ShowSettingsWindow();
         };
 
-        var startupItem = new MenuItem
-        {
-            Header = "Start with Windows",
-            IsCheckable = true,
-            IsChecked = GetStartup()
-        };
-        startupItem.Click += (_, _) =>
-        {
-            bool newStartupState = !GetStartup();
-            SetStartup(newStartupState);
-            _settingsService.Settings.Behavior.StartWithWindows = newStartupState;
-            _settingsService.Save(_settingsService.Settings);
-        };
-
         var exitItem = new MenuItem
         {
             Header = "Exit",
@@ -3065,7 +3051,6 @@ public partial class MainWindow : Window
         exitItem.Click += (_, _) => ExitApplication();
 
         menu.Items.Add(settingsItem);
-        menu.Items.Add(startupItem);
         menu.Items.Add(new Separator());
 
         if (_settingsService.Settings.LastFm.Enabled)
