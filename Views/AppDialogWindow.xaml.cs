@@ -1,8 +1,12 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using Mystral.Configuration;
 using Mystral.Services;
 using DrawingIcon = System.Drawing.Icon;
 
@@ -11,12 +15,17 @@ namespace Mystral.Views;
 public partial class AppDialogWindow : Window
 {
     private AppDialogWindow(string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
+        : this(title, icon, buttons)
+    {
+        DialogDescriptionText.Text = message;
+    }
+
+    private AppDialogWindow(string title, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
     {
         InitializeComponent();
         Title = title;
         Icon = IconImageSource.LoadBestFitFrame("res/ico.ico", 16);
         DialogTitleText.Text = title;
-        DialogDescriptionText.Text = message;
         DialogIcon.Source = icon;
         ConfigureButtons(buttons);
     }
@@ -38,6 +47,31 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons());
     }
 
+    public static MessageBoxResult ShowAbout(Window owner)
+    {
+        var dialog = new AppDialogWindow(
+            $"About {AppMetadata.Name}",
+            IconImageSource.LoadBestFitFrame("res/ico.ico", 32),
+            OkButtons());
+
+        dialog.AboutStampImage.Visibility = Visibility.Visible;
+        dialog.DialogTitleText.Text = AppMetadata.Name;
+        dialog.DialogDescriptionText.Inlines.Clear();
+        dialog.DialogDescriptionText.Inlines.Add(new Run($"Version {AppMetadata.Version}"));
+        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
+        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
+        dialog.DialogDescriptionText.Inlines.Add(new Run("Made with love by "));
+        var link = new Hyperlink(new Run("ponkis"))
+        {
+            NavigateUri = new Uri("https://ponkis.xyz/"),
+            Foreground = new SolidColorBrush(Color.FromRgb(0, 102, 204))
+        };
+        link.RequestNavigate += Hyperlink_RequestNavigate;
+        dialog.DialogDescriptionText.Inlines.Add(link);
+
+        return ShowDialog(owner, dialog);
+    }
+
     public static MessageBoxResult ShowQuestion(Window owner, string title, string message)
     {
         return ShowDialog(
@@ -55,6 +89,11 @@ public partial class AppDialogWindow : Window
     private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
+        return ShowDialog(owner, dialog);
+    }
+
+    private static MessageBoxResult ShowDialog(Window owner, AppDialogWindow dialog)
+    {
         bool originalTopmost = false;
         bool hasTopmostOwner = owner != null && owner.Topmost;
 
@@ -83,9 +122,29 @@ public partial class AppDialogWindow : Window
         return dialog.Result;
     }
 
+    private static void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    {
+        OpenExternalUrl(e.Uri.AbsoluteUri);
+        e.Handled = true;
+    }
+
+    private static void OpenExternalUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = url,
+            UseShellExecute = true
+        });
+    }
+
     private static IReadOnlyList<DialogButtonSpec> ContinueButtons()
     {
         return [new DialogButtonSpec("Continue", MessageBoxResult.OK, IsDefault: true, IsCancel: true)];
+    }
+
+    private static IReadOnlyList<DialogButtonSpec> OkButtons()
+    {
+        return [new DialogButtonSpec("OK", MessageBoxResult.OK, IsDefault: true, IsCancel: true)];
     }
 
     private void ConfigureButtons(IReadOnlyList<DialogButtonSpec> buttons)

@@ -200,10 +200,6 @@
                               Margin="0,8,0,0"
                               Content="Enable track change notifications"
                               Click="SettingsControl_Changed" />
-                    <CheckBox x:Name="AlwaysOnTopCheckBox"
-                              Margin="0,8,0,0"
-                              Content="Keep window always on top"
-                              Click="SettingsControl_Changed" />
                     <CheckBox x:Name="StartWithWindowsCheckBox"
                               Margin="0,8,0,0"
                               Content="Start Mystral with Windows"

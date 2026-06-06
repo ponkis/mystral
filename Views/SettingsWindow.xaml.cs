@@ -44,7 +44,6 @@ public partial class SettingsWindow : Window
         ScrobbleCheckBox.IsChecked = settings.LastFm.ScrobblingEnabled;
         CloseToTrayCheckBox.IsChecked = settings.Behavior.CloseToTray;
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
-        AlwaysOnTopCheckBox.IsChecked = settings.Behavior.AlwaysOnTop;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         _isLoadingSettings = false;
 
@@ -90,7 +89,6 @@ public partial class SettingsWindow : Window
 
         if (current.Behavior.CloseToTray != saved.Behavior.CloseToTray) return false;
         if (current.Behavior.EnableNotifications != saved.Behavior.EnableNotifications) return false;
-        if (current.Behavior.AlwaysOnTop != saved.Behavior.AlwaysOnTop) return false;
         if (current.Behavior.StartWithWindows != saved.Behavior.StartWithWindows) return false;
 
         return true;
@@ -181,7 +179,7 @@ public partial class SettingsWindow : Window
             {
                 CloseToTray = CloseToTrayCheckBox.IsChecked == true,
                 EnableNotifications = EnableNotificationsCheckBox.IsChecked == true,
-                AlwaysOnTop = AlwaysOnTopCheckBox.IsChecked == true,
+                AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true
             }
         };
