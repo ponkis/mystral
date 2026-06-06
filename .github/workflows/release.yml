@@ -156,12 +156,15 @@ jobs:
           }
 
           $publishDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder"
-          $outputBaseFilename = "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-setup"
 
           & $iscc .\installer\Mystral.iss `
             "/DMyAppVersion=""$env:RELEASE_VERSION""" `
-            "/DMyPublishDir=""$publishDir""" `
-            "/DMyOutputBaseFilename=""$outputBaseFilename"""
+            "/DMyPublishDir=""$publishDir"""
+
+          Move-Item `
+            -LiteralPath ".\artifacts\installer\MystralSetup.exe" `
+            -Destination ".\artifacts\installer\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-setup.exe" `
+            -Force
 
       - name: Package release assets
         run: |

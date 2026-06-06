@@ -11,10 +11,6 @@
 #error MyPublishDir must be supplied by the release workflow or installer build script.
 #endif
 
-#ifndef MyOutputBaseFilename
-#error MyOutputBaseFilename must be supplied by the release workflow or installer build script.
-#endif
-
 [Setup]
 AppId={{9B29E19E-864E-4D26-961B-B44E91D94D44}
 AppName={#MyAppName}
@@ -24,7 +20,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\artifacts\installer
-OutputBaseFilename={#MyOutputBaseFilename}
+OutputBaseFilename=MystralSetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

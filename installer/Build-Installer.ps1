@@ -65,6 +65,10 @@ if (-not (Test-Path -LiteralPath $publishDir -PathType Container)) {
 
 & $iscc $InnoScript `
     "/DMyAppVersion=""$version""" `
-    "/DMyRuntimeId=""$RuntimeId""" `
-    "/DMyPublishDir=""$publishDir""" `
-    "/DMyOutputBaseFilename=""Mystral-$version-$RuntimeId-setup"""
+    "/DMyPublishDir=""$publishDir"""
+
+$installerDir = Join-Path $repoRoot "artifacts\installer"
+Move-Item `
+    -LiteralPath (Join-Path $installerDir "MystralSetup.exe") `
+    -Destination (Join-Path $installerDir "Mystral-$version-$RuntimeId-setup.exe") `
+    -Force
