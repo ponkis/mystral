@@ -1,0 +1,224 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version. Leave empty to use the MSBuild Release version."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CONFIGURATION: Release
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+  PROJECT_FILE: Mystral.csproj
+  RUNTIME_ID: win-x64
+
+jobs:
+  release:
+    name: Build and publish production release
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $projectVersion = (
+            dotnet msbuild $env:PROJECT_FILE `
+              -nologo `
+              -getProperty:Version `
+              -p:Configuration=$env:CONFIGURATION
+          ).Trim()
+
+          if (-not $projectVersion) {
+            throw "Could not resolve the MSBuild Version property."
+          }
+
+          $version = $env:INPUT_VERSION
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = $projectVersion.Trim()
+          } else {
+            $version = $version.Trim().TrimStart("v")
+          }
+
+          if ($version -notmatch "^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$") {
+            throw "Release version '$version' is not a valid semantic version."
+          }
+
+          if ($env:GITHUB_EVENT_NAME -eq "push") {
+            $tagVersion = $env:GITHUB_REF_NAME.TrimStart("v")
+            if ($tagVersion -ne $projectVersion) {
+              throw "Tag $env:GITHUB_REF_NAME does not match the MSBuild Release version $projectVersion."
+            }
+            $version = $tagVersion
+          }
+
+          $tag = "v$version"
+          $isPrerelease = $version.Contains("-")
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch" -and $env:INPUT_PRERELEASE -eq "true") {
+            $isPrerelease = $true
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Restore
+        run: dotnet restore $env:PROJECT_FILE -r $env:RUNTIME_ID
+
+      - name: Build
+        run: >
+          dotnet build $env:PROJECT_FILE
+          -c $env:CONFIGURATION
+          -r $env:RUNTIME_ID
+          --no-restore
+          -p:AppEnvironment=Production
+          -p:ContinuousIntegrationBuild=true
+          -p:Version=$env:RELEASE_VERSION
+
+      - name: Publish production binaries
+        run: |
+          $publishRoot = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish"
+          $singleDir = Join-Path $publishRoot "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-single"
+          $folderDir = Join-Path $publishRoot "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder"
+
+          dotnet publish $env:PROJECT_FILE `
+            -c $env:CONFIGURATION `
+            -r $env:RUNTIME_ID `
+            --self-contained true `
+            --no-restore `
+            -o $singleDir `
+            -p:AppEnvironment=Production `
+            -p:DebugSymbols=false `
+            -p:DebugType=None `
+            -p:EnableCompressionInSingleFile=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:PublishSingleFile=true `
+            -p:UseAppHost=true `
+            -p:Version=$env:RELEASE_VERSION
+
+          dotnet publish $env:PROJECT_FILE `
+            -c $env:CONFIGURATION `
+            -r $env:RUNTIME_ID `
+            --self-contained true `
+            --no-restore `
+            -o $folderDir `
+            -p:AppEnvironment=Production `
+            -p:DebugSymbols=false `
+            -p:DebugType=None `
+            -p:PublishSingleFile=false `
+            -p:UseAppHost=true `
+            -p:Version=$env:RELEASE_VERSION
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          }
+
+          & $iscc .\installer\Mystral.iss "/DMyAppVersion=""$env:RELEASE_VERSION""" "/DMyRuntimeId=""$env:RUNTIME_ID"""
+
+      - name: Package release assets
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\release"
+          $publishRoot = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish"
+          $singleDir = Join-Path $publishRoot "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-single"
+          $folderDir = Join-Path $publishRoot "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder"
+
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+
+          Compress-Archive `
+            -Path (Join-Path $singleDir "*") `
+            -DestinationPath (Join-Path $releaseDir "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-single.zip") `
+            -Force
+
+          Compress-Archive `
+            -Path (Join-Path $folderDir "*") `
+            -DestinationPath (Join-Path $releaseDir "Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder.zip") `
+            -Force
+
+          Copy-Item `
+            -Path ".\artifacts\installer\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-setup.exe" `
+            -Destination $releaseDir `
+            -Force
+
+          Get-ChildItem $releaseDir -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = Get-FileHash $_.FullName -Algorithm SHA256
+              "{0}  {1}" -f $hash.Hash.ToLowerInvariant(), $_.Name
+            } |
+            Set-Content (Join-Path $releaseDir "SHA256SUMS.txt") -Encoding ascii
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mystral-release-${{ steps.version.outputs.version }}
+          path: artifacts/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IS_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $assets = Get-ChildItem ".\artifacts\release" -File |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName }
+
+          $args = @(
+            "release",
+            "create",
+            $env:RELEASE_TAG
+          ) + $assets + @(
+            "--generate-notes",
+            "--target",
+            $env:GITHUB_SHA,
+            "--title",
+            "Mystral $env:RELEASE_VERSION"
+          )
+
+          if ($env:IS_PRERELEASE -eq "true") {
+            $args += "--prerelease"
+          }
+
+          & gh @args

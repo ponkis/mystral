@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <VersionPrefix>1.1.1</VersionPrefix>
+    <VersionSuffix Condition="'$(Configuration)' == 'Debug' and '$(VersionSuffix)' == ''">dev</VersionSuffix>
+    <Version Condition="'$(Version)' == '' and '$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
+    <Version Condition="'$(Version)' == ''">$(VersionPrefix)</Version>
+    <AppEnvironment Condition="'$(AppEnvironment)' == '' and '$(Configuration)' == 'Debug'">Development</AppEnvironment>
+    <AppEnvironment Condition="'$(AppEnvironment)' == ''">Production</AppEnvironment>
+    <DefineConstants Condition="'$(AppEnvironment)' == 'Development'">$(DefineConstants);APP_ENVIRONMENT_DEVELOPMENT</DefineConstants>
+  </PropertyGroup>
+</Project>

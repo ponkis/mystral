@@ -1,8 +1,23 @@
 #define MyAppName "Mystral"
-#define MyAppVersion "1.1.1"
+
+#ifndef MyAppVersion
+#error MyAppVersion must be supplied by the release workflow or installer build script.
+#endif
+
 #define MyAppPublisher "ponkis.xyz"
 #define MyAppExeName "Mystral.exe"
-#define MyPublishDir "..\artifacts\publish\Mystral-1.1.1-win-x64-folder"
+
+#ifndef MyRuntimeId
+#define MyRuntimeId "win-x64"
+#endif
+
+#ifndef MyPublishDir
+#define MyPublishDir "..\artifacts\publish\Mystral-" + MyAppVersion + "-" + MyRuntimeId + "-folder"
+#endif
+
+#ifndef MyOutputBaseFilename
+#define MyOutputBaseFilename "Mystral-" + MyAppVersion + "-" + MyRuntimeId + "-setup"
+#endif
 
 [Setup]
 AppId={{9B29E19E-864E-4D26-961B-B44E91D94D44}
@@ -13,7 +28,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\artifacts\installer
-OutputBaseFilename=Mystral-1.1.1-win-x64-setup
+OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

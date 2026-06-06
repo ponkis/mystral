@@ -16,7 +16,6 @@
     <Product>Mystral</Product>
     <Company>ponkis.xyz</Company>
     <Description>Mystral desktop media controls</Description>
-    <Version>1.1.1</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
