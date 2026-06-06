@@ -73,7 +73,6 @@ public partial class MainWindow : Window
     private FrameworkElement? _fullscreenLyricsFooterPanel;
     private Border? _fullscreenLyricsTopSpacer;
     private Border? _fullscreenLyricsBottomSpacer;
-    private AboutWindow? _aboutWindow;
     private SettingsWindow? _settingsWindow;
     private System.Windows.Forms.NotifyIcon? _notifyIcon;
     private ContextMenu? _trayContextMenu;
@@ -2966,25 +2965,7 @@ public partial class MainWindow : Window
 
     private void ShowAboutWindow()
     {
-        if (_aboutWindow is not null)
-        {
-            _aboutWindow.Activate();
-            return;
-        }
-
-        PushDisableTopmost();
-
-        _aboutWindow = new AboutWindow
-        {
-            Owner = this,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner
-        };
-        _aboutWindow.Closed += (_, _) =>
-        {
-            _aboutWindow = null;
-            PopRestoreTopmost();
-        };
-        _aboutWindow.Show();
+        AppDialogWindow.ShowAbout(this);
     }
 
     // ───── Lifecycle ─────
@@ -3203,7 +3184,10 @@ public partial class MainWindow : Window
             },
             Behavior = new BehaviorSettings
             {
-                CloseToTray = current.Behavior.CloseToTray
+                CloseToTray = current.Behavior.CloseToTray,
+                EnableNotifications = current.Behavior.EnableNotifications,
+                AlwaysOnTop = current.Behavior.AlwaysOnTop,
+                StartWithWindows = current.Behavior.StartWithWindows
             }
         });
     }
@@ -3363,7 +3347,6 @@ public partial class MainWindow : Window
         _lastFmCts?.Dispose();
         _lastFmScrobbleCts?.Cancel();
         _lastFmScrobbleCts?.Dispose();
-        _aboutWindow?.Close();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         if (_notifyIcon is not null)
