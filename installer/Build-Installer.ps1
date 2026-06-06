@@ -64,8 +64,8 @@ if (-not (Test-Path -LiteralPath $publishDir -PathType Container)) {
 }
 
 & $iscc $InnoScript `
-    "/DMyAppVersion=""$version""" `
-    "/DMyPublishDir=""$publishDir"""
+    "/DMyAppVersion=$version" `
+    "/DMyPublishDir=$publishDir"
 
 $installerDir = Join-Path $repoRoot "artifacts\installer"
 Move-Item `
