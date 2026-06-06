@@ -74,7 +74,21 @@ dotnet build .\Mystral.csproj -c Release /p:AppEnvironment=Production
 
 ## Release Builds
 
-Production releases are built by GitHub Actions from version tags:
+Development builds are created locally from the `dev` branch. They use Release optimizations with `AppEnvironment=Development`, so you can test packaged builds without touching production settings.
+
+Build and run a local development build:
+
+```powershell
+.\scripts\Build-Dev.ps1 -Clean -Run
+```
+
+The dev build is written to:
+
+```text
+artifacts\dev\Mystral-<version>-dev-win-x64-folder\Mystral.exe
+```
+
+Production releases are built by GitHub Actions from version tags on `main`:
 
 ```powershell
 $version = dotnet msbuild .\Mystral.csproj -nologo -getProperty:Version -p:Configuration=Release
@@ -82,9 +96,27 @@ git tag "v$version"
 git push origin "v$version"
 ```
 
-The release workflow validates that the tag matches the MSBuild Release version, publishes self-contained `win-x64` builds, creates the Inno Setup installer, generates SHA-256 checksums, and attaches the assets to a GitHub Release.
+The production release workflow validates that the tag matches the MSBuild Release version, publishes self-contained `win-x64` builds, creates the Inno Setup installer, generates SHA-256 checksums, and attaches the assets to a GitHub Release.
 
 The workflow can also be started manually from GitHub Actions if you need to rebuild a release from the current commit.
+
+Recommended branch flow:
+
+```text
+work on dev -> build locally -> commit and push dev -> merge dev into main -> vX.Y.Z tag -> GitHub Release
+```
+
+After testing locally, you can merge `dev` into `main` and push with:
+
+```powershell
+.\scripts\Promote-DevToMain.ps1
+```
+
+To merge, push `main`, and create the production release tag in one step:
+
+```powershell
+.\scripts\Promote-DevToMain.ps1 -Release
+```
 
 For local release builds, run these commands from the repository root.
 
