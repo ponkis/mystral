@@ -2543,6 +2543,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        var lookupKey = CreateLastFmLookupKey(query);
+        if (_scrobbleState is not null && _scrobbleState.LookupKey != lookupKey)
+        {
+            ResetScrobblingState();
+        }
+
         if (!snapshot.IsPlaying)
         {
             PauseScrobblingState();
@@ -2550,7 +2556,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        var lookupKey = CreateLastFmLookupKey(query);
         if (CurrentLastFmInfo is null)
         {
             PauseScrobblingState();
@@ -2572,7 +2577,7 @@ public partial class MainWindow : Window
         var now = DateTimeOffset.Now;
         if (_scrobbleState is null || _scrobbleState.Key != key)
         {
-            _scrobbleState = new ScrobblePlaybackState(key, CurrentLastFmInfo, EstimateTrackStartedAt(snapshot, duration, now), duration);
+            _scrobbleState = new ScrobblePlaybackState(lookupKey, key, CurrentLastFmInfo, EstimateTrackStartedAt(snapshot, duration, now), duration);
         }
         _trayNowPlayingTrackName = _scrobbleState.Track.TrackName;
 
@@ -2741,8 +2746,9 @@ public partial class MainWindow : Window
         return $"{track.ArtistName.Trim().ToLowerInvariant()}|{track.TrackName.Trim().ToLowerInvariant()}";
     }
 
-    private sealed class ScrobblePlaybackState(string key, LastFmTrackInfo track, DateTimeOffset startedAt, TimeSpan duration)
+    private sealed class ScrobblePlaybackState(string lookupKey, string key, LastFmTrackInfo track, DateTimeOffset startedAt, TimeSpan duration)
     {
+        public string LookupKey { get; } = lookupKey;
         public string Key { get; } = key;
         public LastFmTrackInfo Track { get; } = track;
         public DateTimeOffset StartedAt { get; } = startedAt;
