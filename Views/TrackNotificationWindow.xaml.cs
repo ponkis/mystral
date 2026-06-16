@@ -1,10 +1,10 @@
 using System;
-using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Animation;
+using static Mystral.Services.ArtworkTint;
 
 namespace Mystral.Views
 {
@@ -43,7 +43,7 @@ namespace Mystral.Views
         public async void RunOpenAnimation()
         {
             var windows = Application.Current.Windows;
-            int offset = 0;
+            var offset = 0;
             foreach (var window in windows)
             {
                 if (window is TrackNotificationWindow notification)
@@ -53,42 +53,18 @@ namespace Mystral.Views
                     notification.Closing += Notification_Closing;
                 }
             }
-            double startTop = ScreenHeight;
-            double endTop = ScreenHeight - Height - 10 - offset;
+            Top = ScreenHeight;
+            AnimateDouble(Window.TopProperty, ScreenHeight - Height - 10 - offset, 500);
+            AnimateDouble(OpacityProperty, 1, 500);
 
-            // Animate via an interval
-            int animationTime = 500;
-            int steps = 10;
-            double stepSize = (startTop - endTop) / steps;
+            await Task.Delay(500);
+            State = NotificationState.Open;
 
-            // Fade in setup
-            double startOpacity = 0;
-            double endOpacity = 1;
-            double opacityStepSize = (endOpacity - startOpacity) / steps;
-
-            for (int i = 0; i < steps; i++)
-            {
-                double top = startTop - stepSize * i;
-                double opacity = startOpacity + opacityStepSize * i;
-
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    Top = top;
-                    Opacity = opacity;
-                });
-                await Task.Delay(animationTime / steps);
-            }
-
-            await Dispatcher.InvokeAsync(() =>
-            {
-                Top = endTop;
-                Opacity = endOpacity;
-                State = NotificationState.Open;
-            });
-
-            // Close after 5 seconds
             await Task.Delay(5000);
-            RunCloseAnimation();
+            if (State == NotificationState.Open)
+            {
+                RunCloseAnimation();
+            }
         }
 
         private void Notification_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
@@ -102,36 +78,15 @@ namespace Mystral.Views
 
         public async void RunCloseAnimation()
         {
-            State = NotificationState.Closing;
-            double startTop = Top;
-            double endTop = ScreenHeight;
-
-            int steps = 10;
-            double stepSize = (startTop - endTop) / steps;
-
-            double startOpacity = 1;
-            double endOpacity = 0;
-            double opacityStepSize = (startOpacity - endOpacity) / steps;
-
-            for (int i = 0; i < steps; i++)
+            if (State == NotificationState.Closing)
             {
-                double top = startTop - stepSize * i;
-                double opacity = startOpacity - opacityStepSize * i;
-
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    Top = top;
-                    Opacity = opacity;
-                });
-                await Task.Delay(500 / steps);
+                return;
             }
 
-            await Dispatcher.InvokeAsync(() =>
-            {
-                Top = endTop;
-                Opacity = endOpacity;
-            });
-
+            State = NotificationState.Closing;
+            AnimateDouble(Window.TopProperty, ScreenHeight, 500);
+            AnimateDouble(OpacityProperty, 0, 500);
+            await Task.Delay(500);
             Close();
         }
 
@@ -221,119 +176,14 @@ namespace Mystral.Views
             }, HandoffBehavior.SnapshotAndReplace);
         }
 
-        private static Color? ExtractDominantTint(BitmapSource? source)
+        private void AnimateDouble(DependencyProperty property, double value, int milliseconds)
         {
-            if (source is null || source.PixelWidth <= 0 || source.PixelHeight <= 0)
+            BeginAnimation(property, new DoubleAnimation
             {
-                return null;
-            }
-
-            try
-            {
-                BitmapSource sampled = source;
-                var maxSide = Math.Max(source.PixelWidth, source.PixelHeight);
-                if (maxSide > 64)
-                {
-                    var scale = 64.0 / maxSide;
-                    sampled = new TransformedBitmap(source, new ScaleTransform(scale, scale));
-                }
-
-                if (sampled.Format != PixelFormats.Bgra32)
-                {
-                    sampled = new FormatConvertedBitmap(sampled, PixelFormats.Bgra32, null, 0);
-                }
-
-                var width = sampled.PixelWidth;
-                var height = sampled.PixelHeight;
-                var stride = width * 4;
-                var pixels = new byte[stride * height];
-                sampled.CopyPixels(pixels, stride, 0);
-
-                double total = 0;
-                double rSum = 0, gSum = 0, bSum = 0;
-
-                for (int i = 0; i < pixels.Length; i += 4)
-                {
-                    byte b = pixels[i];
-                    byte g = pixels[i + 1];
-                    byte r = pixels[i + 2];
-                    byte a = pixels[i + 3];
-
-                    if (a < 200) continue;
-
-                    // Skip extremely dark or extremely light pixels
-                    double l = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255.0;
-                    if (l < 0.15 || l > 0.85) continue;
-
-                    rSum += r;
-                    gSum += g;
-                    bSum += b;
-                    total++;
-                }
-
-                if (total == 0)
-                {
-                    // Fallback to simple average of non-transparent pixels
-                    for (int i = 0; i < pixels.Length; i += 4)
-                    {
-                        byte b = pixels[i];
-                        byte g = pixels[i + 1];
-                        byte r = pixels[i + 2];
-                        byte a = pixels[i + 3];
-
-                        if (a < 128) continue;
-
-                        rSum += r;
-                        gSum += g;
-                        bSum += b;
-                        total++;
-                    }
-                }
-
-                if (total > 0)
-                {
-                    var avgColor = Color.FromRgb(
-                        (byte)Math.Clamp(Math.Round(rSum / total), 0, 255),
-                        (byte)Math.Clamp(Math.Round(gSum / total), 0, 255),
-                        (byte)Math.Clamp(Math.Round(bSum / total), 0, 255));
-                    return PolishTint(avgColor);
-                }
-            }
-            catch
-            {
-                // Ignore and fallback
-            }
-
-            return null;
-        }
-
-        private static Color PolishTint(Color color)
-        {
-            var gray = color.R * 0.299 + color.G * 0.587 + color.B * 0.114;
-            double factor = 1.35; // boost saturation a bit
-            return Color.FromRgb(
-                ClampByte(gray + (color.R - gray) * factor),
-                ClampByte(gray + (color.G - gray) * factor),
-                ClampByte(gray + (color.B - gray) * factor));
-        }
-
-        private static Color Blend(Color from, Color to, double amount)
-        {
-            amount = Math.Clamp(amount, 0, 1);
-            return Color.FromRgb(
-                ClampByte(from.R + (to.R - from.R) * amount),
-                ClampByte(from.G + (to.G - from.G) * amount),
-                ClampByte(from.B + (to.B - from.B) * amount));
-        }
-
-        private static Color WithAlpha(Color color, byte alpha)
-        {
-            return Color.FromArgb(alpha, color.R, color.G, color.B);
-        }
-
-        private static byte ClampByte(double value)
-        {
-            return (byte)Math.Clamp(Math.Round(value), 0, 255);
+                To = value,
+                Duration = TimeSpan.FromMilliseconds(milliseconds),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            }, HandoffBehavior.SnapshotAndReplace);
         }
     }
 }
