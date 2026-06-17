@@ -204,6 +204,13 @@
                               Margin="0,8,0,0"
                               Content="Start Mystral with Windows"
                               Click="SettingsControl_Changed" />
+                    <Button x:Name="CheckUpdatesButton"
+                            Content="Check for updates"
+                            Margin="0,18,0,0"
+                            HorizontalAlignment="Left"
+                            MinWidth="118"
+                            Height="24"
+                            Click="CheckUpdatesButton_Click" />
                 </StackPanel>
 
                 <StackPanel x:Name="HistoryPanel"

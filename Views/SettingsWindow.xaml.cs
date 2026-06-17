@@ -1,6 +1,11 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using Mystral.Configuration;
 using Mystral.Models;
 using Mystral.Services;
 
@@ -21,6 +26,11 @@ public partial class SettingsWindow : Window
         _lastFmService = lastFmService;
 
         InitializeComponent();
+#if DEBUG
+        Debug.Assert(IsNewerRelease("v1.1.5", "1.1.4"));
+        Debug.Assert(IsNewerRelease("v1.1.4", "1.1.4-dev"));
+        Debug.Assert(!IsNewerRelease("v1.1.4", "1.1.4"));
+#endif
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("res/img/info.ico", 16);
         LoadSettings();
@@ -301,6 +311,129 @@ public partial class SettingsWindow : Window
         LoadHistory();
     }
 
+    private async void CheckUpdatesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var originalContent = CheckUpdatesButton.Content;
+        CheckUpdatesButton.IsEnabled = false;
+        CheckUpdatesButton.Content = "Checking...";
+
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
+
+            using var response = await client.GetAsync("https://api.github.com/repos/ponkis/mystral/releases/latest");
+            response.EnsureSuccessStatusCode();
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var release = await JsonDocument.ParseAsync(stream);
+            var root = release.RootElement;
+            var tag = root.GetProperty("tag_name").GetString() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(tag))
+            {
+                throw new InvalidOperationException("GitHub release did not include a tag name.");
+            }
+
+            if (!IsNewerRelease(tag, AppMetadata.Version))
+            {
+                AppDialogWindow.ShowInformation(this, "No updates found", $"Mystral {AppMetadata.Version} is up to date.");
+                return;
+            }
+
+            var latestVersion = tag.Trim().TrimStart('v', 'V');
+            var (installerName, installerUrl) = FindInstallerAsset(root);
+            if (AppDialogWindow.ShowQuestion(this, "Update available", $"Mystral {latestVersion} is available. Download and run the installer? Mystral will close.") != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (_hasUnsavedChanges)
+            {
+                var saveResult = AppDialogWindow.ShowQuestion(this, "Unsaved changes", "Save your settings before updating?");
+                if (saveResult == MessageBoxResult.Cancel)
+                {
+                    return;
+                }
+
+                if (saveResult == MessageBoxResult.Yes && !await SaveSettingsAsync(showSuccess: false))
+                {
+                    return;
+                }
+
+                if (saveResult == MessageBoxResult.No)
+                {
+                    _isClosingConfirmed = true;
+                }
+            }
+
+            CheckUpdatesButton.Content = "Downloading...";
+            var installerPath = await DownloadInstallerAsync(client, installerUrl, installerName);
+            CheckUpdatesButton.Content = "Launching...";
+
+            if (Process.Start(new ProcessStartInfo { FileName = installerPath, UseShellExecute = true }) is null)
+            {
+                throw new InvalidOperationException("Windows did not start the installer.");
+            }
+
+            Application.Current.Shutdown();
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowWarning(this, "Update check failed", $"Could not check GitHub releases: {ex.Message}");
+        }
+        finally
+        {
+            CheckUpdatesButton.Content = originalContent;
+            CheckUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private static (string Name, string Url) FindInstallerAsset(JsonElement release)
+    {
+        foreach (var asset in release.GetProperty("assets").EnumerateArray())
+        {
+            var name = asset.GetProperty("name").GetString() ?? string.Empty;
+            if (!name.EndsWith("-win-x64-setup.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var url = asset.GetProperty("browser_download_url").GetString();
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                throw new InvalidOperationException("GitHub release installer did not include a download URL.");
+            }
+
+            return (name, url);
+        }
+
+        throw new InvalidOperationException("No win-x64 installer was attached to the latest GitHub release.");
+    }
+
+    private static async Task<string> DownloadInstallerAsync(HttpClient client, string url, string assetName)
+    {
+        var fileName = Path.GetFileName(assetName);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            throw new InvalidOperationException("GitHub release installer had an invalid file name.");
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException("GitHub release installer URL was not HTTPS.");
+        }
+
+        using var response = await client.GetAsync(uri);
+        response.EnsureSuccessStatusCode();
+
+        var path = Path.Combine(Path.GetTempPath(), fileName);
+        await using var input = await response.Content.ReadAsStreamAsync();
+        await using var output = File.Create(path);
+        await input.CopyToAsync(output);
+        return path;
+    }
+
     private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
     {
         var result = AppDialogWindow.ShowQuestion(
@@ -411,5 +544,39 @@ public partial class SettingsWindow : Window
             return $"\"{val.Replace("\"", "\"\"")}\"";
         }
         return val;
+    }
+
+    internal static bool IsNewerRelease(string latestTag, string currentVersion)
+    {
+        if (!TryReleaseVersion(latestTag, out var latest, out var latestIsPrerelease)
+            || !TryReleaseVersion(currentVersion, out var current, out var currentIsPrerelease))
+        {
+            return false;
+        }
+
+        var versionCompare = latest.CompareTo(current);
+        return versionCompare > 0 || (versionCompare == 0 && currentIsPrerelease && !latestIsPrerelease);
+    }
+
+    private static bool TryReleaseVersion(string value, out Version version, out bool isPrerelease)
+    {
+        version = new Version(0, 0, 0, 0);
+        isPrerelease = false;
+        value = value.Trim().TrimStart('v', 'V');
+
+        var suffixIndex = value.IndexOf('-');
+        if (suffixIndex >= 0)
+        {
+            isPrerelease = true;
+            value = value[..suffixIndex];
+        }
+
+        if (!Version.TryParse(value, out var parsed))
+        {
+            return false;
+        }
+
+        version = new Version(parsed.Major, parsed.Minor, Math.Max(parsed.Build, 0), Math.Max(parsed.Revision, 0));
+        return true;
     }
 }
