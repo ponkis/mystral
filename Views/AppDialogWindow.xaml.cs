@@ -39,6 +39,11 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Information), ContinueButtons());
     }
 
+    public static MessageBoxResult ShowConfirmation(Window owner, string title, string message)
+    {
+        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Information), ContinueButtons(), "confirmation.wav");
+    }
+
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons(), "warning.wav");
