@@ -192,7 +192,7 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(previousVersion)
                 && SettingsWindow.IsNewerRelease(AppMetadata.Version, previousVersion))
             {
-                AppDialogWindow.ShowInformation(this, "Update installed", $"Mystral was updated to version {AppMetadata.Version}.");
+                AppDialogWindow.ShowConfirmation(this, "Update installed", $"Mystral was updated to version {AppMetadata.Version}.");
             }
 
             File.WriteAllText(LastRunVersionPath, AppMetadata.Version);

@@ -148,7 +148,7 @@ public partial class SettingsWindow : Window
             UpdateDirtyStatus();
             if (showSuccess)
             {
-                AppDialogWindow.ShowInformation(
+                AppDialogWindow.ShowConfirmation(
                     this,
                     "Settings saved",
                     "Your settings were saved successfully.");
