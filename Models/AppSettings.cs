@@ -29,4 +29,5 @@ public sealed record class BehaviorSettings
     public bool EnableNotifications { get; set; } = true;
     public bool AlwaysOnTop { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;
+    public bool CheckForUpdatesOnStartup { get; set; } = true;
 }
