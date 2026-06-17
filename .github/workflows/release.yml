@@ -149,22 +149,12 @@ jobs:
         run: choco install innosetup --yes --no-progress
 
       - name: Build installer
-        run: |
-          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
-          }
-
-          $publishDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-folder"
-
-          & $iscc .\installer\Mystral.iss `
-            "/DMyAppVersion=$env:RELEASE_VERSION" `
-            "/DMyPublishDir=$publishDir"
-
-          Move-Item `
-            -LiteralPath ".\artifacts\installer\MystralSetup.exe" `
-            -Destination ".\artifacts\installer\Mystral-$env:RELEASE_VERSION-$env:RUNTIME_ID-setup.exe" `
-            -Force
+        run: >
+          .\installer\Build-Installer.ps1
+          -Configuration $env:CONFIGURATION
+          -RuntimeId $env:RUNTIME_ID
+          -ProjectFile $env:PROJECT_FILE
+          -Version $env:RELEASE_VERSION
 
       - name: Package release assets
         run: |

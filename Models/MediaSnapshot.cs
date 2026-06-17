@@ -38,3 +38,5 @@ public sealed record MediaSnapshot(
         CanSeek: false,
         CoverArt: null);
 }
+
+public sealed record WindowPlacement(double Left, double Top);

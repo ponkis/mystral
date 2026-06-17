@@ -34,12 +34,6 @@ public sealed class AppSettingsService
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public void Reload()
-    {
-        Settings = LoadSettings();
-        SettingsChanged?.Invoke(this, EventArgs.Empty);
-    }
-
     private AppSettings LoadSettings()
     {
         try

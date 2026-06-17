@@ -141,6 +141,43 @@
             </Setter>
         </Style>
 
+        <Style x:Key="InfoButtonStyle" TargetType="Button" BasedOn="{StaticResource GlassButtonStyle}">
+            <Setter Property="Content" Value="." />
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <Path Width="14"
+                              Height="14"
+                              Stretch="Uniform"
+                              Stroke="#F7FAF7"
+                              StrokeThickness="1.8"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              Data="M 3,5 L 15,5 M 3,9 L 15,9 M 3,13 L 15,13" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LyricsButtonStyle" TargetType="Button" BasedOn="{StaticResource GlassButtonStyle}">
+            <Setter Property="Content" Value="." />
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <Path Width="15"
+                              Height="15"
+                              Stretch="Uniform"
+                              Stroke="#F7FAF7"
+                              StrokeThickness="1.7"
+                              StrokeStartLineCap="Round"
+                              StrokeEndLineCap="Round"
+                              StrokeLineJoin="Round"
+                              Data="M 2,3.5 C 2,2.3 3,1.5 4.2,1.5 L 13.8,1.5 C 15,1.5 16,2.3 16,3.5 L 16,10.5 C 16,11.7 15,12.5 13.8,12.5 L 8.5,12.5 L 5,15 L 5.8,12.5 L 4.2,12.5 C 3,12.5 2,11.7 2,10.5 Z M 5,5.2 L 13,5.2 M 5,8 L 11,8" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="GlassSliderStyle" TargetType="Slider">
             <Setter Property="Height" Value="18" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -236,6 +273,28 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="TimelineSliderStyle" TargetType="Slider" BasedOn="{StaticResource GlassSliderStyle}">
+            <Setter Property="Minimum" Value="0" />
+            <Setter Property="Maximum" Value="1" />
+            <Setter Property="Value" Value="0" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ProgressSlider_PreviewMouseLeftButtonDown" />
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ProgressSlider_PreviewMouseLeftButtonUp" />
+        </Style>
+
+        <Style x:Key="VolumeSliderStyle" TargetType="Slider" BasedOn="{StaticResource GlassSliderStyle}">
+            <Setter Property="Minimum" Value="0" />
+            <Setter Property="Maximum" Value="100" />
+            <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <EventSetter Event="ValueChanged" Handler="VolumeSlider_ValueChanged" />
+        </Style>
+
+        <ControlTemplate x:Key="VolumeButtonTemplate" TargetType="Button">
+            <Image x:Name="VolumeIcon"
+                   Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+        </ControlTemplate>
 
         <Style x:Key="AeroTransportButtonStyle" TargetType="Button">
             <Setter Property="Width" Value="32" />
@@ -338,8 +397,11 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <ContentPresenter HorizontalAlignment="Center"
-                                          VerticalAlignment="Center" />
+                        <Image x:Name="PlayPauseIcon"
+                               Width="42"
+                               Height="43"
+                               Source="pack://siteoforigin:,,,/res/img/play.png"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.72" />
@@ -640,13 +702,7 @@
                                        Text="0:00" />
                             <Slider x:Name="ProgressSlider"
                                     Grid.Column="1"
-                                    Style="{StaticResource GlassSliderStyle}"
-                                    Minimum="0"
-                                    Maximum="1"
-                                    Value="0"
-                                    IsMoveToPointEnabled="True"
-                                    PreviewMouseLeftButtonDown="ProgressSlider_PreviewMouseLeftButtonDown"
-                                    PreviewMouseLeftButtonUp="ProgressSlider_PreviewMouseLeftButtonUp" />
+                                    Style="{StaticResource TimelineSliderStyle}" />
                             <TextBlock x:Name="DurationText"
                                        Grid.Column="2"
                                        HorizontalAlignment="Right"
@@ -704,25 +760,14 @@
                                     Height="20"
                                     Cursor="Hand"
                                     Visibility="Collapsed"
+                                    Template="{StaticResource VolumeButtonTemplate}"
                                     Click="VolumeButton_Click"
-                                    ToolTip="Mute">
-                                <Button.Template>
-                                    <ControlTemplate TargetType="Button">
-                                        <Image x:Name="CompactVolumeIcon"
-                                               Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
-                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                    </ControlTemplate>
-                                </Button.Template>
-                            </Button>
+                                    ToolTip="Mute" />
                             <Slider x:Name="CompactVolumeSlider"
                                     Width="55"
                                     Margin="4,0,0,0"
-                                    Style="{StaticResource GlassSliderStyle}"
-                                    Minimum="0"
-                                    Maximum="100"
-                                    IsMoveToPointEnabled="True"
-                                    Visibility="Collapsed"
-                                    ValueChanged="VolumeSlider_ValueChanged" />
+                                    Style="{StaticResource VolumeSliderStyle}"
+                                    Visibility="Collapsed" />
                         </StackPanel>
 
                     <Canvas Grid.Column="1"
@@ -753,13 +798,7 @@
                                 Style="{StaticResource AeroPlayPauseButtonStyle}"
                                 CommandParameter="Play"
                                 Click="PlayPauseButton_Click"
-                                ToolTip="Play or pause">
-                            <Image x:Name="PlayPauseImage"
-                                   Width="42"
-                                   Height="43"
-                                   Source="pack://siteoforigin:,,,/res/img/play.png"
-                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                        </Button>
+                                ToolTip="Play or pause" />
                     </Canvas>
 
                         <StackPanel Grid.Column="2"
@@ -768,40 +807,21 @@
                                     VerticalAlignment="Center"
                                     Margin="0,0,-2,0">
                             <Button x:Name="CompactInfoButton"
-                                    Style="{StaticResource GlassButtonStyle}"
+                                    Style="{StaticResource InfoButtonStyle}"
                                     Width="28"
                                     Height="28"
                                     Margin="0,0,3,0"
                                     Visibility="Collapsed"
                                     Click="InfoButton_Click"
-                                    ToolTip="More">
-                                <Path Width="12"
-                                      Height="12"
-                                      Stretch="Uniform"
-                                      Stroke="#F7FAF7"
-                                      StrokeThickness="1.8"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      Data="M 3,5 L 15,5 M 3,9 L 15,9 M 3,13 L 15,13" />
-                            </Button>
+                                    ToolTip="More" />
                             <Button x:Name="CompactLyricsButton"
-                                    Style="{StaticResource GlassButtonStyle}"
+                                    Style="{StaticResource LyricsButtonStyle}"
                                     Width="28"
                                     Height="28"
                                     Margin="0"
                                     Visibility="Collapsed"
                                     Click="LyricsButton_Click"
-                                    ToolTip="Lyrics">
-                                <Path Width="13"
-                                      Height="13"
-                                      Stretch="Uniform"
-                                      Stroke="#F7FAF7"
-                                      StrokeThickness="1.7"
-                                      StrokeStartLineCap="Round"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      Data="M 2,3.5 C 2,2.3 3,1.5 4.2,1.5 L 13.8,1.5 C 15,1.5 16,2.3 16,3.5 L 16,10.5 C 16,11.7 15,12.5 13.8,12.5 L 8.5,12.5 L 5,15 L 5.8,12.5 L 4.2,12.5 C 3,12.5 2,11.7 2,10.5 Z M 5,5.2 L 13,5.2 M 5,8 L 11,8" />
-                            </Button>
+                                    ToolTip="Lyrics" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -912,13 +932,7 @@
                                            Text="0:00" />
                                 <Slider x:Name="ExpandedProgressSlider"
                                         Grid.Column="1"
-                                        Style="{StaticResource GlassSliderStyle}"
-                                        Minimum="0"
-                                        Maximum="1"
-                                        Value="0"
-                                        IsMoveToPointEnabled="True"
-                                        PreviewMouseLeftButtonDown="ProgressSlider_PreviewMouseLeftButtonDown"
-                                        PreviewMouseLeftButtonUp="ProgressSlider_PreviewMouseLeftButtonUp" />
+                                        Style="{StaticResource TimelineSliderStyle}" />
                                 <TextBlock x:Name="ExpandedDurationText"
                                            Grid.Column="2"
                                            HorizontalAlignment="Right"
@@ -945,25 +959,14 @@
                                             Height="22"
                                             Cursor="Hand"
                                             Visibility="Collapsed"
+                                            Template="{StaticResource VolumeButtonTemplate}"
                                             Click="VolumeButton_Click"
-                                            ToolTip="Mute">
-                                        <Button.Template>
-                                            <ControlTemplate TargetType="Button">
-                                                <Image x:Name="ExpandedVolumeIcon"
-                                                       Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
-                                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                            </ControlTemplate>
-                                        </Button.Template>
-                                    </Button>
+                                            ToolTip="Mute" />
                                     <Slider x:Name="ExpandedVolumeSlider"
                                             Width="55"
                                             Margin="4,0,0,0"
-                                            Style="{StaticResource GlassSliderStyle}"
-                                            Minimum="0"
-                                            Maximum="100"
-                                            IsMoveToPointEnabled="True"
-                                            Visibility="Collapsed"
-                                            ValueChanged="VolumeSlider_ValueChanged" />
+                                            Style="{StaticResource VolumeSliderStyle}"
+                                            Visibility="Collapsed" />
                                 </StackPanel>
 
                                 <Canvas Grid.Column="1"
@@ -993,13 +996,7 @@
                                             Style="{StaticResource AeroPlayPauseButtonStyle}"
                                             CommandParameter="Play"
                                             Click="PlayPauseButton_Click"
-                                            ToolTip="Play">
-                                        <Image x:Name="ExpandedPlayPauseImage"
-                                               Width="42"
-                                               Height="43"
-                                               Source="pack://siteoforigin:,,,/res/img/play.png"
-                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                    </Button>
+                                            ToolTip="Play" />
                                 </Canvas>
 
                                 <StackPanel Grid.Column="2"
@@ -1007,40 +1004,21 @@
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Center">
                                     <Button x:Name="ExpandedInfoButton"
-                                            Style="{StaticResource GlassButtonStyle}"
+                                            Style="{StaticResource InfoButtonStyle}"
                                             Width="34"
                                             Height="34"
                                             Margin="0,0,3,0"
                                             Visibility="Collapsed"
                                             Click="InfoButton_Click"
-                                            ToolTip="More">
-                                        <Path Width="14"
-                                              Height="14"
-                                              Stretch="Uniform"
-                                              Stroke="#F7FAF7"
-                                              StrokeThickness="1.8"
-                                              StrokeStartLineCap="Round"
-                                              StrokeEndLineCap="Round"
-                                              Data="M 3,5 L 15,5 M 3,9 L 15,9 M 3,13 L 15,13" />
-                                    </Button>
+                                            ToolTip="More" />
                                     <Button x:Name="ExpandedLyricsButton"
-                                            Style="{StaticResource GlassButtonStyle}"
+                                            Style="{StaticResource LyricsButtonStyle}"
                                             Width="34"
                                             Height="34"
                                             Margin="0"
                                             Visibility="Collapsed"
                                             Click="LyricsButton_Click"
-                                            ToolTip="Lyrics">
-                                        <Path Width="15"
-                                              Height="15"
-                                              Stretch="Uniform"
-                                              Stroke="#F7FAF7"
-                                              StrokeThickness="1.7"
-                                              StrokeStartLineCap="Round"
-                                              StrokeEndLineCap="Round"
-                                              StrokeLineJoin="Round"
-                                              Data="M 2,3.5 C 2,2.3 3,1.5 4.2,1.5 L 13.8,1.5 C 15,1.5 16,2.3 16,3.5 L 16,10.5 C 16,11.7 15,12.5 13.8,12.5 L 8.5,12.5 L 5,15 L 5.8,12.5 L 4.2,12.5 C 3,12.5 2,11.7 2,10.5 Z M 5,5.2 L 13,5.2 M 5,8 L 11,8" />
-                                    </Button>
+                                            ToolTip="Lyrics" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -1296,13 +1274,7 @@
                                            Text="0:00" />
                                 <Slider x:Name="LyricsProgressSlider"
                                         Grid.Column="1"
-                                        Style="{StaticResource GlassSliderStyle}"
-                                        Minimum="0"
-                                        Maximum="1"
-                                        Value="0"
-                                        IsMoveToPointEnabled="True"
-                                        PreviewMouseLeftButtonDown="ProgressSlider_PreviewMouseLeftButtonDown"
-                                        PreviewMouseLeftButtonUp="ProgressSlider_PreviewMouseLeftButtonUp" />
+                                        Style="{StaticResource TimelineSliderStyle}" />
                                 <TextBlock x:Name="LyricsDurationText"
                                            Grid.Column="2"
                                            HorizontalAlignment="Right"
@@ -1329,25 +1301,14 @@
                                             Height="22"
                                             Cursor="Hand"
                                             Visibility="Collapsed"
+                                            Template="{StaticResource VolumeButtonTemplate}"
                                             Click="VolumeButton_Click"
-                                            ToolTip="Mute">
-                                        <Button.Template>
-                                            <ControlTemplate TargetType="Button">
-                                                <Image x:Name="LyricsVolumeIcon"
-                                                       Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
-                                                       RenderOptions.BitmapScalingMode="HighQuality" />
-                                            </ControlTemplate>
-                                        </Button.Template>
-                                    </Button>
+                                            ToolTip="Mute" />
                                     <Slider x:Name="LyricsVolumeSlider"
                                             Width="55"
                                             Margin="4,0,0,0"
-                                            Style="{StaticResource GlassSliderStyle}"
-                                            Minimum="0"
-                                            Maximum="100"
-                                            IsMoveToPointEnabled="True"
-                                            Visibility="Collapsed"
-                                            ValueChanged="VolumeSlider_ValueChanged" />
+                                            Style="{StaticResource VolumeSliderStyle}"
+                                            Visibility="Collapsed" />
                                 </StackPanel>
 
                                 <Canvas Grid.Column="1"
@@ -1377,13 +1338,7 @@
                                             Style="{StaticResource AeroPlayPauseButtonStyle}"
                                             CommandParameter="Play"
                                             Click="PlayPauseButton_Click"
-                                            ToolTip="Play">
-                                        <Image x:Name="LyricsPlayPauseImage"
-                                               Width="42"
-                                               Height="43"
-                                               Source="pack://siteoforigin:,,,/res/img/play.png"
-                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                    </Button>
+                                            ToolTip="Play" />
                                 </Canvas>
 
                                 <StackPanel Grid.Column="2"
@@ -1391,22 +1346,13 @@
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Center">
                                     <Button x:Name="LyricsInfoButton"
-                                            Style="{StaticResource GlassButtonStyle}"
+                                            Style="{StaticResource InfoButtonStyle}"
                                             Width="34"
                                             Height="34"
                                             Margin="0"
                                             Visibility="Collapsed"
                                             Click="InfoButton_Click"
-                                            ToolTip="More">
-                                        <Path Width="14"
-                                              Height="14"
-                                              Stretch="Uniform"
-                                              Stroke="#F7FAF7"
-                                              StrokeThickness="1.8"
-                                              StrokeStartLineCap="Round"
-                                              StrokeEndLineCap="Round"
-                                              Data="M 3,5 L 15,5 M 3,9 L 15,9 M 3,13 L 15,13" />
-                                    </Button>
+                                            ToolTip="More" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -1572,13 +1518,7 @@
                                     <Slider x:Name="FullscreenProgressSlider"
                                             Grid.Column="1"
                                             Margin="10,0"
-                                            Style="{StaticResource GlassSliderStyle}"
-                                            Minimum="0"
-                                            Maximum="1"
-                                            Value="0"
-                                            IsMoveToPointEnabled="True"
-                                            PreviewMouseLeftButtonDown="ProgressSlider_PreviewMouseLeftButtonDown"
-                                            PreviewMouseLeftButtonUp="ProgressSlider_PreviewMouseLeftButtonUp" />
+                                            Style="{StaticResource TimelineSliderStyle}" />
                                     <TextBlock x:Name="FullscreenDurationText"
                                                Grid.Column="2"
                                                VerticalAlignment="Center"
@@ -1608,24 +1548,13 @@
                                                     Width="24"
                                                     Height="24"
                                                     Cursor="Hand"
+                                                    Template="{StaticResource VolumeButtonTemplate}"
                                                     Click="VolumeButton_Click"
-                                                    ToolTip="Mute">
-                                                <Button.Template>
-                                                    <ControlTemplate TargetType="Button">
-                                                        <Image x:Name="FullscreenVolumeIcon"
-                                                               Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
-                                                               RenderOptions.BitmapScalingMode="HighQuality" />
-                                                    </ControlTemplate>
-                                                </Button.Template>
-                                            </Button>
+                                                    ToolTip="Mute" />
                                             <Slider x:Name="FullscreenVolumeSlider"
                                                     Width="80"
                                                     Margin="6,0,0,0"
-                                                    Style="{StaticResource GlassSliderStyle}"
-                                                    Minimum="0"
-                                                    Maximum="100"
-                                                    IsMoveToPointEnabled="True"
-                                                    ValueChanged="VolumeSlider_ValueChanged" />
+                                                    Style="{StaticResource VolumeSliderStyle}" />
                                         </StackPanel>
                                     </Grid>
 
@@ -1654,13 +1583,7 @@
                                                 Style="{StaticResource AeroPlayPauseButtonStyle}"
                                                 CommandParameter="Play"
                                                 Click="PlayPauseButton_Click"
-                                                ToolTip="Play or pause">
-                                            <Image x:Name="FullscreenPlayPauseImage"
-                                                   Width="42"
-                                                   Height="43"
-                                                   Source="pack://siteoforigin:,,,/res/img/play.png"
-                                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                                        </Button>
+                                                ToolTip="Play or pause" />
                                     </Canvas>
 
                                     <!-- Right buttons: Lyrics Toggle and Last.fm Info -->
@@ -1671,38 +1594,19 @@
                                                     VerticalAlignment="Center"
                                                     HorizontalAlignment="Right">
                                             <Button x:Name="FullscreenInfoButton"
-                                                    Style="{StaticResource GlassButtonStyle}"
+                                                    Style="{StaticResource InfoButtonStyle}"
                                                     Width="32"
                                                     Height="32"
                                                     Margin="0,0,6,0"
                                                     Click="InfoButton_Click"
-                                                    ToolTip="More">
-                                                <Path Width="14"
-                                                      Height="14"
-                                                      Stretch="Uniform"
-                                                      Stroke="#F7FAF7"
-                                                      StrokeThickness="1.8"
-                                                      StrokeStartLineCap="Round"
-                                                      StrokeEndLineCap="Round"
-                                                      Data="M 3,5 L 15,5 M 3,9 L 15,9 M 3,13 L 15,13" />
-                                            </Button>
+                                                    ToolTip="More" />
                                             <Button x:Name="FullscreenLyricsToggle"
-                                                    Style="{StaticResource GlassButtonStyle}"
+                                                    Style="{StaticResource LyricsButtonStyle}"
                                                     Width="32"
                                                     Height="32"
                                                     Margin="0"
                                                     Click="FullscreenLyricsToggle_Click"
-                                                    ToolTip="Lyrics">
-                                                <Path Width="14"
-                                                      Height="14"
-                                                      Stretch="Uniform"
-                                                      Stroke="#F7FAF7"
-                                                      StrokeThickness="1.8"
-                                                      StrokeStartLineCap="Round"
-                                                      StrokeEndLineCap="Round"
-                                                      StrokeLineJoin="Round"
-                                                      Data="M 2,3.5 C 2,2.3 3,1.5 4.2,1.5 L 13.8,1.5 C 15,1.5 16,2.3 16,3.5 L 16,10.5 C 16,11.7 15,12.5 13.8,12.5 L 8.5,12.5 L 5,15 L 5.8,12.5 L 4.2,12.5 C 3,12.5 2,11.7 2,10.5 Z M 5,5.2 L 13,5.2 M 5,8 L 11,8" />
-                                            </Button>
+                                                    ToolTip="Lyrics" />
                                         </StackPanel>
                                     </Grid>
                                 </Grid>

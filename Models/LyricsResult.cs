@@ -1,5 +1,14 @@
 namespace Mystral.Models;
 
+public sealed record LyricLine(TimeSpan Time, string Text);
+
+public sealed record LyricsTrackInfo(
+    string TrackName,
+    string ArtistName,
+    string AlbumName,
+    double Duration,
+    string SourceName);
+
 public sealed record LyricsResult(
     LyricsStatus Status,
     IReadOnlyList<LyricLine> SyncedLines,

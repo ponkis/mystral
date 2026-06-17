@@ -64,7 +64,7 @@ public partial class SettingsWindow : Window
         if (selectedItem == LastFmCategoryItem)
         {
             SettingsTitleText.Text = "Last.fm";
-            SettingsHeaderIcon.Source = LoadSiteImage("res/img/lastfm.png");
+            SettingsHeaderIcon.Source = IconImageSource.LoadSiteImage("res/img/lastfm.png");
         }
         else if (selectedItem == BehaviorCategoryItem)
         {
@@ -79,22 +79,6 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private bool AreSettingsEqual(AppSettings current, AppSettings saved)
-    {
-        if (current.LastFm.Enabled != saved.LastFm.Enabled) return false;
-        if ((current.LastFm.ApiKey ?? "") != (saved.LastFm.ApiKey ?? "")) return false;
-        if ((current.LastFm.ApiSecret ?? "") != (saved.LastFm.ApiSecret ?? "")) return false;
-        if ((current.LastFm.Username ?? "") != (saved.LastFm.Username ?? "")) return false;
-        if ((current.LastFm.Password ?? "") != (saved.LastFm.Password ?? "")) return false;
-        if (current.LastFm.ScrobblingEnabled != saved.LastFm.ScrobblingEnabled) return false;
-
-        if (current.Behavior.CloseToTray != saved.Behavior.CloseToTray) return false;
-        if (current.Behavior.EnableNotifications != saved.Behavior.EnableNotifications) return false;
-        if (current.Behavior.StartWithWindows != saved.Behavior.StartWithWindows) return false;
-
-        return true;
-    }
-
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
         if (_isLoadingSettings)
@@ -103,7 +87,7 @@ public partial class SettingsWindow : Window
         }
 
         var current = CreateSettingsFromFields();
-        _hasUnsavedChanges = !AreSettingsEqual(current, _settingsService.Settings);
+        _hasUnsavedChanges = current != _settingsService.Settings;
         UpdateLastFmStatus();
         UpdateDirtyStatus();
     }
@@ -263,7 +247,7 @@ public partial class SettingsWindow : Window
             ? System.Windows.Media.Brushes.DarkRed
             : System.Windows.Media.Brushes.DimGray;
         StatusIcon.Source = isWarning
-            ? LoadSiteImage("res/img/WarningIcon.png")
+            ? IconImageSource.LoadSiteImage("res/img/WarningIcon.png")
             : IconImageSource.LoadBestFitFrame("res/img/info.ico", 16);
     }
 
@@ -281,17 +265,6 @@ public partial class SettingsWindow : Window
     private static bool CanSave(AppSettings settings)
     {
         return !settings.LastFm.Enabled || settings.LastFm.IsConfigured;
-    }
-
-    private static System.Windows.Media.ImageSource LoadSiteImage(string relativePath)
-    {
-        var image = new System.Windows.Media.Imaging.BitmapImage();
-        image.BeginInit();
-        image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-        image.UriSource = new Uri($"pack://siteoforigin:,,,/{relativePath.TrimStart('/', '\\').Replace('\\', '/')}", UriKind.Absolute);
-        image.EndInit();
-        image.Freeze();
-        return image;
     }
 
     private void LoadHistory()

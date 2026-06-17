@@ -6,6 +6,23 @@ namespace Mystral.Services;
 
 public static class IconImageSource
 {
+    private static readonly Dictionary<string, ImageSource> SiteImageCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public static ImageSource LoadSiteImage(string relativePath)
+    {
+        var normalizedPath = relativePath.TrimStart('/', '\\').Replace('\\', '/');
+        if (SiteImageCache.TryGetValue(normalizedPath, out var cached))
+        {
+            return cached;
+        }
+
+        var source = normalizedPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)
+            ? LoadBestFrame(normalizedPath)
+            : LoadBitmap(normalizedPath);
+        SiteImageCache[normalizedPath] = source;
+        return source;
+    }
+
     public static ImageSource LoadBestFrame(string relativePath)
     {
         return LoadFrame(relativePath, targetSize: null);
@@ -41,5 +58,16 @@ public static class IconImageSource
 
         frame.Freeze();
         return frame;
+    }
+
+    private static ImageSource LoadBitmap(string normalizedPath)
+    {
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.UriSource = new Uri($"pack://siteoforigin:,,,/{normalizedPath}", UriKind.Absolute);
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 }

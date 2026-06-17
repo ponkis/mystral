@@ -97,7 +97,6 @@ public partial class MainWindow : Window
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
     private static readonly TimeSpan LyricActivationLead = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan LyricRegressionTolerance = TimeSpan.FromMilliseconds(1750);
-    private static readonly Dictionary<string, ImageSource> SiteImageCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _hasAppliedArtworkTint;
     private BitmapSource? _lastArtworkTintSource;
     private bool _isExitingFromTray;
@@ -345,8 +344,6 @@ public partial class MainWindow : Window
 
     private void ApplySnapshot(MediaSnapshot snapshot)
     {
-        Mystral.Services.LocalScrobbleCacheService.Instance.Update(snapshot);
-
         if (snapshot.HasSession && !string.IsNullOrWhiteSpace(snapshot.Title))
         {
             if (snapshot.Title != _lastNotificationTrackTitle || snapshot.Description != _lastNotificationTrackArtist)
@@ -567,7 +564,7 @@ public partial class MainWindow : Window
 
     private static void SetPlayPauseButtonImage(Button button, string visualState)
     {
-        if (button.Content is not Image image)
+        if (button.Template?.FindName("PlayPauseIcon", button) is not Image image)
         {
             return;
         }
@@ -586,27 +583,7 @@ public partial class MainWindow : Window
 
     private static ImageSource GetSiteImageSource(string relativePath)
     {
-        var normalizedPath = relativePath.TrimStart('/', '\\').Replace('\\', '/');
-        if (SiteImageCache.TryGetValue(normalizedPath, out var cached))
-        {
-            return cached;
-        }
-
-        if (normalizedPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
-        {
-            var iconFrame = IconImageSource.LoadBestFrame(normalizedPath);
-            SiteImageCache[normalizedPath] = iconFrame;
-            return iconFrame;
-        }
-
-        var image = new BitmapImage();
-        image.BeginInit();
-        image.CacheOption = BitmapCacheOption.OnLoad;
-        image.UriSource = new Uri($"pack://siteoforigin:,,,/{normalizedPath}", UriKind.Absolute);
-        image.EndInit();
-        image.Freeze();
-        SiteImageCache[normalizedPath] = image;
-        return image;
+        return IconImageSource.LoadSiteImage(relativePath);
     }
 
     private static void SetImageSourceIfChanged(Image image, ImageSource? source)
@@ -2437,16 +2414,16 @@ public partial class MainWindow : Window
             _ => "vol_high.png"
         };
         var source = GetSiteImageSource($"res/img/{icon}");
-        SetVolumeIcon(CompactVolumeButton, "CompactVolumeIcon", source);
-        SetVolumeIcon(ExpandedVolumeButton, "ExpandedVolumeIcon", source);
-        SetVolumeIcon(LyricsVolumeButton, "LyricsVolumeIcon", source);
-        SetVolumeIcon(FullscreenVolumeButton, "FullscreenVolumeIcon", source);
+        SetVolumeIcon(CompactVolumeButton, source);
+        SetVolumeIcon(ExpandedVolumeButton, source);
+        SetVolumeIcon(LyricsVolumeButton, source);
+        SetVolumeIcon(FullscreenVolumeButton, source);
     }
 
-    private static void SetVolumeIcon(Button button, string imageName, ImageSource source)
+    private static void SetVolumeIcon(Button button, ImageSource source)
     {
         if (button == null) return;
-        if (button.Template?.FindName(imageName, button) is Image img)
+        if (button.Template?.FindName("VolumeIcon", button) is Image img)
         {
             img.Source = source;
         }
@@ -2656,6 +2633,18 @@ public partial class MainWindow : Window
                     }
 
                     state.ScrobbleSubmitted = result.IsSuccess;
+                    if (result.IsSuccess)
+                    {
+                        LocalScrobbleCacheService.Instance.AddRecord(new ScrobbleRecord
+                        {
+                            Title = state.Track.TrackName,
+                            Artist = state.Track.ArtistName,
+                            Album = state.Track.AlbumName,
+                            Timestamp = state.StartedAt.ToUnixTimeSeconds(),
+                            Duration = (int)state.Duration.TotalSeconds
+                        });
+                    }
+
                     SetScrobblingStatus(result.IsSuccess
                         ? $"Scrobbled: {state.Track.TrackName}"
                         : result.Message);
@@ -3789,21 +3778,4 @@ public partial class MainWindow : Window
         }
     }
 
-    private static bool GetStartup()
-    {
-        try
-        {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: false);
-            if (key != null)
-            {
-                var value = key.GetValue("Mystral") as string;
-                return !string.IsNullOrEmpty(value);
-            }
-        }
-        catch
-        {
-            // Suppress
-        }
-        return false;
-    }
 }
