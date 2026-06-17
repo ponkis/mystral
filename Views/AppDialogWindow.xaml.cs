@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Media;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -39,12 +41,12 @@ public partial class AppDialogWindow : Window
 
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
-        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons());
+        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons(), "warning.wav");
     }
 
     public static MessageBoxResult ShowError(Window owner, string title, string message)
     {
-        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons());
+        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons(), "error.wav");
     }
 
     public static MessageBoxResult ShowAbout(Window owner, Func<Window, Button, Task>? checkForUpdates = null)
@@ -90,16 +92,17 @@ public partial class AppDialogWindow : Window
                 new DialogButtonSpec("Yes", MessageBoxResult.Yes, IsDefault: true, IsCancel: false),
                 new DialogButtonSpec("No", MessageBoxResult.No, IsDefault: false, IsCancel: false),
                 new DialogButtonSpec("Cancel", MessageBoxResult.Cancel, IsDefault: false, IsCancel: true)
-            ]);
+            ],
+            "confirmation.wav");
     }
 
-    private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
+    private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons, string? soundFile = null)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
-        return ShowDialog(owner, dialog);
+        return ShowDialog(owner, dialog, soundFile);
     }
 
-    private static MessageBoxResult ShowDialog(Window owner, AppDialogWindow dialog)
+    private static MessageBoxResult ShowDialog(Window owner, AppDialogWindow dialog, string? soundFile = null)
     {
         bool originalTopmost = false;
         bool hasTopmostOwner = owner != null && owner.Topmost;
@@ -119,6 +122,7 @@ public partial class AppDialogWindow : Window
             dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         }
 
+        PlayDialogSound(soundFile);
         dialog.ShowDialog();
 
         if (hasTopmostOwner && owner != null)
@@ -144,6 +148,26 @@ public partial class AppDialogWindow : Window
         });
     }
 
+    private static void PlayDialogSound(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "res", "Audio", fileName);
+            if (File.Exists(path))
+            {
+                new SoundPlayer(path).Play();
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private static IReadOnlyList<DialogButtonSpec> ContinueButtons()
     {
         return [new DialogButtonSpec("Continue", MessageBoxResult.OK, IsDefault: true, IsCancel: true)];
@@ -165,6 +189,7 @@ public partial class AppDialogWindow : Window
                 Foreground = System.Windows.Media.Brushes.Black,
                 Height = 23,
                 MinWidth = 72,
+                Padding = new Thickness(10, 0, 10, 0),
                 Margin = new Thickness(ButtonPanel.Children.Count == 0 ? 0 : 10, 0, 0, 0),
                 IsDefault = spec.IsDefault,
                 IsCancel = spec.IsCancel

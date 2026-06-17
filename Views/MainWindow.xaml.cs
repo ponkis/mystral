@@ -94,6 +94,9 @@ public partial class MainWindow : Window
     private static readonly string WindowPlacementPath = Path.Combine(
         AppMetadata.LocalApplicationDataDirectory,
         "window-placement.json");
+    private static readonly string LastRunVersionPath = Path.Combine(
+        AppMetadata.LocalApplicationDataDirectory,
+        "last-version.txt");
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
     private static readonly TimeSpan LyricActivationLead = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan LyricRegressionTolerance = TimeSpan.FromMilliseconds(1750);
@@ -159,6 +162,7 @@ public partial class MainWindow : Window
         PlayOpenAnimation();
         CompositionTarget.Rendering += TimelineCompositionTarget_Rendering;
         _mediaPollTimer.Start();
+        ShowUpdatedSuccessfullyIfNeeded();
         if (_settingsService.Settings.Behavior.CheckForUpdatesOnStartup)
         {
             _ = SettingsWindow.CheckForUpdatesAsync(this, showNoUpdateMessage: false, showErrors: false);
@@ -173,6 +177,28 @@ public partial class MainWindow : Window
             TitleText.Text = "Media controls unavailable";
             DescriptionText.Text = ex.Message;
             SetTransportEnabled(false);
+        }
+    }
+
+    private void ShowUpdatedSuccessfullyIfNeeded()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppMetadata.LocalApplicationDataDirectory);
+            var previousVersion = File.Exists(LastRunVersionPath)
+                ? File.ReadAllText(LastRunVersionPath).Trim()
+                : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(previousVersion)
+                && SettingsWindow.IsNewerRelease(AppMetadata.Version, previousVersion))
+            {
+                AppDialogWindow.ShowInformation(this, "Update installed", $"Mystral was updated to version {AppMetadata.Version}.");
+            }
+
+            File.WriteAllText(LastRunVersionPath, AppMetadata.Version);
+        }
+        catch
+        {
         }
     }
 
