@@ -47,12 +47,19 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons());
     }
 
-    public static MessageBoxResult ShowAbout(Window owner)
+    public static MessageBoxResult ShowAbout(Window owner, Func<Window, Button, Task>? checkForUpdates = null)
     {
-        var dialog = new AppDialogWindow(
+        AppDialogWindow? dialog = null;
+        dialog = new AppDialogWindow(
             $"About {AppMetadata.Name}",
             IconImageSource.LoadBestFitFrame("res/ico.ico", 32),
-            OkButtons());
+            checkForUpdates is null
+                ? OkButtons()
+                :
+                [
+                    new DialogButtonSpec("Check for updates", MessageBoxResult.None, IsDefault: false, IsCancel: false, ClickAsync: button => checkForUpdates(dialog!, button)),
+                    new DialogButtonSpec("OK", MessageBoxResult.OK, IsDefault: true, IsCancel: true)
+                ]);
 
         dialog.AboutStampImage.Visibility = Visibility.Visible;
         dialog.DialogTitleText.Text = AppMetadata.Name;
@@ -164,6 +171,12 @@ public partial class AppDialogWindow : Window
             };
             button.Click += (_, _) =>
             {
+                if (spec.ClickAsync is not null)
+                {
+                    _ = spec.ClickAsync(button);
+                    return;
+                }
+
                 Result = spec.Result;
                 Close();
             };
@@ -181,5 +194,5 @@ public partial class AppDialogWindow : Window
         return source;
     }
 
-    private sealed record DialogButtonSpec(string Caption, MessageBoxResult Result, bool IsDefault, bool IsCancel);
+    private sealed record DialogButtonSpec(string Caption, MessageBoxResult Result, bool IsDefault, bool IsCancel, Func<Button, Task>? ClickAsync = null);
 }

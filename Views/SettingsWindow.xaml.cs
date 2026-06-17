@@ -57,6 +57,7 @@ public partial class SettingsWindow : Window
         CloseToTrayCheckBox.IsChecked = settings.Behavior.CloseToTray;
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
+        CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -179,7 +180,8 @@ public partial class SettingsWindow : Window
                 CloseToTray = CloseToTrayCheckBox.IsChecked == true,
                 EnableNotifications = EnableNotificationsCheckBox.IsChecked == true,
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
-                StartWithWindows = StartWithWindowsCheckBox.IsChecked == true
+                StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
+                CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true
             }
         };
     }
@@ -312,12 +314,15 @@ public partial class SettingsWindow : Window
         LoadHistory();
     }
 
-    private async void CheckUpdatesButton_Click(object sender, RoutedEventArgs e)
+    internal static async Task CheckForUpdatesAsync(Window owner, bool showNoUpdateMessage, bool showErrors, Button? sourceButton = null)
     {
-        var originalContent = CheckUpdatesButton.Content;
+        var originalContent = sourceButton?.Content;
         UpdateProgressWindow? progressWindow = null;
-        CheckUpdatesButton.IsEnabled = false;
-        CheckUpdatesButton.Content = "Checking...";
+        if (sourceButton is not null)
+        {
+            sourceButton.IsEnabled = false;
+            sourceButton.Content = "Checking...";
+        }
 
         try
         {
@@ -340,40 +345,28 @@ public partial class SettingsWindow : Window
 
             if (!IsNewerRelease(tag, AppMetadata.Version))
             {
-                AppDialogWindow.ShowInformation(this, "No updates found", $"Mystral {AppMetadata.Version} is up to date.");
+                if (showNoUpdateMessage)
+                {
+                    AppDialogWindow.ShowInformation(owner, "No updates found", $"Mystral {AppMetadata.Version} is up to date.");
+                }
                 return;
             }
 
             var latestVersion = tag.Trim().TrimStart('v', 'V');
             var (installerName, installerUrl) = FindInstallerAsset(root);
-            if (AppDialogWindow.ShowQuestion(this, "Update available", $"Mystral {latestVersion} is available. Download and run the installer? Mystral will close.") != MessageBoxResult.Yes)
+            if (AppDialogWindow.ShowQuestion(owner, "Update available", $"Mystral {latestVersion} is available. Download and run the installer? Mystral will close.") != MessageBoxResult.Yes)
             {
                 return;
             }
 
-            if (_hasUnsavedChanges)
+            if (sourceButton is not null)
             {
-                var saveResult = AppDialogWindow.ShowQuestion(this, "Unsaved changes", "Save your settings before updating?");
-                if (saveResult == MessageBoxResult.Cancel)
-                {
-                    return;
-                }
-
-                if (saveResult == MessageBoxResult.Yes && !await SaveSettingsAsync(showSuccess: false))
-                {
-                    return;
-                }
-
-                if (saveResult == MessageBoxResult.No)
-                {
-                    _isClosingConfirmed = true;
-                }
+                sourceButton.Content = "Downloading...";
             }
 
-            CheckUpdatesButton.Content = "Downloading...";
             string? installerPath = null;
             Exception? downloadError = null;
-            progressWindow = new UpdateProgressWindow(this, $"Mystral {latestVersion}", downloadCancellation.Cancel);
+            progressWindow = new UpdateProgressWindow(owner, $"Mystral {latestVersion}", downloadCancellation.Cancel);
             progressWindow.ContentRendered += async (_, _) =>
             {
                 try
@@ -402,7 +395,10 @@ public partial class SettingsWindow : Window
                 return;
             }
 
-            CheckUpdatesButton.Content = "Launching...";
+            if (sourceButton is not null)
+            {
+                sourceButton.Content = "Launching...";
+            }
 
             if (Process.Start(new ProcessStartInfo { FileName = installerPath, UseShellExecute = true }) is null)
             {
@@ -416,13 +412,19 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            AppDialogWindow.ShowWarning(this, "Update check failed", $"Could not check GitHub releases: {ex.Message}");
+            if (showErrors)
+            {
+                AppDialogWindow.ShowWarning(owner, "Update check failed", $"Could not check GitHub releases: {ex.Message}");
+            }
         }
         finally
         {
             progressWindow?.CloseDownloadWindow();
-            CheckUpdatesButton.Content = originalContent;
-            CheckUpdatesButton.IsEnabled = true;
+            if (sourceButton is not null)
+            {
+                sourceButton.Content = originalContent;
+                sourceButton.IsEnabled = true;
+            }
         }
     }
 
@@ -535,13 +537,20 @@ public partial class SettingsWindow : Window
         public UpdateProgressWindow(Window owner, string versionInfo, Action cancelDownload)
         {
             _cancelDownload = cancelDownload;
-            Owner = owner;
             Title = "Downloading update";
             Icon = owner.Icon;
             Width = 430;
             SizeToContent = SizeToContent.Height;
             ResizeMode = ResizeMode.NoResize;
-            WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            if (owner.IsVisible)
+            {
+                Owner = owner;
+                WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            }
+            else
+            {
+                WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            }
             ShowInTaskbar = false;
             Background = System.Windows.Media.Brushes.White;
             FontFamily = new System.Windows.Media.FontFamily("Segoe UI");

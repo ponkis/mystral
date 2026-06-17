@@ -159,6 +159,10 @@ public partial class MainWindow : Window
         PlayOpenAnimation();
         CompositionTarget.Rendering += TimelineCompositionTarget_Rendering;
         _mediaPollTimer.Start();
+        if (_settingsService.Settings.Behavior.CheckForUpdatesOnStartup)
+        {
+            _ = SettingsWindow.CheckForUpdatesAsync(this, showNoUpdateMessage: false, showErrors: false);
+        }
 
         try
         {
@@ -2839,7 +2843,7 @@ public partial class MainWindow : Window
 
     private void ShowAboutWindow()
     {
-        AppDialogWindow.ShowAbout(this);
+        AppDialogWindow.ShowAbout(this, (owner, button) => SettingsWindow.CheckForUpdatesAsync(owner, showNoUpdateMessage: true, showErrors: true, button));
     }
 
     // ───── Lifecycle ─────
@@ -3046,7 +3050,8 @@ public partial class MainWindow : Window
                 CloseToTray = current.Behavior.CloseToTray,
                 EnableNotifications = current.Behavior.EnableNotifications,
                 AlwaysOnTop = current.Behavior.AlwaysOnTop,
-                StartWithWindows = current.Behavior.StartWithWindows
+                StartWithWindows = current.Behavior.StartWithWindows,
+                CheckForUpdatesOnStartup = current.Behavior.CheckForUpdatesOnStartup
             }
         });
     }
