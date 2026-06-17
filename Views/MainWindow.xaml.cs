@@ -608,7 +608,7 @@ public partial class MainWindow : Window
             _ => string.Empty
         };
 
-        image.Source = GetSiteImageSource($"res/img/{action}{suffix}.png");
+        image.Source = GetSiteImageSource($"Resources/Images/{action}{suffix}.png");
     }
 
     private static ImageSource GetSiteImageSource(string relativePath)
@@ -897,7 +897,7 @@ public partial class MainWindow : Window
 
     private void LoadLoadingIconFrames()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "res", "img");
+        var directory = Path.Combine(AppContext.BaseDirectory, "Resources", "Images");
         if (!Directory.Exists(directory))
         {
             return;
@@ -2443,7 +2443,7 @@ public partial class MainWindow : Window
             <= 66 => "vol_mid.png",
             _ => "vol_high.png"
         };
-        var source = GetSiteImageSource($"res/img/{icon}");
+        var source = GetSiteImageSource($"Resources/Images/{icon}");
         SetVolumeIcon(CompactVolumeButton, source);
         SetVolumeIcon(ExpandedVolumeButton, source);
         SetVolumeIcon(LyricsVolumeButton, source);
@@ -2791,7 +2791,7 @@ public partial class MainWindow : Window
                 Header = $"View \"{lastFmInfo.TrackName}\" on Last.fm",
                 Icon = new Image
                 {
-                    Source = GetSiteImageSource("res/img/lastfm.png"),
+                    Source = GetSiteImageSource("Resources/Images/lastfm.png"),
                     Width = 16,
                     Height = 16
                 }
@@ -2811,7 +2811,7 @@ public partial class MainWindow : Window
         var settingsItem = new MenuItem
         {
             Header = "Settings",
-            Icon = CreateMenuIcon("res/settings.ico")
+            Icon = CreateMenuIcon("Resources/settings.ico")
         };
         settingsItem.Click += (_, _) => ShowSettingsWindow();
         menu.Items.Add(settingsItem);
@@ -2819,7 +2819,7 @@ public partial class MainWindow : Window
         var aboutItem = new MenuItem
         {
             Header = "About",
-            Icon = CreateMenuIcon("res/img/info.ico")
+            Icon = CreateMenuIcon("Resources/Images/info.ico")
         };
         aboutItem.Click += (_, _) => ShowAboutWindow();
         menu.Items.Add(aboutItem);
@@ -2912,7 +2912,7 @@ public partial class MainWindow : Window
 
     private void InitializeTrayIcon()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "res", "ico.ico");
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "ico.ico");
         _notifyIcon = new System.Windows.Forms.NotifyIcon
         {
             Text = AppMetadata.Name,
@@ -2939,7 +2939,7 @@ public partial class MainWindow : Window
         var settingsItem = new MenuItem
         {
             Header = "Settings",
-            Icon = CreateMenuIcon("res/settings.ico")
+            Icon = CreateMenuIcon("Resources/settings.ico")
         };
         settingsItem.Click += (_, _) =>
         {
@@ -2950,7 +2950,7 @@ public partial class MainWindow : Window
         var exitItem = new MenuItem
         {
             Header = "Exit",
-            Icon = CreateMenuIcon("res/exit.ico")
+            Icon = CreateMenuIcon("Resources/exit.ico")
         };
         exitItem.Click += (_, _) => ExitApplication();
 
@@ -2994,7 +2994,7 @@ public partial class MainWindow : Window
         var item = new MenuItem
         {
             Header = $"{AppMetadata.Name} {AppMetadata.Version}",
-            Icon = CreateMenuIcon("res/ico.ico"),
+            Icon = CreateMenuIcon("Resources/ico.ico"),
             FontWeight = FontWeights.Bold,
             Focusable = false,
             IsTabStop = false,

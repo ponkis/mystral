@@ -104,7 +104,7 @@
                            Width="16" 
                            Height="16" 
                            VerticalAlignment="Center"
-                           Source="pack://siteoforigin:,,,/res/ico.ico"
+                           Source="pack://siteoforigin:,,,/Resources/ico.ico"
                            RenderOptions.BitmapScalingMode="HighQuality" />
                            
                     <TextBlock Grid.Column="1" 
@@ -158,7 +158,7 @@
                                 </Border.Background>
                             </Border>
                             <Image x:Name="ArtPlaceholder"
-                                   Source="pack://siteoforigin:,,,/res/img/unknown.png"
+                                   Source="pack://siteoforigin:,,,/Resources/Images/unknown.png"
                                    Stretch="UniformToFill"
                                    RenderOptions.BitmapScalingMode="HighQuality" />
                             <Image x:Name="ArtImage"
