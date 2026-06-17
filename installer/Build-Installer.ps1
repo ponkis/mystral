@@ -2,6 +2,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$RuntimeId = "win-x64",
+    [string]$Version,
     [string]$ProjectFile,
     [string]$InnoScript,
     [string]$InnoCompiler
@@ -27,14 +28,18 @@ if ([string]::IsNullOrWhiteSpace($InnoScript)) {
 $projectPath = (Resolve-Path -LiteralPath $ProjectFile).Path
 $repoRoot = Split-Path -Parent $projectPath
 
-$version = (
-    dotnet msbuild $projectPath `
-        -nologo `
-        -getProperty:Version `
-        -p:Configuration=$Configuration
-).Trim()
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = (
+        dotnet msbuild $projectPath `
+            -nologo `
+            -getProperty:Version `
+            -p:Configuration=$Configuration
+    ).Trim()
+} else {
+    $Version = $Version.Trim().TrimStart("v")
+}
 
-if ([string]::IsNullOrWhiteSpace($version)) {
+if ([string]::IsNullOrWhiteSpace($Version)) {
     throw "Could not resolve the MSBuild Version property."
 }
 
@@ -58,17 +63,17 @@ if (-not $iscc) {
     throw "Could not find ISCC.exe. Install Inno Setup 6 or pass -InnoCompiler."
 }
 
-$publishDir = Join-Path $repoRoot "artifacts\publish\Mystral-$version-$RuntimeId-folder"
+$publishDir = Join-Path $repoRoot "artifacts\publish\Mystral-$Version-$RuntimeId-folder"
 if (-not (Test-Path -LiteralPath $publishDir -PathType Container)) {
     throw "Missing publish folder: $publishDir. Build the folder publish first."
 }
 
 & $iscc $InnoScript `
-    "/DMyAppVersion=$version" `
+    "/DMyAppVersion=$Version" `
     "/DMyPublishDir=$publishDir"
 
 $installerDir = Join-Path $repoRoot "artifacts\installer"
 Move-Item `
     -LiteralPath (Join-Path $installerDir "MystralSetup.exe") `
-    -Destination (Join-Path $installerDir "Mystral-$version-$RuntimeId-setup.exe") `
+    -Destination (Join-Path $installerDir "Mystral-$Version-$RuntimeId-setup.exe") `
     -Force

@@ -17,3 +17,8 @@ public sealed record LastFmSubmitResult(bool IsSuccess, string Message)
     public static LastFmSubmitResult Success(string message) => new(true, message);
     public static LastFmSubmitResult Failure(string message) => new(false, message);
 }
+
+public sealed record LastFmValidationResult(bool IsSuccess, string Message)
+{
+    public static LastFmValidationResult Success { get; } = new(true, "Last.fm API key and username verified.");
+}

@@ -1,12 +1,12 @@
 namespace Mystral.Models;
 
-public sealed class AppSettings
+public sealed record class AppSettings
 {
     public LastFmCredentials LastFm { get; set; } = new();
     public BehaviorSettings Behavior { get; set; } = new();
 }
 
-public sealed class LastFmCredentials
+public sealed record class LastFmCredentials
 {
     public bool Enabled { get; set; }
     public string ApiKey { get; set; } = string.Empty;
@@ -23,7 +23,7 @@ public sealed class LastFmCredentials
         && !string.IsNullOrWhiteSpace(Password);
 }
 
-public sealed class BehaviorSettings
+public sealed record class BehaviorSettings
 {
     public bool CloseToTray { get; set; } = true;
     public bool EnableNotifications { get; set; } = true;
