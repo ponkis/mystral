@@ -1343,6 +1343,7 @@
                     Opacity="0"
                     Panel.ZIndex="50">
                 <Grid x:Name="FullscreenSurface"
+                      SizeChanged="FullscreenLayout_SizeChanged"
                       ClipToBounds="True">
                     
                     <!-- Solid Opaque Base to prevent desktop showing through -->
