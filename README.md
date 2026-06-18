@@ -36,6 +36,34 @@ Mystral is a Windows desktop music companion built with WPF. It reads the active
 
 The app validates Last.fm credentials when settings are saved. Scrobbling uses Last.fm `auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
 
+## Testing
+
+The automated tests live in `tests\Mystral.Tests`. They use a small console runner instead of a test framework, so there are no extra test packages to restore.
+
+Run the core test suite:
+
+```powershell
+dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj
+dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj --no-restore
+```
+
+If NuGet is unavailable but the SDK packs are already cached locally, restore from the local package cache:
+
+```powershell
+dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj --source "$env:USERPROFILE\.nuget\packages"
+```
+
+The test suite covers the vital headless app logic:
+
+- LRC parsing and lyric result handling
+- Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
+- LRCLIB search ranking, parsing, and caching
+- settings persistence and corrupt JSON fallback
+- local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
+- model defaults and artwork tint edge cases
+
+Before a release, also smoke-test the Windows-only shell manually: WPF window states, tray behavior, media session controls, system volume controls, notifications, and installer output.
+
 ## Settings Storage
 
 Debug builds store settings in:
