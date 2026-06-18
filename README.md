@@ -62,7 +62,7 @@ The test suite covers the vital headless app logic:
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - model defaults and artwork tint edge cases
 
-Before a release, also smoke-test the Windows-only shell manually: WPF window states, tray behavior, media session controls, system volume controls, notifications, and installer output.
+Before a release, also run the Windows-only checklist in `SMOKE_TEST.md`: WPF window states, tray behavior, media session controls, system volume controls, notifications, and installer output.
 
 ## Settings Storage
 
