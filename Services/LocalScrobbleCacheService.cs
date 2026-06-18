@@ -18,8 +18,13 @@ public sealed class LocalScrobbleCacheService
     public event EventHandler<ScrobbleRecord>? ScrobbleAdded;
 
     private LocalScrobbleCacheService()
+        : this(Path.Combine(AppMetadata.LocalApplicationDataDirectory, "scrobbles.json"))
     {
-        _cachePath = Path.Combine(AppMetadata.LocalApplicationDataDirectory, "scrobbles.json");
+    }
+
+    internal LocalScrobbleCacheService(string cachePath)
+    {
+        _cachePath = cachePath;
     }
 
     public void AddRecord(ScrobbleRecord record)

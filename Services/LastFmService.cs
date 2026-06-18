@@ -19,9 +19,14 @@ public sealed class LastFmService : IDisposable
     private string _sessionCredentialKey = string.Empty;
 
     public LastFmService(AppSettingsService settingsService)
+        : this(settingsService, new HttpClient { Timeout = TimeSpan.FromSeconds(10) })
+    {
+    }
+
+    internal LastFmService(AppSettingsService settingsService, HttpClient httpClient)
     {
         _settingsService = settingsService;
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
         _settingsService.SettingsChanged += SettingsService_SettingsChanged;
     }

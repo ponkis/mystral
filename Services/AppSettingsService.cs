@@ -15,8 +15,13 @@ public sealed class AppSettingsService
     private readonly string _settingsPath;
 
     public AppSettingsService()
+        : this(Path.Combine(AppMetadata.LocalApplicationDataDirectory, "settings.json"))
     {
-        _settingsPath = Path.Combine(AppMetadata.LocalApplicationDataDirectory, "settings.json");
+    }
+
+    internal AppSettingsService(string settingsPath)
+    {
+        _settingsPath = settingsPath;
         Settings = LoadSettings();
     }
 

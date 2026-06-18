@@ -18,12 +18,18 @@ public sealed class LyricsService : IDisposable
     private readonly Dictionary<string, LyricsResult> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public LyricsService()
-    {
-        _httpClient = new HttpClient
+        : this(new HttpClient
         {
             BaseAddress = new Uri("https://lrclib.net"),
             Timeout = TimeSpan.FromSeconds(28)
-        };
+        })
+    {
+    }
+
+    internal LyricsService(HttpClient httpClient)
+    {
+        _httpClient = httpClient;
+        _httpClient.BaseAddress ??= new Uri("https://lrclib.net");
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
     }
 

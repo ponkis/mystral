@@ -146,6 +146,6 @@ public static partial class LastFmMetadataCleaner
     [GeneratedRegex(@"\s*[\[\(]\s*(official\s+)?((music|lyric)\s+)?(video|audio|lyrics?|visualizer|hd|4k)\s*[\]\)]\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex VideoNoisePattern();
 
-    [GeneratedRegex(@"\s+-\s+(youtube|spotify|apple music|soundcloud)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\s*-\s*(youtube|spotify|apple music|soundcloud)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TrailingSitePattern();
 }
