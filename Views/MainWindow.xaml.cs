@@ -3505,9 +3505,7 @@ public partial class MainWindow : Window
 
         FullscreenLyricsToggle.Opacity = 1.0;
 
-        var targetInfoSize = _isFullscreenLyrics ? 460.0 : 560.0;
-        AnimateDouble(FullscreenArtBorder, WidthProperty, targetInfoSize, 300);
-        AnimateDouble(FullscreenArtBorder, HeightProperty, targetInfoSize, 300);
+        SetFullscreenArtSize(animate: true);
 
         if (_isFullscreenLyrics)
         {
@@ -3534,6 +3532,32 @@ public partial class MainWindow : Window
             };
             FullscreenLyricsPanel.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
         }
+    }
+
+    private void SetFullscreenArtSize(bool animate)
+    {
+        var desired = _isFullscreenLyrics ? 460.0 : 560.0;
+        var height = FullscreenSurface.ActualHeight > 0 ? FullscreenSurface.ActualHeight : SystemParameters.WorkArea.Height;
+        var margin = FullscreenContentGrid.Margin;
+        // ponytail: 205 is the fixed title/progress/control stack under the art.
+        var size = Math.Min(desired, Math.Max(300.0, height - margin.Top - margin.Bottom - 205.0));
+
+        if (Math.Abs(FullscreenArtBorder.Width - size) < 0.5 && Math.Abs(FullscreenArtBorder.Height - size) < 0.5)
+        {
+            return;
+        }
+
+        if (animate)
+        {
+            AnimateDouble(FullscreenArtBorder, WidthProperty, size, 300);
+            AnimateDouble(FullscreenArtBorder, HeightProperty, size, 300);
+            return;
+        }
+
+        FullscreenArtBorder.BeginAnimation(WidthProperty, null);
+        FullscreenArtBorder.BeginAnimation(HeightProperty, null);
+        FullscreenArtBorder.Width = size;
+        FullscreenArtBorder.Height = size;
     }
 
     private void SyncFullscreenPlaybackState()
@@ -3647,6 +3671,11 @@ public partial class MainWindow : Window
 
     private void FullscreenLayout_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_isFullscreen && ReferenceEquals(sender, FullscreenSurface))
+        {
+            SetFullscreenArtSize(animate: false);
+        }
+
         if (_isFullscreen && _isFullscreenLyrics)
         {
             GetCurrentArtCenterY();
