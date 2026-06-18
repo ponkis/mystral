@@ -116,20 +116,12 @@
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonShell" Property="BorderBrush" Value="#E7FFFFFF" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonShell" Property="Opacity" Value="0.78" />
-                            </MultiTrigger>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonShell" Property="Opacity" Value="0.38" />
                                 <Setter Property="Cursor" Value="No" />
@@ -325,20 +317,12 @@
                                Source="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButton.png"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButtonHover.png" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButtonPressed.png" />
-                            </MultiTrigger>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonImage" Property="Opacity" Value="0.45" />
                                 <Setter Property="Cursor" Value="No" />
@@ -361,20 +345,12 @@
                                Source="pack://siteoforigin:,,,/Resources/Images/PreviewNextButton.png"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewNextButtonHover.png" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewNextButtonPressed.png" />
-                            </MultiTrigger>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonImage" Property="Opacity" Value="0.45" />
                                 <Setter Property="Cursor" Value="No" />
