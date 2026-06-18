@@ -133,8 +133,8 @@ public partial class MainWindow : Window
             if (_isFullscreen && _isFullscreenLyrics)
             {
                 _isUserBrowsingFullscreenLyrics = false;
-                ApplyFullscreenLyricBlockVisualState(_activeFullscreenLyricIndex);
-                CenterFullscreenActiveLyric(_activeFullscreenLyricIndex);
+                ApplyLyricBlockVisualState(_activeFullscreenLyricIndex, isFullscreen: true);
+                CenterActiveLyric(_activeFullscreenLyricIndex, isFullscreen: true);
             }
         };
 
@@ -207,14 +207,14 @@ public partial class MainWindow : Window
         AlbumArtSurface.ToolTip = null;
         LyricsBackButton.ToolTip = "Back";
 
-        foreach (var slider in new[] { ProgressSlider, ExpandedProgressSlider, LyricsProgressSlider, FullscreenProgressSlider })
+        foreach (var slider in ProgressSliders)
         {
             slider.ToolTip = "Seek";
             ToolTipService.SetInitialShowDelay(slider, 250);
             slider.MouseMove += ProgressSlider_MouseMove;
         }
 
-        foreach (var slider in new[] { CompactVolumeSlider, ExpandedVolumeSlider, LyricsVolumeSlider, FullscreenVolumeSlider })
+        foreach (var slider in VolumeSliders)
         {
             slider.ToolTip = CreateVolumeToolTip(slider);
             ToolTipService.SetInitialShowDelay(slider, 0);
@@ -226,6 +226,17 @@ public partial class MainWindow : Window
             slider.LostMouseCapture += VolumeSlider_LostMouseCapture;
         }
     }
+
+    private Button[] PreviousButtons => [PreviousButton, ExpandedPreviousButton, LyricsPreviousButton, FullscreenPreviousButton];
+    private Button[] NextButtons => [NextButton, ExpandedNextButton, LyricsNextButton, FullscreenNextButton];
+    private Button[] PlayPauseButtons => [PlayPauseButton, ExpandedPlayPauseButton, LyricsPlayPauseButton, FullscreenPlayPauseButton];
+    private Button[] VolumeButtons => [CompactVolumeButton, ExpandedVolumeButton, LyricsVolumeButton, FullscreenVolumeButton];
+    private Button[] InfoButtons => [CompactInfoButton, ExpandedInfoButton, LyricsInfoButton, FullscreenInfoButton];
+    private Button[] LyricsButtons => [CompactLyricsButton, ExpandedLyricsButton, FullscreenLyricsToggle];
+    private Slider[] ProgressSliders => [ProgressSlider, ExpandedProgressSlider, LyricsProgressSlider, FullscreenProgressSlider];
+    private Slider[] VolumeSliders => [CompactVolumeSlider, ExpandedVolumeSlider, LyricsVolumeSlider, FullscreenVolumeSlider];
+    private TextBlock[] ElapsedTexts => [ElapsedText, ExpandedElapsedText, LyricsElapsedText, FullscreenElapsedText];
+    private TextBlock[] DurationTexts => [DurationText, ExpandedDurationText, LyricsDurationText, FullscreenDurationText];
 
     private void ProgressSlider_MouseMove(object sender, MouseEventArgs e)
     {
@@ -438,29 +449,29 @@ public partial class MainWindow : Window
 
         UpdateTrackActionVisibility(snapshot);
 
-        SetControlDisabledState(PreviousButton, snapshot.CanPrevious);
-        SetControlDisabledState(ExpandedPreviousButton, snapshot.CanPrevious);
-        SetControlDisabledState(LyricsPreviousButton, snapshot.CanPrevious);
-        SetControlDisabledState(FullscreenPreviousButton, snapshot.CanPrevious);
-        SetControlDisabledState(NextButton, snapshot.CanNext);
-        SetControlDisabledState(ExpandedNextButton, snapshot.CanNext);
-        SetControlDisabledState(LyricsNextButton, snapshot.CanNext);
-        SetControlDisabledState(FullscreenNextButton, snapshot.CanNext);
+        foreach (var button in PreviousButtons)
+        {
+            SetControlDisabledState(button, snapshot.CanPrevious);
+        }
+
+        foreach (var button in NextButtons)
+        {
+            SetControlDisabledState(button, snapshot.CanNext);
+        }
+
         var canPlayPause = snapshot.CanPlay || snapshot.CanPause;
-        SetControlDisabledState(PlayPauseButton, canPlayPause);
-        SetControlDisabledState(ExpandedPlayPauseButton, canPlayPause);
-        SetControlDisabledState(LyricsPlayPauseButton, canPlayPause);
-        SetControlDisabledState(FullscreenPlayPauseButton, canPlayPause);
+        foreach (var button in PlayPauseButtons)
+        {
+            SetControlDisabledState(button, canPlayPause);
+        }
+
         SetPlayPauseButtonState(snapshot.IsPlaying);
         var canSeek = snapshot.CanSeek && snapshot.Duration > TimeSpan.Zero;
-        SetControlDisabledState(ProgressSlider, canSeek);
-        SetControlDisabledState(ExpandedProgressSlider, canSeek);
-        SetControlDisabledState(LyricsProgressSlider, canSeek);
-        SetControlDisabledState(FullscreenProgressSlider, canSeek);
-        ProgressSlider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
-        ExpandedProgressSlider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
-        LyricsProgressSlider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
-        FullscreenProgressSlider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
+        foreach (var slider in ProgressSliders)
+        {
+            SetControlDisabledState(slider, canSeek);
+            slider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
+        }
 
         CompactProgressRow.Visibility = snapshot.HasSession ? Visibility.Visible : Visibility.Collapsed;
         if (!snapshot.HasSession)
@@ -493,10 +504,10 @@ public partial class MainWindow : Window
     {
         var showVolume = snapshot.HasSession && _volumeService.IsAvailable;
         var volumeVisibility = showVolume ? Visibility.Visible : Visibility.Collapsed;
-        CompactVolumeButton.Visibility = volumeVisibility;
-        ExpandedVolumeButton.Visibility = volumeVisibility;
-        LyricsVolumeButton.Visibility = volumeVisibility;
-        FullscreenVolumeButton.Visibility = volumeVisibility;
+        foreach (var button in VolumeButtons)
+        {
+            button.Visibility = volumeVisibility;
+        }
 
         if (!showVolume)
         {
@@ -504,9 +515,10 @@ public partial class MainWindow : Window
         }
 
         var lyricsVisibility = ShouldShowLyricsButton(snapshot) ? Visibility.Visible : Visibility.Collapsed;
-        CompactLyricsButton.Visibility = lyricsVisibility;
-        ExpandedLyricsButton.Visibility = lyricsVisibility;
-        FullscreenLyricsToggle.Visibility = lyricsVisibility;
+        foreach (var button in LyricsButtons)
+        {
+            button.Visibility = lyricsVisibility;
+        }
     }
 
     private bool ShouldShowLyricsButton(MediaSnapshot snapshot)
@@ -519,39 +531,32 @@ public partial class MainWindow : Window
         var state = isPlaying ? "Pause" : "Play";
         var tooltip = isPlaying ? "Pause" : "Play";
 
-        PlayPauseButton.CommandParameter = state;
-        ExpandedPlayPauseButton.CommandParameter = state;
-        LyricsPlayPauseButton.CommandParameter = state;
-        FullscreenPlayPauseButton.CommandParameter = state;
-        PlayPauseButton.ToolTip = tooltip;
-        ExpandedPlayPauseButton.ToolTip = tooltip;
-        LyricsPlayPauseButton.ToolTip = tooltip;
-        FullscreenPlayPauseButton.ToolTip = tooltip;
-        RefreshPlayPauseButtonImage(PlayPauseButton);
-        RefreshPlayPauseButtonImage(ExpandedPlayPauseButton);
-        RefreshPlayPauseButtonImage(LyricsPlayPauseButton);
-        RefreshPlayPauseButtonImage(FullscreenPlayPauseButton);
+        foreach (var button in PlayPauseButtons)
+        {
+            button.CommandParameter = state;
+            button.ToolTip = tooltip;
+            RefreshPlayPauseButtonImage(button);
+        }
     }
 
     private static void SetControlDisabledState(FrameworkElement element, bool isEnabled)
     {
-        element.IsEnabled = true;
-        element.Tag = isEnabled ? null : "disabled";
-        element.Opacity = isEnabled || IsPlayPauseButton(element) ? 1.0 : (element is Slider ? 0.42 : 0.45);
+        element.IsEnabled = isEnabled;
+        element.Opacity = isEnabled ? 1.0 : element is Slider ? 0.42 : 0.45;
         element.Cursor = isEnabled
             ? System.Windows.Input.Cursors.Hand
             : System.Windows.Input.Cursors.No;
         element.ForceCursor = !isEnabled;
-    }
 
-    private static bool IsPlayPauseButton(FrameworkElement element)
-    {
-        return element is Button { Name: "PlayPauseButton" or "ExpandedPlayPauseButton" or "LyricsPlayPauseButton" or "FullscreenPlayPauseButton" };
+        if (element is Button button)
+        {
+            RefreshPlayPauseButtonImage(button);
+        }
     }
 
     private static bool IsControlDisabled(object sender)
     {
-        return sender is FrameworkElement fe && (!fe.IsEnabled || fe.Tag is "disabled");
+        return sender is FrameworkElement { IsEnabled: false };
     }
 
     private void PlayPauseButton_MouseEnter(object sender, MouseEventArgs e)
@@ -608,7 +613,7 @@ public partial class MainWindow : Window
             _ => string.Empty
         };
 
-        image.Source = GetSiteImageSource($"res/img/{action}{suffix}.png");
+        image.Source = GetSiteImageSource($"Resources/Images/{action}{suffix}.png");
     }
 
     private static ImageSource GetSiteImageSource(string relativePath)
@@ -686,17 +691,17 @@ public partial class MainWindow : Window
             var progressValue = duration > TimeSpan.Zero
                 ? Math.Clamp(position.TotalSeconds, 0, Math.Max(1, duration.TotalSeconds))
                 : 0;
-            SetSliderValueIfChanged(ProgressSlider, progressValue);
-            SetSliderValueIfChanged(ExpandedProgressSlider, progressValue);
-            SetSliderValueIfChanged(LyricsProgressSlider, progressValue);
-            SetSliderValueIfChanged(FullscreenProgressSlider, progressValue);
+            foreach (var slider in ProgressSliders)
+            {
+                SetSliderValueIfChanged(slider, progressValue);
+            }
         }
 
         var elapsedText = FormatTime(position);
-        SetTextIfChanged(ElapsedText, elapsedText);
-        SetTextIfChanged(ExpandedElapsedText, elapsedText);
-        SetTextIfChanged(LyricsElapsedText, elapsedText);
-        SetTextIfChanged(FullscreenElapsedText, elapsedText);
+        foreach (var textBlock in ElapsedTexts)
+        {
+            SetTextIfChanged(textBlock, elapsedText);
+        }
 
         var remaining = duration > TimeSpan.Zero ? duration - position : TimeSpan.Zero;
         if (remaining < TimeSpan.Zero)
@@ -705,15 +710,16 @@ public partial class MainWindow : Window
         }
 
         var remainingText = "-" + FormatTime(remaining);
-        SetTextIfChanged(DurationText, remainingText);
-        SetTextIfChanged(ExpandedDurationText, remainingText);
-        SetTextIfChanged(LyricsDurationText, remainingText);
-        SetTextIfChanged(FullscreenDurationText, remainingText);
+        foreach (var textBlock in DurationTexts)
+        {
+            SetTextIfChanged(textBlock, remainingText);
+        }
+
         UpdateSyncedLyricsUi(position);
 
         if (_isFullscreen && _isFullscreenLyrics)
         {
-            UpdateFullscreenSyncedLyricsUi(position);
+            UpdateSyncedLyricsUi(position, isFullscreen: true);
         }
     }
 
@@ -824,12 +830,9 @@ public partial class MainWindow : Window
         LyricsStackPanel.Children.Clear();
         _lyricBlocks.Clear();
         _lyricWaitIndicators.Clear();
-        _fullscreenLyricWaitIndicators.Clear();
         _lyricsFooterPanel = null;
         _activeLyricIndex = -1;
         _activeLyricWaitIndicatorIndex = -1;
-        _activeFullscreenLyricIndex = -1;
-        _activeFullscreenLyricWaitIndicatorIndex = -1;
         _isUserBrowsingLyrics = false;
         _lastLyricsPosition = TimeSpan.Zero;
         StopLyricsScrollAnimation();
@@ -841,27 +844,20 @@ public partial class MainWindow : Window
         var hasLyrics = Lyrics.Status is LyricsStatus.Synced or LyricsStatus.Plain;
         var isLoading = Lyrics.Status == LyricsStatus.Loading;
         var lyricsButtonVisibility = ShouldShowLyricsButton(Snapshot) ? Visibility.Visible : Visibility.Collapsed;
-        CompactLyricsButton.Visibility = lyricsButtonVisibility;
-        ExpandedLyricsButton.Visibility = lyricsButtonVisibility;
-        FullscreenLyricsToggle.Visibility = lyricsButtonVisibility;
+        foreach (var button in LyricsButtons)
+        {
+            button.Visibility = lyricsButtonVisibility;
+        }
 
         if (Lyrics.Status == LyricsStatus.Synced)
         {
             LyricsMessagePanel.Visibility = Visibility.Collapsed;
-            for (var i = 0; i < Lyrics.SyncedLines.Count; i++)
-            {
-                var line = Lyrics.SyncedLines[i];
-                var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
-                AddLyricWaitIndicatorIfNeeded(i, previousLineTime, line.Time);
-                AddLyricBlock(line.Text, 22, 0.30);
-            }
-
+            RenderSyncedLyrics(LyricsStackPanel, _lyricBlocks, _lyricWaitIndicators, isFullscreen: false);
             AddLyricsInfoFooter();
-            SetCompactLyricText("Lyrics ready");
             Dispatcher.BeginInvoke(() => UpdateSyncedLyricsUi(GetCurrentPosition()), DispatcherPriority.Loaded);
             if (_isFullscreen && _isFullscreenLyrics)
             {
-                Dispatcher.BeginInvoke(() => UpdateFullscreenSyncedLyricsUi(GetCurrentPosition()), DispatcherPriority.Loaded);
+                Dispatcher.BeginInvoke(() => UpdateSyncedLyricsUi(GetCurrentPosition(), isFullscreen: true), DispatcherPriority.Loaded);
             }
             return;
         }
@@ -869,20 +865,13 @@ public partial class MainWindow : Window
         if (Lyrics.Status == LyricsStatus.Plain)
         {
             LyricsMessagePanel.Visibility = Visibility.Collapsed;
-            foreach (var line in Lyrics.PlainLines)
-            {
-                AddLyricBlock(line, 19, 0.76);
-            }
-
+            RenderPlainLyrics(LyricsStackPanel, _lyricBlocks, isFullscreen: false);
             AddLyricsInfoFooter();
-            SetPlainLyricStyle();
-            SetCompactLyricText(Lyrics.PlainLines.FirstOrDefault() ?? "Unsynced lyrics");
             return;
         }
 
         LyricsMessagePanel.Visibility = Visibility.Visible;
         LyricsMessageText.Text = Lyrics.Message;
-        SetCompactLyricText(Lyrics.Message);
 
         if (_isLyricsMode && !isLoading)
         {
@@ -897,7 +886,7 @@ public partial class MainWindow : Window
 
     private void LoadLoadingIconFrames()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "res", "img");
+        var directory = Path.Combine(AppContext.BaseDirectory, "Resources", "Images");
         if (!Directory.Exists(directory))
         {
             return;
@@ -962,18 +951,6 @@ public partial class MainWindow : Window
         _loadingIconFrameIndex = (_loadingIconFrameIndex + 1) % _loadingIconFrames.Count;
         LyricsLoadingIcon.Source = _loadingIconFrames[_loadingIconFrameIndex];
         FullscreenLyricsLoadingIcon.Source = _loadingIconFrames[_loadingIconFrameIndex];
-    }
-
-    private void AddLyricBlock(string text, double fontSize, double opacity)
-    {
-        AddLyricBlock(
-            LyricsStackPanel,
-            _lyricBlocks,
-            text,
-            fontSize,
-            opacity,
-            new Thickness(0, 13, 0, 13),
-            Color.FromRgb(124, 132, 132));
     }
 
     private static void AddLyricBlock(
@@ -1326,9 +1303,9 @@ public partial class MainWindow : Window
         return string.Empty;
     }
 
-    private void SetPlainLyricStyle()
+    private void SetPlainLyricStyle(IEnumerable<TextBlock> blocks)
     {
-        foreach (var block in _lyricBlocks)
+        foreach (var block in blocks)
         {
             block.Foreground = new SolidColorBrush(Color.FromRgb(221, 226, 226));
             block.FontWeight = FontWeights.SemiBold;
@@ -1337,7 +1314,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateSyncedLyricsUi(TimeSpan position)
+    private void UpdateSyncedLyricsUi(TimeSpan position, bool isFullscreen = false)
     {
         if (Lyrics.Status != LyricsStatus.Synced || Lyrics.SyncedLines.Count == 0)
         {
@@ -1345,8 +1322,38 @@ public partial class MainWindow : Window
         }
 
         var stabilizedPosition = StabilizeLyricPosition(position);
-        var activeWaitChanged = UpdateLyricWaitIndicators(stabilizedPosition);
+        var activeWaitChanged = isFullscreen
+            ? UpdateFullscreenLyricWaitIndicators(stabilizedPosition)
+            : UpdateLyricWaitIndicators(stabilizedPosition);
         var activeIndex = FindActiveLyricIndex(Lyrics.SyncedLines, stabilizedPosition + LyricActivationLead);
+
+        if (isFullscreen)
+        {
+            if (activeWaitChanged && _activeFullscreenLyricWaitIndicatorIndex >= 0)
+            {
+                Dispatcher.BeginInvoke(
+                    () => CenterLyricsElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element, isFullscreen: true),
+                    DispatcherPriority.Loaded);
+            }
+
+            if (activeIndex == _activeFullscreenLyricIndex)
+            {
+                return;
+            }
+
+            _isUserBrowsingFullscreenLyrics = false;
+            _fullscreenLyricsInactivityTimer.Stop();
+            _activeFullscreenLyricIndex = activeIndex;
+            ApplyLyricBlockVisualState(activeIndex, isFullscreen: true);
+
+            if (_activeFullscreenLyricWaitIndicatorIndex < 0)
+            {
+                Dispatcher.BeginInvoke(() => CenterActiveLyric(activeIndex, isFullscreen: true), DispatcherPriority.Loaded);
+            }
+
+            return;
+        }
+
         if (activeIndex == _activeLyricIndex)
         {
             if (activeWaitChanged)
@@ -1416,35 +1423,34 @@ public partial class MainWindow : Window
         _isUserBrowsingLyrics = false;
         ApplyLyricBlockVisualState(activeIndex);
 
-        if (activeIndex >= 0 && activeIndex < Lyrics.SyncedLines.Count)
-        {
-            SetCompactLyricText(Lyrics.SyncedLines[activeIndex].Text);
-        }
-        else
-        {
-            SetCompactLyricText("Lyrics ready");
-        }
-
         Dispatcher.BeginInvoke(() => CenterActiveLyric(activeIndex), DispatcherPriority.Loaded);
     }
 
-    private void ApplyLyricBlockVisualState(int activeIndex)
+    private void ApplyLyricBlockVisualState(int activeIndex, bool isFullscreen = false)
     {
-        var shouldHidePreviousFinalLine = !_isUserBrowsingLyrics && activeIndex == _lyricBlocks.Count - 1;
-        var hasActiveWaitIndicator = !_isUserBrowsingLyrics && _activeLyricWaitIndicatorIndex >= 0;
-        for (var i = 0; i < _lyricBlocks.Count; i++)
+        var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
+        var isUserBrowsing = isFullscreen ? _isUserBrowsingFullscreenLyrics : _isUserBrowsingLyrics;
+        var activeWaitIndicatorIndex = isFullscreen ? _activeFullscreenLyricWaitIndicatorIndex : _activeLyricWaitIndicatorIndex;
+        var shouldHidePreviousFinalLine = !isFullscreen && !isUserBrowsing && activeIndex == blocks.Count - 1;
+        var hasActiveWaitIndicator = !isUserBrowsing && activeWaitIndicatorIndex >= 0;
+
+        for (var i = 0; i < blocks.Count; i++)
         {
-            var block = _lyricBlocks[i];
+            var block = blocks[i];
             var distance = activeIndex < 0 ? 4 : Math.Abs(i - activeIndex);
-            var isActive = !hasActiveWaitIndicator && i == activeIndex;
-            var targetOpacity = shouldHidePreviousFinalLine && i == activeIndex - 1
-                ? 0.0
-                : isActive ? 1.0 : hasActiveWaitIndicator && i == activeIndex ? 0.44 : distance == 1 ? 0.48 : distance == 2 ? 0.28 : 0.18;
-            var targetColor = isActive
-                ? Color.FromRgb(246, 249, 244)
-                : distance == 1
-                    ? Color.FromRgb(150, 158, 158)
-                    : Color.FromRgb(94, 101, 101);
+            var isActive = (!hasActiveWaitIndicator || isFullscreen) && i == activeIndex;
+            var targetOpacity = isFullscreen
+                ? isActive ? 1.0 : isUserBrowsing || i > activeIndex ? 0.35 : 0.0
+                : shouldHidePreviousFinalLine && i == activeIndex - 1
+                    ? 0.0
+                    : isActive ? 1.0 : hasActiveWaitIndicator && i == activeIndex ? 0.44 : distance == 1 ? 0.48 : distance == 2 ? 0.28 : 0.18;
+            var targetColor = isFullscreen
+                ? isActive ? Color.FromRgb(255, 255, 255) : Color.FromRgb(180, 185, 185)
+                : isActive
+                    ? Color.FromRgb(246, 249, 244)
+                    : distance == 1
+                        ? Color.FromRgb(150, 158, 158)
+                        : Color.FromRgb(94, 101, 101);
 
             if (block.Foreground is SolidColorBrush existingBrush && !existingBrush.IsFrozen)
             {
@@ -1456,18 +1462,20 @@ public partial class MainWindow : Window
             }
 
             block.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
-            AnimateDouble(block, OpacityProperty, targetOpacity, 380);
+            AnimateDouble(block, OpacityProperty, targetOpacity, isFullscreen && isUserBrowsing ? 150 : 380);
         }
     }
 
-    private void CenterActiveLyric(int activeIndex)
+    private void CenterActiveLyric(int activeIndex, bool isFullscreen = false)
     {
-        if (activeIndex < 0 || activeIndex >= _lyricBlocks.Count || LyricsScrollViewer.ViewportHeight <= 1)
+        var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
+        var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
+        if (activeIndex < 0 || activeIndex >= blocks.Count || scrollViewer.ViewportHeight <= 1)
         {
             return;
         }
 
-        CenterLyricsElement(_lyricBlocks[activeIndex]);
+        CenterLyricsElement(blocks[activeIndex], isFullscreen);
     }
 
     private void CenterActiveLyricWaitIndicator()
@@ -1484,56 +1492,80 @@ public partial class MainWindow : Window
             DispatcherPriority.Loaded);
     }
 
-    private void CenterLyricsElement(FrameworkElement element)
+    private void CenterLyricsElement(FrameworkElement element, bool isFullscreen = false)
     {
-        if (LyricsScrollViewer.ViewportHeight <= 1)
+        var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
+        var stackPanel = isFullscreen ? FullscreenLyricsStackPanel : LyricsStackPanel;
+        if (scrollViewer.ViewportHeight <= 1)
         {
             return;
         }
 
         try
         {
-            LyricsStackPanel.UpdateLayout();
-            var elementTop = element.TransformToVisual(LyricsStackPanel).Transform(new Point(0, 0)).Y;
+            var artCenterY = isFullscreen ? GetCurrentArtCenterY() : 0;
+            stackPanel.UpdateLayout();
+            var elementTop = element.TransformToVisual(stackPanel).Transform(new Point(0, 0)).Y;
             var elementExtent = element.ActualHeight;
-            var viewport = LyricsScrollViewer.ViewportHeight;
-            var max = GetLyricsScrollMaxOffset();
-            var target = LyricsStackVerticalPadding + elementTop + (elementExtent * 0.5) - (viewport * 0.43);
-            AnimateLyricsScrollTo(Math.Clamp(target, 0, max));
+            var max = GetLyricsScrollMaxOffset(isFullscreen);
+            var target = isFullscreen
+                ? elementTop + (elementExtent * 0.5) - artCenterY
+                : LyricsStackVerticalPadding + elementTop + (elementExtent * 0.5) - (scrollViewer.ViewportHeight * 0.43);
+            AnimateLyricsScrollTo(Math.Clamp(target, 0, max), isFullscreen);
         }
         catch (InvalidOperationException)
         {
         }
     }
 
-    private void SetCompactLyricText(string text)
-    {
-    }
-
     private void LyricsViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Lyrics.Status is not (LyricsStatus.Synced or LyricsStatus.Plain) || _lyricBlocks.Count == 0)
+        BrowseLyrics(e, isFullscreen: false);
+    }
+
+    private void BrowseLyrics(MouseWheelEventArgs e, bool isFullscreen)
+    {
+        var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
+        if (Lyrics.Status is not (LyricsStatus.Synced or LyricsStatus.Plain) || blocks.Count == 0)
         {
             return;
         }
 
         e.Handled = true;
-        _isUserBrowsingLyrics = true;
         StopLyricsScrollAnimation();
 
-        if (Lyrics.Status == LyricsStatus.Synced)
+        if (isFullscreen)
         {
-            ApplyLyricBlockVisualState(_activeLyricIndex);
+            _isUserBrowsingFullscreenLyrics = true;
+            _fullscreenLyricsInactivityTimer.Stop();
+            _fullscreenLyricsInactivityTimer.Start();
+            ApplyLyricBlockVisualState(_activeFullscreenLyricIndex, isFullscreen: true);
+        }
+        else
+        {
+            _isUserBrowsingLyrics = true;
+            if (Lyrics.Status == LyricsStatus.Synced)
+            {
+                ApplyLyricBlockVisualState(_activeLyricIndex);
+            }
         }
 
-        var target = LyricsScrollViewer.VerticalOffset + (e.Delta > 0 ? -42 : 42);
-        var max = GetLyricsScrollMaxOffset();
-        LyricsScrollViewer.ScrollToVerticalOffset(Math.Clamp(target, 0, max));
+        var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
+        var step = isFullscreen ? 60 : 42;
+        var target = scrollViewer.VerticalOffset + (e.Delta > 0 ? -step : step);
+        scrollViewer.ScrollToVerticalOffset(Math.Clamp(target, 0, GetLyricsScrollMaxOffset(isFullscreen)));
     }
 
-    private void AnimateLyricsScrollTo(double target)
+    private void AnimateLyricsScrollTo(double target, bool isFullscreen = false)
     {
-        _lyricsScrollTarget = Math.Clamp(target, 0, GetLyricsScrollMaxOffset());
+        if (isFullscreen)
+        {
+            _fullscreenLyricsScrollTarget = Math.Clamp(target, 0, GetLyricsScrollMaxOffset(isFullscreen: true));
+        }
+        else
+        {
+            _lyricsScrollTarget = Math.Clamp(target, 0, GetLyricsScrollMaxOffset());
+        }
 
         if (!_isLyricsScrollAnimating)
         {
@@ -1589,7 +1621,7 @@ public partial class MainWindow : Window
         else
         {
             var current = FullscreenLyricsScrollViewer.VerticalOffset;
-            _fullscreenLyricsScrollTarget = Math.Clamp(_fullscreenLyricsScrollTarget, 0, GetFullscreenLyricsScrollMaxOffset());
+            _fullscreenLyricsScrollTarget = Math.Clamp(_fullscreenLyricsScrollTarget, 0, GetLyricsScrollMaxOffset(isFullscreen: true));
             var remaining = _fullscreenLyricsScrollTarget - current;
 
             if (Math.Abs(remaining) < 0.3)
@@ -1604,19 +1636,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private double GetLyricsScrollMaxOffset()
+    private double GetLyricsScrollMaxOffset(bool isFullscreen = false)
     {
-        var max = Math.Max(0, LyricsScrollViewer.ExtentHeight - LyricsScrollViewer.ViewportHeight);
-        if (_lyricsFooterPanel is null || LyricsScrollViewer.ViewportHeight <= 1)
+        var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
+        var stackPanel = isFullscreen ? FullscreenLyricsStackPanel : LyricsStackPanel;
+        var footerPanel = isFullscreen ? _fullscreenLyricsFooterPanel : _lyricsFooterPanel;
+        var max = Math.Max(0, scrollViewer.ExtentHeight - scrollViewer.ViewportHeight);
+        if (footerPanel is null || scrollViewer.ViewportHeight <= 1)
         {
             return max;
         }
 
         try
         {
-            LyricsStackPanel.UpdateLayout();
-            var footerTop = _lyricsFooterPanel.TransformToAncestor(LyricsStackPanel).Transform(new Point(0, 0)).Y;
-            return Math.Clamp(footerTop - 12, 0, max);
+            var topOffset = isFullscreen ? GetCurrentArtCenterY() : 12;
+            stackPanel.UpdateLayout();
+            var footerTop = footerPanel.TransformToAncestor(stackPanel).Transform(new Point(0, 0)).Y;
+            return Math.Clamp(footerTop - topOffset, 0, max);
         }
         catch (InvalidOperationException)
         {
@@ -1650,27 +1686,6 @@ public partial class MainWindow : Window
         {
         }
         return 430.0;
-    }
-
-    private double GetFullscreenLyricsScrollMaxOffset()
-    {
-        var max = Math.Max(0, FullscreenLyricsScrollViewer.ExtentHeight - FullscreenLyricsScrollViewer.ViewportHeight);
-        if (_fullscreenLyricsFooterPanel is null || FullscreenLyricsScrollViewer.ViewportHeight <= 1)
-        {
-            return max;
-        }
-
-        try
-        {
-            var artCenterY = GetCurrentArtCenterY();
-            FullscreenLyricsStackPanel.UpdateLayout();
-            var footerTop = _fullscreenLyricsFooterPanel.TransformToAncestor(FullscreenLyricsStackPanel).Transform(new Point(0, 0)).Y;
-            return Math.Clamp(footerTop - artCenterY, 0, max);
-        }
-        catch (InvalidOperationException)
-        {
-            return max;
-        }
     }
 
     private static void AnimateDouble(DependencyObject target, DependencyProperty property, double value, int milliseconds)
@@ -2307,23 +2322,62 @@ public partial class MainWindow : Window
 
     private void SetTransportEnabled(bool isEnabled)
     {
-        SetControlDisabledState(PlayPauseButton, isEnabled);
-        SetControlDisabledState(ExpandedPlayPauseButton, isEnabled);
-        SetControlDisabledState(LyricsPlayPauseButton, isEnabled);
-        SetControlDisabledState(NextButton, isEnabled);
-        SetControlDisabledState(ExpandedNextButton, isEnabled);
-        SetControlDisabledState(LyricsNextButton, isEnabled);
-        SetControlDisabledState(PreviousButton, isEnabled);
-        SetControlDisabledState(ExpandedPreviousButton, isEnabled);
-        SetControlDisabledState(LyricsPreviousButton, isEnabled);
-        SetControlDisabledState(ProgressSlider, isEnabled);
-        SetControlDisabledState(ExpandedProgressSlider, isEnabled);
-        SetControlDisabledState(LyricsProgressSlider, isEnabled);
+        foreach (var control in PlayPauseButtons.Cast<FrameworkElement>()
+                     .Concat(NextButtons)
+                     .Concat(PreviousButtons)
+                     .Concat(ProgressSliders))
+        {
+            SetControlDisabledState(control, isEnabled);
+        }
+
         if (!isEnabled)
         {
-            PlayPauseButton.ToolTip = "Play";
-            ExpandedPlayPauseButton.ToolTip = "Play";
-            LyricsPlayPauseButton.ToolTip = "Play";
+            foreach (var button in PlayPauseButtons)
+            {
+                button.ToolTip = "Play";
+            }
+        }
+    }
+
+    private void RenderSyncedLyrics(
+        Panel panel,
+        ICollection<TextBlock> blocks,
+        ICollection<LyricWaitIndicator> waitIndicators,
+        bool isFullscreen)
+    {
+        for (var i = 0; i < Lyrics.SyncedLines.Count; i++)
+        {
+            var line = Lyrics.SyncedLines[i];
+            var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
+            AddLyricWaitIndicatorIfNeeded(i, previousLineTime, line.Time, panel, waitIndicators, isFullscreen);
+            AddLyricBlock(
+                panel,
+                blocks,
+                line.Text,
+                isFullscreen ? 38 : 22,
+                isFullscreen ? 0.35 : 0.30,
+                isFullscreen ? new Thickness(0, 22, 0, 22) : new Thickness(0, 13, 0, 13),
+                isFullscreen ? Color.FromRgb(150, 158, 158) : Color.FromRgb(124, 132, 132));
+        }
+    }
+
+    private void RenderPlainLyrics(Panel panel, ICollection<TextBlock> blocks, bool isFullscreen)
+    {
+        foreach (var line in Lyrics.PlainLines)
+        {
+            AddLyricBlock(
+                panel,
+                blocks,
+                line,
+                isFullscreen ? 32 : 19,
+                isFullscreen ? 0.70 : 0.76,
+                isFullscreen ? new Thickness(0, 22, 0, 22) : new Thickness(0, 13, 0, 13),
+                isFullscreen ? Color.FromRgb(150, 158, 158) : Color.FromRgb(124, 132, 132));
+        }
+
+        if (!isFullscreen)
+        {
+            SetPlainLyricStyle(blocks);
         }
     }
 
@@ -2348,10 +2402,11 @@ public partial class MainWindow : Window
         if (!_volumeService.IsAvailable) return;
         _volumeUpdating = true;
         var vol = GetDisplayedVolumeValue();
-        CompactVolumeSlider.Value = vol;
-        ExpandedVolumeSlider.Value = vol;
-        LyricsVolumeSlider.Value = vol;
-        FullscreenVolumeSlider.Value = vol;
+        foreach (var slider in VolumeSliders)
+        {
+            slider.Value = vol;
+        }
+
         _volumeUpdating = false;
         UpdateVolumeIcon();
         RefreshAllVolumeToolTips();
@@ -2363,10 +2418,11 @@ public partial class MainWindow : Window
         _volumeService.ToggleMute();
         _volumeUpdating = true;
         var vol = GetDisplayedVolumeValue();
-        CompactVolumeSlider.Value = vol;
-        ExpandedVolumeSlider.Value = vol;
-        LyricsVolumeSlider.Value = vol;
-        FullscreenVolumeSlider.Value = vol;
+        foreach (var slider in VolumeSliders)
+        {
+            slider.Value = vol;
+        }
+
         _volumeUpdating = false;
         UpdateVolumeIcon();
         RefreshAllVolumeToolTips();
@@ -2387,14 +2443,13 @@ public partial class MainWindow : Window
             _volumeService.IsMuted = false;
         }
         
-        if (sender != CompactVolumeSlider && CompactVolumeSlider != null) 
-            CompactVolumeSlider.Value = val;
-        if (sender != ExpandedVolumeSlider && ExpandedVolumeSlider != null) 
-            ExpandedVolumeSlider.Value = val;
-        if (sender != LyricsVolumeSlider && LyricsVolumeSlider != null) 
-            LyricsVolumeSlider.Value = val;
-        if (sender != FullscreenVolumeSlider && FullscreenVolumeSlider != null)
-            FullscreenVolumeSlider.Value = val;
+        foreach (var slider in VolumeSliders)
+        {
+            if (!ReferenceEquals(sender, slider))
+            {
+                slider.Value = val;
+            }
+        }
             
         _volumeUpdating = false;
         UpdateVolumeIcon();
@@ -2407,24 +2462,9 @@ public partial class MainWindow : Window
 
     private void RefreshAllVolumeToolTips()
     {
-        if (CompactVolumeSlider is not null)
+        foreach (var slider in VolumeSliders)
         {
-            UpdateVolumeToolTip(CompactVolumeSlider);
-        }
-
-        if (ExpandedVolumeSlider is not null)
-        {
-            UpdateVolumeToolTip(ExpandedVolumeSlider);
-        }
-
-        if (LyricsVolumeSlider is not null)
-        {
-            UpdateVolumeToolTip(LyricsVolumeSlider);
-        }
-
-        if (FullscreenVolumeSlider is not null)
-        {
-            UpdateVolumeToolTip(FullscreenVolumeSlider);
+            UpdateVolumeToolTip(slider);
         }
     }
 
@@ -2443,11 +2483,11 @@ public partial class MainWindow : Window
             <= 66 => "vol_mid.png",
             _ => "vol_high.png"
         };
-        var source = GetSiteImageSource($"res/img/{icon}");
-        SetVolumeIcon(CompactVolumeButton, source);
-        SetVolumeIcon(ExpandedVolumeButton, source);
-        SetVolumeIcon(LyricsVolumeButton, source);
-        SetVolumeIcon(FullscreenVolumeButton, source);
+        var source = GetSiteImageSource($"Resources/Images/{icon}");
+        foreach (var button in VolumeButtons)
+        {
+            SetVolumeIcon(button, source);
+        }
     }
 
     private static void SetVolumeIcon(Button button, ImageSource source)
@@ -2463,10 +2503,10 @@ public partial class MainWindow : Window
     {
         if (show && (!Snapshot.HasSession || !_volumeService.IsAvailable)) return;
         var vis = show ? Visibility.Visible : Visibility.Collapsed;
-        CompactVolumeSlider.Visibility = vis;
-        ExpandedVolumeSlider.Visibility = vis;
-        LyricsVolumeSlider.Visibility = vis;
-        FullscreenVolumeSlider.Visibility = vis;
+        foreach (var slider in VolumeSliders)
+        {
+            slider.Visibility = vis;
+        }
     }
 
     // ───── Last.fm Info ─────
@@ -2520,10 +2560,10 @@ public partial class MainWindow : Window
 
     private void ShowInfoButtons()
     {
-        CompactInfoButton.Visibility = Visibility.Visible;
-        ExpandedInfoButton.Visibility = Visibility.Visible;
-        LyricsInfoButton.Visibility = Visibility.Visible;
-        FullscreenInfoButton.Visibility = Visibility.Visible;
+        foreach (var button in InfoButtons)
+        {
+            button.Visibility = Visibility.Visible;
+        }
     }
 
     private void UpdateScrobblingForSnapshot(MediaSnapshot snapshot, bool force = false)
@@ -2791,7 +2831,7 @@ public partial class MainWindow : Window
                 Header = $"View \"{lastFmInfo.TrackName}\" on Last.fm",
                 Icon = new Image
                 {
-                    Source = GetSiteImageSource("res/img/lastfm.png"),
+                    Source = GetSiteImageSource("Resources/Images/lastfm.png"),
                     Width = 16,
                     Height = 16
                 }
@@ -2811,7 +2851,7 @@ public partial class MainWindow : Window
         var settingsItem = new MenuItem
         {
             Header = "Settings",
-            Icon = CreateMenuIcon("res/settings.ico")
+            Icon = CreateMenuIcon("Resources/settings.ico")
         };
         settingsItem.Click += (_, _) => ShowSettingsWindow();
         menu.Items.Add(settingsItem);
@@ -2819,7 +2859,7 @@ public partial class MainWindow : Window
         var aboutItem = new MenuItem
         {
             Header = "About",
-            Icon = CreateMenuIcon("res/img/info.ico")
+            Icon = CreateMenuIcon("Resources/Images/info.ico")
         };
         aboutItem.Click += (_, _) => ShowAboutWindow();
         menu.Items.Add(aboutItem);
@@ -2912,7 +2952,7 @@ public partial class MainWindow : Window
 
     private void InitializeTrayIcon()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "res", "ico.ico");
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Resources", "ico.ico");
         _notifyIcon = new System.Windows.Forms.NotifyIcon
         {
             Text = AppMetadata.Name,
@@ -2939,7 +2979,7 @@ public partial class MainWindow : Window
         var settingsItem = new MenuItem
         {
             Header = "Settings",
-            Icon = CreateMenuIcon("res/settings.ico")
+            Icon = CreateMenuIcon("Resources/settings.ico")
         };
         settingsItem.Click += (_, _) =>
         {
@@ -2950,7 +2990,7 @@ public partial class MainWindow : Window
         var exitItem = new MenuItem
         {
             Header = "Exit",
-            Icon = CreateMenuIcon("res/exit.ico")
+            Icon = CreateMenuIcon("Resources/exit.ico")
         };
         exitItem.Click += (_, _) => ExitApplication();
 
@@ -2994,7 +3034,7 @@ public partial class MainWindow : Window
         var item = new MenuItem
         {
             Header = $"{AppMetadata.Name} {AppMetadata.Version}",
-            Icon = CreateMenuIcon("res/ico.ico"),
+            Icon = CreateMenuIcon("Resources/ico.ico"),
             FontWeight = FontWeights.Bold,
             Focusable = false,
             IsTabStop = false,
@@ -3478,7 +3518,7 @@ public partial class MainWindow : Window
             AnimateElementOpacity(FullscreenLyricsPanel, 1, 300);
             
             RenderFullscreenLyricsState();
-            UpdateFullscreenSyncedLyricsUi(GetCurrentPosition());
+            UpdateSyncedLyricsUi(GetCurrentPosition(), isFullscreen: true);
         }
         else
         {
@@ -3506,20 +3546,38 @@ public partial class MainWindow : Window
         
         ApplyArtworkTint(Snapshot.CoverArt);
         
-        SetControlDisabledState(FullscreenPreviousButton, Snapshot.CanPrevious);
-        SetControlDisabledState(FullscreenNextButton, Snapshot.CanNext);
+        foreach (var button in PreviousButtons)
+        {
+            SetControlDisabledState(button, Snapshot.CanPrevious);
+        }
+
+        foreach (var button in NextButtons)
+        {
+            SetControlDisabledState(button, Snapshot.CanNext);
+        }
+
         var canPlayPause = Snapshot.CanPlay || Snapshot.CanPause;
-        SetControlDisabledState(FullscreenPlayPauseButton, canPlayPause);
+        foreach (var button in PlayPauseButtons)
+        {
+            SetControlDisabledState(button, canPlayPause);
+        }
+
         SetPlayPauseButtonState(Snapshot.IsPlaying);
         
         var canSeek = Snapshot.CanSeek && Snapshot.Duration > TimeSpan.Zero;
-        SetControlDisabledState(FullscreenProgressSlider, canSeek);
-        FullscreenProgressSlider.Maximum = Math.Max(1, Snapshot.Duration.TotalSeconds);
+        foreach (var slider in ProgressSliders)
+        {
+            SetControlDisabledState(slider, canSeek);
+            slider.Maximum = Math.Max(1, Snapshot.Duration.TotalSeconds);
+        }
         
         if (_volumeService.IsAvailable)
         {
             _volumeUpdating = true;
-            FullscreenVolumeSlider.Value = GetDisplayedVolumeValue();
+            foreach (var slider in VolumeSliders)
+            {
+                slider.Value = GetDisplayedVolumeValue();
+            }
             _volumeUpdating = false;
             UpdateVolumeIcon();
         }
@@ -3541,75 +3599,34 @@ public partial class MainWindow : Window
         _fullscreenLyricsBottomSpacer = null;
         
         var status = Lyrics.Status;
-        var artCenterY = GetCurrentArtCenterY();
-        
-        if (status == LyricsStatus.Synced)
+        if (status is LyricsStatus.Synced or LyricsStatus.Plain)
         {
             FullscreenLyricsMessagePanel.Visibility = Visibility.Collapsed;
-            
-            // Add top spacer
-            _fullscreenLyricsTopSpacer = new Border { Height = artCenterY, Opacity = 0, IsHitTestVisible = false };
-            FullscreenLyricsStackPanel.Children.Add(_fullscreenLyricsTopSpacer);
+            _fullscreenLyricsTopSpacer = AddFullscreenLyricsSpacer();
 
-            for (var i = 0; i < Lyrics.SyncedLines.Count; i++)
+            if (status == LyricsStatus.Synced)
             {
-                var line = Lyrics.SyncedLines[i];
-                var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
-                AddLyricWaitIndicatorIfNeeded(
-                    i,
-                    previousLineTime,
-                    line.Time,
-                    FullscreenLyricsStackPanel,
-                    _fullscreenLyricWaitIndicators,
-                    isFullscreen: true);
-                AddLyricBlock(
-                    FullscreenLyricsStackPanel,
-                    _fullscreenLyricBlocks,
-                    line.Text,
-                    38,
-                    0.35,
-                    new Thickness(0, 22, 0, 22),
-                    Color.FromRgb(150, 158, 158));
+                RenderSyncedLyrics(FullscreenLyricsStackPanel, _fullscreenLyricBlocks, _fullscreenLyricWaitIndicators, isFullscreen: true);
+            }
+            else
+            {
+                RenderPlainLyrics(FullscreenLyricsStackPanel, _fullscreenLyricBlocks, isFullscreen: true);
             }
             
             AddFullscreenLyricsInfoFooter();
-            
-            // Add bottom spacer
-            _fullscreenLyricsBottomSpacer = new Border { Height = artCenterY, Opacity = 0, IsHitTestVisible = false };
-            FullscreenLyricsStackPanel.Children.Add(_fullscreenLyricsBottomSpacer);
-            return;
-        }
-        
-        if (status == LyricsStatus.Plain)
-        {
-            FullscreenLyricsMessagePanel.Visibility = Visibility.Collapsed;
-            
-            // Add top spacer
-            _fullscreenLyricsTopSpacer = new Border { Height = artCenterY, Opacity = 0, IsHitTestVisible = false };
-            FullscreenLyricsStackPanel.Children.Add(_fullscreenLyricsTopSpacer);
-
-            foreach (var line in Lyrics.PlainLines)
-            {
-                AddLyricBlock(
-                    FullscreenLyricsStackPanel,
-                    _fullscreenLyricBlocks,
-                    line,
-                    32,
-                    0.70,
-                    new Thickness(0, 22, 0, 22),
-                    Color.FromRgb(150, 158, 158));
-            }
-            
-            AddFullscreenLyricsInfoFooter();
-            
-            // Add bottom spacer
-            _fullscreenLyricsBottomSpacer = new Border { Height = artCenterY, Opacity = 0, IsHitTestVisible = false };
-            FullscreenLyricsStackPanel.Children.Add(_fullscreenLyricsBottomSpacer);
+            _fullscreenLyricsBottomSpacer = AddFullscreenLyricsSpacer();
             return;
         }
 
         FullscreenLyricsMessagePanel.Visibility = Visibility.Visible;
         FullscreenLyricsMessageText.Text = Lyrics.Message;
+    }
+
+    private Border AddFullscreenLyricsSpacer()
+    {
+        var spacer = new Border { Height = GetCurrentArtCenterY(), Opacity = 0, IsHitTestVisible = false };
+        FullscreenLyricsStackPanel.Children.Add(spacer);
+        return spacer;
     }
 
     private bool UpdateFullscreenLyricWaitIndicators(TimeSpan position)
@@ -3623,162 +3640,26 @@ public partial class MainWindow : Window
             isFullscreen: true);
     }
 
-    private void CenterFullscreenElement(FrameworkElement element)
-    {
-        if (FullscreenLyricsScrollViewer.ViewportHeight <= 1)
-        {
-            return;
-        }
-
-        try
-        {
-            var artCenterY = GetCurrentArtCenterY();
-            FullscreenLyricsStackPanel.UpdateLayout();
-            var elementTop = element.TransformToVisual(FullscreenLyricsStackPanel).Transform(new Point(0, 0)).Y;
-            var elementExtent = element.ActualHeight;
-            var max = GetFullscreenLyricsScrollMaxOffset();
-            
-            var target = elementTop + (elementExtent * 0.5) - artCenterY;
-            
-            _fullscreenLyricsScrollTarget = Math.Clamp(target, 0, max);
-            if (!_isLyricsScrollAnimating)
-            {
-                StartLyricsScrollAnimation();
-            }
-        }
-        catch (InvalidOperationException)
-        {
-        }
-    }
-
-    private void UpdateFullscreenSyncedLyricsUi(TimeSpan position)
-    {
-        if (Lyrics.Status != LyricsStatus.Synced || Lyrics.SyncedLines.Count == 0)
-        {
-            return;
-        }
-
-        var stabilizedPosition = StabilizeLyricPosition(position);
-        var activeWaitChanged = UpdateFullscreenLyricWaitIndicators(stabilizedPosition);
-
-        if (activeWaitChanged && _activeFullscreenLyricWaitIndicatorIndex >= 0)
-        {
-            Dispatcher.BeginInvoke(() => CenterFullscreenElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element), DispatcherPriority.Loaded);
-        }
-
-        var activeIndex = FindActiveLyricIndex(Lyrics.SyncedLines, stabilizedPosition + LyricActivationLead);
-        if (activeIndex == _activeFullscreenLyricIndex)
-        {
-            return;
-        }
-
-        _isUserBrowsingFullscreenLyrics = false;
-        _fullscreenLyricsInactivityTimer.Stop();
-        _activeFullscreenLyricIndex = activeIndex;
-        ApplyFullscreenLyricBlockVisualState(activeIndex);
-
-        if (_activeFullscreenLyricWaitIndicatorIndex < 0)
-        {
-            Dispatcher.BeginInvoke(() => CenterFullscreenActiveLyric(activeIndex), DispatcherPriority.Loaded);
-        }
-    }
-
-    private void ApplyFullscreenLyricBlockVisualState(int activeIndex)
-    {
-        for (var i = 0; i < _fullscreenLyricBlocks.Count; i++)
-        {
-            var block = _fullscreenLyricBlocks[i];
-            var isActive = i == activeIndex;
-            
-            double targetOpacity = 0.0;
-            if (isActive)
-            {
-                targetOpacity = 1.0;
-            }
-            else
-            {
-                if (_isUserBrowsingFullscreenLyrics)
-                {
-                    targetOpacity = 0.35;
-                }
-                else
-                {
-                    if (i > activeIndex)
-                    {
-                        targetOpacity = 0.35;
-                    }
-                    else
-                    {
-                        targetOpacity = 0.0;
-                    }
-                }
-            }
-
-            var targetColor = isActive
-                ? Color.FromRgb(255, 255, 255)
-                : Color.FromRgb(180, 185, 185);
-
-            if (block.Foreground is SolidColorBrush existingBrush && !existingBrush.IsFrozen)
-            {
-                AnimateBrushColor(existingBrush, targetColor);
-            }
-            else
-            {
-                block.Foreground = new SolidColorBrush(targetColor);
-            }
-
-            block.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
-            AnimateDouble(block, OpacityProperty, targetOpacity, _isUserBrowsingFullscreenLyrics ? 150 : 380);
-        }
-    }
-
-    private void CenterFullscreenActiveLyric(int activeIndex)
-    {
-        if (activeIndex < 0 || activeIndex >= _fullscreenLyricBlocks.Count || FullscreenLyricsScrollViewer.ViewportHeight <= 1)
-        {
-            return;
-        }
-
-        CenterFullscreenElement(_fullscreenLyricBlocks[activeIndex]);
-    }
-
     private void FullscreenLyricsViewport_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (Lyrics.Status is not (LyricsStatus.Synced or LyricsStatus.Plain) || _fullscreenLyricBlocks.Count == 0)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        _isUserBrowsingFullscreenLyrics = true;
-        _fullscreenLyricsInactivityTimer.Stop();
-        _fullscreenLyricsInactivityTimer.Start();
-        
-        StopLyricsScrollAnimation();
-
-        ApplyFullscreenLyricBlockVisualState(_activeFullscreenLyricIndex);
-
-        var target = FullscreenLyricsScrollViewer.VerticalOffset + (e.Delta > 0 ? -60 : 60);
-        var max = GetFullscreenLyricsScrollMaxOffset();
-        FullscreenLyricsScrollViewer.ScrollToVerticalOffset(Math.Clamp(target, 0, max));
+        BrowseLyrics(e, isFullscreen: true);
     }
 
     private void FullscreenLayout_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (_isFullscreen && _isFullscreenLyrics)
         {
-            // GetCurrentArtCenterY will dynamically update the spacer heights if they changed
-            var artCenterY = GetCurrentArtCenterY();
-            
+            GetCurrentArtCenterY();
+
             if (!_isUserBrowsingFullscreenLyrics)
             {
                 if (_activeFullscreenLyricWaitIndicatorIndex >= 0 && _fullscreenLyricWaitIndicators.Count > _activeFullscreenLyricWaitIndicatorIndex)
                 {
-                    CenterFullscreenElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element);
+                    CenterLyricsElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element, isFullscreen: true);
                 }
                 else if (_activeFullscreenLyricIndex >= 0 && _fullscreenLyricBlocks.Count > _activeFullscreenLyricIndex)
                 {
-                    CenterFullscreenActiveLyric(_activeFullscreenLyricIndex);
+                    CenterActiveLyric(_activeFullscreenLyricIndex, isFullscreen: true);
                 }
             }
         }

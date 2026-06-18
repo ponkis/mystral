@@ -32,8 +32,8 @@ public partial class SettingsWindow : Window
         Debug.Assert(IsNewerRelease("v1.1.4", "1.1.4-dev"));
         Debug.Assert(!IsNewerRelease("v1.1.4", "1.1.4"));
 #endif
-        SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
-        StatusIcon.Source = IconImageSource.LoadBestFitFrame("res/img/info.ico", 16);
+        SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
+        StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
 
@@ -76,17 +76,17 @@ public partial class SettingsWindow : Window
         if (selectedItem == LastFmCategoryItem)
         {
             SettingsTitleText.Text = "Last.fm";
-            SettingsHeaderIcon.Source = IconImageSource.LoadSiteImage("res/img/lastfm.png");
+            SettingsHeaderIcon.Source = IconImageSource.LoadSiteImage("Resources/Images/lastfm.png");
         }
         else if (selectedItem == BehaviorCategoryItem)
         {
             SettingsTitleText.Text = "Behavior";
-            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         }
         else if (selectedItem == HistoryCategoryItem)
         {
             SettingsTitleText.Text = "Playback History";
-            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("res/settings.ico", 16);
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
             LoadHistory();
         }
     }
@@ -260,8 +260,8 @@ public partial class SettingsWindow : Window
             ? System.Windows.Media.Brushes.DarkRed
             : System.Windows.Media.Brushes.DimGray;
         StatusIcon.Source = isWarning
-            ? IconImageSource.LoadSiteImage("res/img/WarningIcon.png")
-            : IconImageSource.LoadBestFitFrame("res/img/info.ico", 16);
+            ? IconImageSource.LoadSiteImage("Resources/Images/WarningIcon.png")
+            : IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
     }
 
     private void UpdateDirtyStatus()
@@ -607,7 +607,7 @@ public partial class SettingsWindow : Window
             {
                 Background = new System.Windows.Media.ImageBrush
                 {
-                    ImageSource = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://siteoforigin:,,,/res/img/dialog_background.png")),
+                    ImageSource = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://siteoforigin:,,,/Resources/Images/dialog_background.png")),
                     Stretch = System.Windows.Media.Stretch.Fill
                 }
             };
@@ -619,7 +619,7 @@ public partial class SettingsWindow : Window
             contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var iconImage = new Image
             {
-                Source = IconImageSource.LoadBestFitFrame("res/ico.ico", 32),
+                Source = IconImageSource.LoadBestFitFrame("Resources/ico.ico", 32),
                 Width = 32,
                 Height = 32,
                 VerticalAlignment = VerticalAlignment.Top

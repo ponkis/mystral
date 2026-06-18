@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Mystral"
-        Icon="pack://siteoforigin:,,,/res/ico.ico"
+        Icon="pack://siteoforigin:,,,/Resources/ico.ico"
         Width="352"
         Height="172"
         MinWidth="218"
@@ -116,20 +116,12 @@
                             </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonShell" Property="BorderBrush" Value="#E7FFFFFF" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ButtonShell" Property="Opacity" Value="0.78" />
-                            </MultiTrigger>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonShell" Property="Opacity" Value="0.38" />
                                 <Setter Property="Cursor" Value="No" />
@@ -246,14 +238,14 @@
                                                 <Image x:Name="ThumbImage"
                                                        Width="16"
                                                        Height="9"
-                                                       Source="pack://siteoforigin:,,,/res/img/seekhandle.png"
+                                                       Source="pack://siteoforigin:,,,/Resources/Images/seekhandle.png"
                                                        RenderOptions.BitmapScalingMode="HighQuality" />
                                                 <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="ThumbImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/seekhandle_hover.png" />
+                                                        <Setter TargetName="ThumbImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/seekhandle_hover.png" />
                                                     </Trigger>
                                                     <Trigger Property="IsDragging" Value="True">
-                                                        <Setter TargetName="ThumbImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/seekhandle_pressed.png" />
+                                                        <Setter TargetName="ThumbImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/seekhandle_pressed.png" />
                                                     </Trigger>
                                                 </ControlTemplate.Triggers>
                                             </ControlTemplate>
@@ -292,7 +284,7 @@
 
         <ControlTemplate x:Key="VolumeButtonTemplate" TargetType="Button">
             <Image x:Name="VolumeIcon"
-                   Source="pack://siteoforigin:,,,/res/img/vol_mid.png"
+                   Source="pack://siteoforigin:,,,/Resources/Images/vol_mid.png"
                    RenderOptions.BitmapScalingMode="HighQuality" />
         </ControlTemplate>
 
@@ -322,23 +314,15 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Image x:Name="ButtonImage"
-                               Source="pack://siteoforigin:,,,/res/img/PreviewPrevButton.png"
+                               Source="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButton.png"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/PreviewPrevButtonHover.png" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/PreviewPrevButtonPressed.png" />
-                            </MultiTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButtonHover.png" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewPrevButtonPressed.png" />
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonImage" Property="Opacity" Value="0.45" />
                                 <Setter Property="Cursor" Value="No" />
@@ -358,23 +342,15 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Image x:Name="ButtonImage"
-                               Source="pack://siteoforigin:,,,/res/img/PreviewNextButton.png"
+                               Source="pack://siteoforigin:,,,/Resources/Images/PreviewNextButton.png"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/PreviewNextButtonHover.png" />
-                            </MultiTrigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsPressed" Value="True" />
-                                    <Condition Property="Tag" Value="{x:Null}" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/res/img/PreviewNextButtonPressed.png" />
-                            </MultiTrigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewNextButtonHover.png" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonImage" Property="Source" Value="pack://siteoforigin:,,,/Resources/Images/PreviewNextButtonPressed.png" />
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonImage" Property="Opacity" Value="0.45" />
                                 <Setter Property="Cursor" Value="No" />
@@ -400,7 +376,7 @@
                         <Image x:Name="PlayPauseIcon"
                                Width="42"
                                Height="43"
-                               Source="pack://siteoforigin:,,,/res/img/play.png"
+                               Source="pack://siteoforigin:,,,/Resources/Images/play.png"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsEnabled" Value="False">
@@ -618,7 +594,7 @@
                                 </Border.Background>
                             </Border>
                             <Image x:Name="ArtPlaceholderText"
-                                   Source="pack://siteoforigin:,,,/res/img/unknown.png"
+                                   Source="pack://siteoforigin:,,,/Resources/Images/unknown.png"
                                    Stretch="UniformToFill"
                                    RenderOptions.BitmapScalingMode="HighQuality" />
                             <Image x:Name="ArtImage"
@@ -1142,7 +1118,7 @@
                                     ClipToBounds="True">
                                 <Grid SizeChanged="RoundedSurface_SizeChanged">
                                     <Image x:Name="LyricsHeaderArtPlaceholderText"
-                                           Source="pack://siteoforigin:,,,/res/img/unknown.png"
+                                           Source="pack://siteoforigin:,,,/Resources/Images/unknown.png"
                                            Stretch="UniformToFill"
                                            RenderOptions.BitmapScalingMode="HighQuality" />
                                     <Image x:Name="LyricsHeaderArtImage"
@@ -1231,7 +1207,7 @@
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"
                                            Stretch="None"
-                                           Source="pack://siteoforigin:,,,/res/img/WarningIcon.png"
+                                           Source="pack://siteoforigin:,,,/Resources/Images/WarningIcon.png"
                                            Visibility="Collapsed"
                                            RenderOptions.BitmapScalingMode="NearestNeighbor" />
 
@@ -1454,7 +1430,7 @@
                                          </Border>
                                          
                                          <Image x:Name="FullscreenArtPlaceholder"
-                                                Source="pack://siteoforigin:,,,/res/img/unknown.png"
+                                                Source="pack://siteoforigin:,,,/Resources/Images/unknown.png"
                                                 Stretch="UniformToFill"
                                                 RenderOptions.BitmapScalingMode="HighQuality" />
                                          <Image x:Name="FullscreenArtImage"
@@ -1660,7 +1636,7 @@
                                            HorizontalAlignment="Center"
                                            VerticalAlignment="Center"
                                            Stretch="None"
-                                           Source="pack://siteoforigin:,,,/res/img/WarningIcon.png"
+                                           Source="pack://siteoforigin:,,,/Resources/Images/WarningIcon.png"
                                            Visibility="Collapsed"
                                            RenderOptions.BitmapScalingMode="NearestNeighbor" />
 

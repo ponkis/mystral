@@ -11,7 +11,7 @@
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <AssemblyName>Mystral</AssemblyName>
     <RootNamespace>Mystral</RootNamespace>
-    <ApplicationIcon>res\ico.ico</ApplicationIcon>
+    <ApplicationIcon>Resources\ico.ico</ApplicationIcon>
     <Title>Mystral</Title>
     <Product>Mystral</Product>
     <Company>ponkis.xyz</Company>
@@ -25,16 +25,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="res\*.ico">
+    <Content Include="Resources\*.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="res\img\*.png">
+    <Content Include="Resources\Images\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="res\img\*.ico">
+    <Content Include="Resources\Images\*.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="res\Audio\*.wav">
+    <Content Include="Resources\Audio\*.wav">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

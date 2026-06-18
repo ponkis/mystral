@@ -176,4 +176,4 @@ artifacts\installer\Mystral-<version>-win-x64-setup.exe
 
 ## Runtime Assets
 
-All runtime assets are inside this project under `res`.
+All runtime assets are inside this project under `Resources`.

@@ -26,7 +26,7 @@ public partial class AppDialogWindow : Window
     {
         InitializeComponent();
         Title = title;
-        Icon = IconImageSource.LoadBestFitFrame("res/ico.ico", 16);
+        Icon = IconImageSource.LoadBestFitFrame("Resources/ico.ico", 16);
         DialogTitleText.Text = title;
         DialogIcon.Source = icon;
         ConfigureButtons(buttons);
@@ -59,7 +59,7 @@ public partial class AppDialogWindow : Window
         AppDialogWindow? dialog = null;
         dialog = new AppDialogWindow(
             $"About {AppMetadata.Name}",
-            IconImageSource.LoadBestFitFrame("res/ico.ico", 32),
+            IconImageSource.LoadBestFitFrame("Resources/ico.ico", 32),
             checkForUpdates is null
                 ? OkButtons()
                 :
@@ -162,7 +162,7 @@ public partial class AppDialogWindow : Window
 
         try
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "res", "Audio", fileName);
+            var path = Path.Combine(AppContext.BaseDirectory, "Resources", "Audio", fileName);
             if (File.Exists(path))
             {
                 new SoundPlayer(path).Play();
