@@ -47,6 +47,8 @@ dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj
 dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj --no-restore
 ```
 
+GitHub Actions runs the same core checks on pushes and pull requests in `.github\workflows\ci.yml`.
+
 If NuGet is unavailable but the SDK packs are already cached locally, restore from the local package cache:
 
 ```powershell
