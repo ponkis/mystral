@@ -377,8 +377,8 @@ public partial class MainWindow : Window
             _isBurnDiscDragging = true;
             EnableCompactBurnDiscOverflow();
             CompactBurnSlot.Height = BurnDiscMaxSurfaceHeight;
-            CompactBurnSlot.Cursor = Cursors.Hand;
-            Mouse.OverrideCursor = Cursors.Hand;
+            CompactBurnSlot.Cursor = Cursors.SizeAll;
+            Mouse.OverrideCursor = Cursors.SizeAll;
         }
 
         _burnDiscPullDistance = Math.Clamp(
