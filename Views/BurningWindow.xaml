@@ -1,0 +1,512 @@
+<Window x:Class="Mystral.Views.BurningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Mystral.Controls"
+        Title="Burn your own CD"
+        Icon="pack://siteoforigin:,,,/Resources/ico.ico"
+        Width="720"
+        Height="700"
+        MinWidth="720"
+        MinHeight="700"
+        MaxWidth="720"
+        MaxHeight="700"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        FontFamily="Segoe UI"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <DropShadowEffect x:Key="CardShadow"
+                              BlurRadius="24"
+                              ShadowDepth="0"
+                              Opacity="0.52"
+                              Color="#050708" />
+            <DropShadowEffect x:Key="TextShadow"
+                              BlurRadius="2"
+                              ShadowDepth="1"
+                              Opacity="0.48"
+                              Color="#000000" />
+
+            <Style x:Key="ChromeButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="28" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Foreground" Value="#F7FAF7" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Chrome"
+                                    Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#3CFFFFFF" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#52000000" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="AeroCommandButtonStyle" TargetType="Button">
+                <Setter Property="Height" Value="28" />
+                <Setter Property="MinWidth" Value="88" />
+                <Setter Property="Padding" Value="13,0" />
+                <Setter Property="Foreground" Value="#17242C" />
+                <Setter Property="BorderBrush" Value="#A64F7486" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Shell"
+                                    CornerRadius="4"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#F8FFFFFF" Offset="0" />
+                                        <GradientStop Color="#D9F3F8FA" Offset="0.48" />
+                                        <GradientStop Color="#A9B9D1DC" Offset="0.52" />
+                                        <GradientStop Color="#CFE7F0F4" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Shell" Property="BorderBrush" Value="#E75EACD4" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Shell" Property="Opacity" Value="0.78" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Shell" Property="Opacity" Value="0.42" />
+                                    <Setter Property="Cursor" Value="No" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="EditorTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Height" Value="29" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Padding" Value="7,1" />
+                <Setter Property="Foreground" Value="#202529" />
+                <Setter Property="Background" Value="#F8FFFFFF" />
+                <Setter Property="BorderBrush" Value="#8B7893A1" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="SelectionBrush" Value="#6BAEE8FF" />
+            </Style>
+
+            <Style x:Key="UploadTileStyle" TargetType="Button">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Background" Value="#EAF8FBFC" />
+                <Setter Property="BorderBrush" Value="#A65C7A89" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Tile"
+                                    CornerRadius="7"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <Grid>
+                                    <Border Height="46"
+                                            VerticalAlignment="Top"
+                                            CornerRadius="6,6,0,0"
+                                            IsHitTestVisible="False">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Color="#B9FFFFFF" Offset="0" />
+                                                <GradientStop Color="#00FFFFFF" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <ContentPresenter HorizontalAlignment="Stretch"
+                                                      VerticalAlignment="Stretch" />
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Tile" Property="BorderBrush" Value="#EF4C9DCC" />
+                                    <Setter TargetName="Tile" Property="Background" Value="#F6FFFFFF" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Tile" Property="Opacity" Value="0.76" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Margin="14">
+        <Border x:Name="RootCard"
+                CornerRadius="9"
+                BorderThickness="1"
+                BorderBrush="#A5DCE9EE"
+                Effect="{StaticResource CardShadow}"
+                ClipToBounds="True"
+                SizeChanged="RoundedSurface_SizeChanged">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop x:Name="CardTopStop" Color="#906F7D84" Offset="0" />
+                    <GradientStop x:Name="CardUpperStop" Color="#82576268" Offset="0.48" />
+                    <GradientStop x:Name="CardLowerStop" Color="#76343D42" Offset="0.53" />
+                    <GradientStop x:Name="CardBottomStop" Color="#84434E54" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+
+            <Grid x:Name="GlassSurface"
+                  ClipToBounds="True"
+                  SizeChanged="RoundedSurface_SizeChanged">
+                <Grid.Background>
+                    <RadialGradientBrush Center="0.8,1.1"
+                                         GradientOrigin="0.72,0.94"
+                                         RadiusX="0.86"
+                                         RadiusY="0.78">
+                        <GradientStop x:Name="GlowPrimaryStop" Color="#76E6F4FA" Offset="0" />
+                        <GradientStop x:Name="GlowSecondaryStop" Color="#1C8496A0" Offset="0.45" />
+                        <GradientStop Color="#00000000" Offset="1" />
+                    </RadialGradientBrush>
+                </Grid.Background>
+
+                <Image x:Name="BlurredCoverImage"
+                       Stretch="UniformToFill"
+                       Opacity="0.16"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="LowQuality">
+                    <Image.Effect>
+                        <BlurEffect Radius="24" KernelType="Gaussian" />
+                    </Image.Effect>
+                </Image>
+
+                <Rectangle Height="82"
+                           VerticalAlignment="Top"
+                           Opacity="0.52"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#E8FFFFFF" Offset="0" />
+                            <GradientStop Color="#4FFFFFFF" Offset="0.42" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border Margin="1"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="#35FFFFFF"
+                        IsHitTestVisible="False" />
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30" />
+                        <RowDefinition Height="190" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="58" />
+                    </Grid.RowDefinitions>
+
+                    <Grid x:Name="TitleBar"
+                          Grid.Row="0"
+                          Background="#12000000"
+                          MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Image Width="16"
+                               Height="16"
+                               Margin="10,0,0,0"
+                               VerticalAlignment="Center"
+                               Source="pack://siteoforigin:,,,/Resources/ico.ico"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Grid.Column="1"
+                                   Margin="7,0,0,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FCFEFC"
+                                   Effect="{StaticResource TextShadow}"
+                                   Text="Burn your own CD" />
+                        <Button Grid.Column="2"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="CloseButton_Click"
+                                ToolTip="Close">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Stroke="#F7FAF7"
+                                  StrokeThickness="1.8"
+                                  Data="M 1,1 L 10,10 M 10,1 L 1,10" />
+                        </Button>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            BorderBrush="#55FFFFFF"
+                            BorderThickness="0,1,0,1"
+                            Background="#36000000">
+                        <Grid Margin="22,10,24,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="194" />
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                             <controls:JewelCasePreview x:Name="JewelPreview"
+                                                       Width="189"
+                                                       Height="170"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       UploadCoverRequested="JewelPreview_UploadCoverRequested" />
+
+                            <StackPanel Grid.Column="2"
+                                        VerticalAlignment="Center">
+                                <TextBlock x:Name="PreviewTitleText"
+                                           FontSize="24"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FCFEFC"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                                <TextBlock x:Name="PreviewArtistText"
+                                           Margin="0,5,0,0"
+                                           FontSize="15"
+                                           FontWeight="SemiBold"
+                                           Foreground="#F0F5F1"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                                <TextBlock x:Name="PreviewAlbumText"
+                                           Margin="0,4,0,0"
+                                           FontSize="14"
+                                           Foreground="#DDE7E1"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                                <TextBlock x:Name="SourceFileText"
+                                           Margin="0,17,0,0"
+                                           FontSize="11"
+                                           Foreground="#BFD0C7"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TabControl x:Name="EditorTabs"
+                                Grid.Row="2"
+                                Margin="14,12,14,8"
+                                Background="#F2F5F6F7"
+                                BorderBrush="#ACD9E5EA">
+                        <TabItem Header="Details">
+                            <Border Padding="25,21"
+                                    Background="#F2F5F6F7">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" VerticalAlignment="Center" Foreground="#42484C" Text="Title" />
+                                    <TextBox x:Name="TitleBox" Grid.Row="0" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="1" VerticalAlignment="Center" Foreground="#42484C" Text="Artist" />
+                                    <TextBox x:Name="ArtistBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="2" VerticalAlignment="Center" Foreground="#42484C" Text="Genre" />
+                                    <TextBox x:Name="GenreBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" />
+                                    <TextBlock Grid.Row="3" VerticalAlignment="Center" Foreground="#42484C" Text="Date" />
+                                    <TextBox x:Name="DateBox" Grid.Row="3" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" ToolTip="Year or date" />
+                                    <TextBlock Grid.Row="4" VerticalAlignment="Center" Foreground="#42484C" Text="Album" />
+                                    <TextBox x:Name="AlbumBox" Grid.Row="4" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="5" VerticalAlignment="Center" Foreground="#42484C" Text="Track number" />
+                                    <TextBox x:Name="TrackNumberBox" Grid.Row="5" Grid.Column="1" Style="{StaticResource EditorTextBoxStyle}" />
+                                </Grid>
+                            </Border>
+                        </TabItem>
+
+                        <TabItem Header="Artwork">
+                            <Border Padding="24,22"
+                                    Background="#F2F5F6F7">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="CoverUploadButton"
+                                            Grid.Column="0"
+                                            Height="238"
+                                            Style="{StaticResource UploadTileStyle}"
+                                            Click="CoverUploadButton_Click">
+                                        <Grid Margin="13">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border Width="142"
+                                                    Height="142"
+                                                    HorizontalAlignment="Center"
+                                                    CornerRadius="4"
+                                                    ClipToBounds="True"
+                                                    BorderBrush="#8B7B8D96"
+                                                    BorderThickness="1"
+                                                    Background="#24333A3E">
+                                                <Image x:Name="CoverUploadImage"
+                                                       Stretch="UniformToFill"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                            </Border>
+                                            <TextBlock Grid.Row="1"
+                                                       Margin="0,9,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#253139"
+                                                       Text="Cover artwork" />
+                                            <TextBlock Grid.Row="2"
+                                                       Margin="0,3,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="11"
+                                                       Foreground="#647078"
+                                                       Text="Click to upload an image" />
+                                        </Grid>
+                                    </Button>
+
+                                    <Button x:Name="DiscUploadButton"
+                                            Grid.Column="2"
+                                            Height="238"
+                                            Style="{StaticResource UploadTileStyle}"
+                                            Click="DiscUploadButton_Click">
+                                        <Grid Margin="13">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border Width="142"
+                                                    Height="142"
+                                                    HorizontalAlignment="Center"
+                                                    CornerRadius="71"
+                                                    ClipToBounds="True"
+                                                    BorderBrush="#8B7B8D96"
+                                                    BorderThickness="1"
+                                                    Background="#24333A3E">
+                                                <Grid>
+                                                    <Image x:Name="DiscUploadImage"
+                                                           Stretch="UniformToFill"
+                                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    <Ellipse Width="23"
+                                                             Height="23"
+                                                             HorizontalAlignment="Center"
+                                                             VerticalAlignment="Center"
+                                                             Fill="#F2F5F6F7"
+                                                             Stroke="#68747A"
+                                                             StrokeThickness="1" />
+                                                </Grid>
+                                            </Border>
+                                            <TextBlock Grid.Row="1"
+                                                       Margin="0,9,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#253139"
+                                                       Text="CD artwork" />
+                                            <TextBlock Grid.Row="2"
+                                                       Margin="0,3,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="11"
+                                                       Foreground="#647078"
+                                                       Text="Optional disc or medium scan" />
+                                        </Grid>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </TabItem>
+                    </TabControl>
+
+                    <Border Grid.Row="3"
+                            BorderBrush="#48FFFFFF"
+                            BorderThickness="0,1,0,0"
+                            Background="#2C000000">
+                        <Grid Margin="14,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Button x:Name="FetchButton"
+                                    Style="{StaticResource AeroCommandButtonStyle}"
+                                    Click="FetchButton_Click"
+                                    Content="Fetch song data" />
+
+                            <StackPanel Grid.Column="1"
+                                        Margin="12,0"
+                                        VerticalAlignment="Center">
+                                <TextBlock x:Name="StatusText"
+                                           Foreground="#E5EDE8"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis" />
+                                <ProgressBar x:Name="OperationProgress"
+                                             Height="4"
+                                             Margin="0,4,0,0"
+                                             Minimum="0"
+                                             Maximum="1"
+                                             Visibility="Collapsed" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal">
+                                <Button x:Name="CancelButton"
+                                        Margin="0,0,8,0"
+                                        Style="{StaticResource AeroCommandButtonStyle}"
+                                        Click="CancelButton_Click"
+                                        Content="Cancel" />
+                                <Button x:Name="SaveButton"
+                                        Style="{StaticResource AeroCommandButtonStyle}"
+                                        Click="SaveButton_Click"
+                                        Content="Save" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

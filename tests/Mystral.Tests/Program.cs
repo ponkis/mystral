@@ -27,7 +27,10 @@ internal static class Program
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
-            ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack)
+            ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
+            ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
+            ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
+            ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
 
         var failures = new List<string>();
@@ -474,6 +477,296 @@ static class CdArtworkComposerTests
     }
 }
 
+static class ImageArtworkLoaderTests
+{
+    public static void ValidatesDecodedImageContent()
+    {
+        using var temp = TempDir.Create();
+        var loader = new ImageArtworkLoader();
+        var png = Png(
+            width: 2,
+            height: 1,
+            pixels:
+            [
+                20, 40, 220, 255,
+                180, 80, 10, 255
+            ]);
+        var validPath = Path.Combine(temp.Path, "cover.not-an-image-extension");
+        File.WriteAllBytes(validPath, png);
+
+        var artwork = loader.LoadFileAsync(validPath).GetAwaiter().GetResult();
+
+        Check.Sequence(png, artwork.Data);
+        Check.True(artwork.Preview.IsFrozen);
+        Check.Equal(2, artwork.Preview.PixelWidth);
+        Check.Equal(1, artwork.Preview.PixelHeight);
+
+        var fakeImagePath = Path.Combine(temp.Path, "fake.png");
+        File.WriteAllText(fakeImagePath, "this is not an image");
+        Check.Throws<InvalidDataException>(() =>
+            loader.LoadFileAsync(fakeImagePath).GetAwaiter().GetResult());
+        Check.Throws<InvalidDataException>(() =>
+            loader.LoadAsync([]).GetAwaiter().GetResult());
+    }
+}
+
+static class MusicBrainzServiceTests
+{
+    public static void MapsRecordingAndArtworkResponses()
+    {
+        var coverBytes = new byte[] { 1, 3, 5, 7 };
+        var discBytes = new byte[] { 2, 4, 6, 8 };
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal(HttpMethod.Get, request.Method);
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Contains("Mystral/", request.Headers.UserAgent.ToString());
+                var query = Uri.UnescapeDataString(uri.Query);
+                Check.Contains("recording:\"Requested title\"", query);
+                Check.Contains("artist:\"Lead & Guest\"", query);
+                Check.Contains("release:\"Wanted album\"", query);
+                return JsonText("""
+                    {
+                      "recordings": [
+                        {
+                          "score": "100",
+                          "title": "Wrong result",
+                          "length": 180000,
+                          "artist-credit": [{ "name": "Someone else" }],
+                          "releases": []
+                        },
+                        {
+                          "score": "85",
+                          "title": "Mapped title",
+                          "length": 211000,
+                          "first-release-date": "1998",
+                          "artist-credit": [
+                            { "name": "Lead", "joinphrase": " & " },
+                            { "artist": { "name": "Guest" } }
+                          ],
+                          "tags": [
+                            { "count": 2, "name": "ambient" },
+                            { "count": 12, "name": "rock" }
+                          ],
+                          "releases": [
+                            {
+                              "id": "release-other",
+                              "title": "Other album",
+                              "status": "Official",
+                              "media": [{ "format": "CD", "track": [{ "number": "1" }] }]
+                            },
+                            {
+                              "id": "release-good",
+                              "title": "Wanted album",
+                              "status": "Official",
+                              "date": "2001-02-03",
+                              "release-group": { "id": "group-good", "primary-type": "Album" },
+                              "media": [{ "format": "CD", "track": [{ "number": "07" }] }]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath.Equals("/release/release-good/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        {
+                          "approved": true,
+                          "front": true,
+                          "types": ["Front"],
+                          "image": "http://assets.test/cover-original",
+                          "thumbnails": { "1200": "http://assets.test/cover-1200" }
+                        },
+                        {
+                          "approved": true,
+                          "front": false,
+                          "types": ["Medium"],
+                          "image": "http://assets.test/disc-original",
+                          "thumbnails": { "500": "http://assets.test/disc-500" }
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/cover-1200")))
+            {
+                return Bytes(coverBytes);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/disc-500")))
+            {
+                return Bytes(discBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchTrackDataAsync(
+                "Requested title",
+                "Lead & Guest",
+                "Wanted album",
+                "",
+                TimeSpan.FromSeconds(211))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Equal("Mapped title", result!.Title);
+        Check.Equal("Lead & Guest", result.Artist);
+        Check.Equal("rock", result.Genre);
+        Check.Equal("2001-02-03", result.Date);
+        Check.Equal("Wanted album", result.Album);
+        Check.Equal("07", result.TrackNumber);
+        Check.Sequence(coverBytes, result.CoverArtwork!);
+        Check.Sequence(discBytes, result.DiscArtwork!);
+        Check.Equal(4, handler.Count);
+
+        var empty = service.FetchTrackDataAsync("", "Artist", "Album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(empty);
+        Check.Equal(4, handler.Count);
+
+        var survivingDiscBytes = new byte[] { 9, 8, 7, 6 };
+        var partialArtworkHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Resilient title",
+                        "artist-credit": [{ "name": "Resilient artist" }],
+                        "releases": [{ "id": "resilient-release", "title": "Resilient album", "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.AbsolutePath.Equals("/release/resilient-release/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        { "approved": true, "front": true, "types": ["Front"], "image": "https://assets.test/failing-cover", "thumbnails": {} },
+                        { "approved": true, "front": false, "types": ["Medium"], "image": "https://assets.test/working-disc", "thumbnails": {} }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/failing-cover")))
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/working-disc")))
+            {
+                return Bytes(survivingDiscBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+        using var partialArtworkClient = new HttpClient(partialArtworkHandler);
+        using var partialArtworkService = new MusicBrainzService(partialArtworkClient);
+        var partialArtworkResult = partialArtworkService.FetchTrackDataAsync(
+                "Resilient title",
+                "Resilient artist",
+                "Resilient album",
+                "",
+                TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.NotNull(partialArtworkResult);
+        Check.Null(partialArtworkResult!.CoverArtwork);
+        Check.Sequence(survivingDiscBytes, partialArtworkResult.DiscArtwork!);
+        Check.Equal(4, partialArtworkHandler.Count);
+
+        using var malformedClient = new HttpClient(new FakeHttpMessageHandler(_ => JsonText("{")));
+        using var malformedService = new MusicBrainzService(malformedClient);
+        Check.Throws<InvalidDataException>(() =>
+            malformedService.FetchTrackDataAsync(
+                    "Song",
+                    "Artist",
+                    "",
+                    "",
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult());
+    }
+}
+
+static class AudioTagServiceTests
+{
+    public static void ReadsAndSavesMetadataWithoutTouchingSource()
+    {
+        using var temp = TempDir.Create();
+        var sourcePath = Path.Combine(temp.Path, "original.wav");
+        var sourceBytes = PcmWave(duration: TimeSpan.FromSeconds(1));
+        File.WriteAllBytes(sourcePath, sourceBytes);
+
+        var service = new AudioTagService();
+        var draft = service.ReadAsync(sourcePath).GetAwaiter().GetResult();
+
+        Check.Equal(Path.GetFullPath(sourcePath), draft.SourcePath);
+        Check.True(draft.Duration >= TimeSpan.FromMilliseconds(990));
+        Check.True(draft.Duration <= TimeSpan.FromMilliseconds(1010));
+        Check.Equal("", draft.Title);
+        Check.Equal("", draft.Artist);
+
+        draft.Title = "Burned title";
+        draft.Artist = "Burned artist";
+        draft.Genre = "Rock";
+        draft.Date = "1995";
+        draft.Album = "Burned album";
+        draft.TrackNumber = "7";
+        var destinationPath = Path.Combine(temp.Path, "burned.wav");
+
+        service.SaveCopyAsync(draft, destinationPath).GetAwaiter().GetResult();
+
+        Check.Sequence(sourceBytes, File.ReadAllBytes(sourcePath));
+        Check.True(File.Exists(destinationPath));
+        var saved = service.ReadAsync(destinationPath).GetAwaiter().GetResult();
+        Check.Equal("Burned title", saved.Title);
+        Check.Equal("Burned artist", saved.Artist);
+        Check.Equal("Rock", saved.Genre);
+        Check.Equal("1995", saved.Date);
+        Check.Equal("Burned album", saved.Album);
+        Check.Equal("7", saved.TrackNumber);
+
+        draft.Date = "2001-04";
+        var partialDatePath = Path.Combine(temp.Path, "partial-date.wav");
+        service.SaveCopyAsync(draft, partialDatePath).GetAwaiter().GetResult();
+        Check.Equal("2001-04", service.ReadAsync(partialDatePath).GetAwaiter().GetResult().Date);
+
+        draft.Date = "definitely not a date";
+        var invalidDatePath = Path.Combine(temp.Path, "invalid-date.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, invalidDatePath).GetAwaiter().GetResult());
+        Check.False(File.Exists(invalidDatePath));
+        Check.False(Directory.EnumerateFiles(temp.Path, "*.mystral*", SearchOption.TopDirectoryOnly).Any());
+
+        var disguisedText = Path.Combine(temp.Path, "not-audio.wav");
+        File.WriteAllText(disguisedText, "RIFF is not enough to make this audio");
+        Check.Throws<InvalidDataException>(() =>
+            service.ReadAsync(disguisedText).GetAwaiter().GetResult());
+    }
+}
+
 static class Samples
 {
     public static MediaSnapshot Snapshot(
@@ -524,6 +817,66 @@ static class Samples
         {
             Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json")
         };
+    }
+
+    public static HttpResponseMessage JsonText(string value)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(value, Encoding.UTF8, "application/json")
+        };
+    }
+
+    public static HttpResponseMessage Bytes(byte[] value)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(value)
+        };
+    }
+
+    public static byte[] Png(int width, int height, byte[] pixels)
+    {
+        var bitmap = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    public static byte[] PcmWave(TimeSpan duration, int sampleRate = 8000)
+    {
+        const short channelCount = 1;
+        const short bitsPerSample = 16;
+        var sampleCount = checked((int)Math.Round(duration.TotalSeconds * sampleRate));
+        var dataLength = checked(sampleCount * channelCount * (bitsPerSample / 8));
+        using var stream = new MemoryStream(capacity: 44 + dataLength);
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(36 + dataLength);
+        writer.Write(Encoding.ASCII.GetBytes("WAVE"));
+        writer.Write(Encoding.ASCII.GetBytes("fmt "));
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write(channelCount);
+        writer.Write(sampleRate);
+        writer.Write(sampleRate * channelCount * (bitsPerSample / 8));
+        writer.Write((short)(channelCount * (bitsPerSample / 8)));
+        writer.Write(bitsPerSample);
+        writer.Write(Encoding.ASCII.GetBytes("data"));
+        writer.Write(dataLength);
+        writer.Write(new byte[dataLength]);
+        writer.Flush();
+        return stream.ToArray();
     }
 }
 
@@ -647,5 +1000,20 @@ static class Check
         {
             throw new InvalidOperationException($"Expected '{actual}' to contain '{expected}'.");
         }
+    }
+
+    public static void Throws<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 }

@@ -7,7 +7,7 @@ public static class AppMetadata
 {
     public const string Name = "Mystral";
     public static string Version { get; } = GetInformationalVersion();
-    public static string UserAgent { get; } = Name + "/" + Version;
+    public static string UserAgent { get; } = Name + "/" + Version + " (https://ponkis.xyz/)";
 
 #if APP_ENVIRONMENT_DEVELOPMENT
     public const string EnvironmentName = "Development";

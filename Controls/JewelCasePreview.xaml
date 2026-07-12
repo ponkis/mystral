@@ -1,0 +1,47 @@
+<UserControl x:Class="Mystral.Controls.JewelCasePreview"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent"
+             Cursor="Hand"
+             Focusable="False"
+             MouseEnter="Preview_MouseEnter"
+             MouseLeave="Preview_MouseLeave"
+             LostMouseCapture="Preview_LostMouseCapture"
+             PreviewMouseLeftButtonDown="Preview_PreviewMouseLeftButtonDown"
+             PreviewMouseLeftButtonUp="Preview_PreviewMouseLeftButtonUp">
+    <Grid Background="Transparent">
+        <Image x:Name="CaseImage"
+               Stretch="Fill"
+               RenderOptions.BitmapScalingMode="HighQuality" />
+
+        <Border x:Name="UploadHint"
+                Opacity="0"
+                IsHitTestVisible="False"
+                Background="#72000000">
+            <Border Width="112"
+                    Height="52"
+                    CornerRadius="7"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    BorderBrush="#96FFFFFF"
+                    BorderThickness="1"
+                    Background="#A21A2023">
+                <StackPanel HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal">
+                    <TextBlock Margin="0,0,7,0"
+                               VerticalAlignment="Center"
+                               FontFamily="Segoe MDL2 Assets"
+                               FontSize="17"
+                               Foreground="White"
+                               Text="&#xE898;" />
+                    <TextBlock VerticalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="White"
+                               Text="Upload cover" />
+                </StackPanel>
+            </Border>
+        </Border>
+    </Grid>
+</UserControl>

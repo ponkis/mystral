@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private bool _isBurnDiscPointerDown;
     private bool _isBurnDiscDragging;
     private bool _isBurnDiscInserting;
+    private bool _isOpeningBurningWindow;
     private bool _isBurnDiscOverflowActive;
     private bool _suppressBurnDiscHoverUntilLeave;
     private double _burnDiscDragStartY;
@@ -379,7 +380,9 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (e.LeftButton != MouseButtonState.Pressed)
         {
-            CompleteCompactBurnDiscPointerInteraction(releaseMouseCapture: true);
+            CompleteCompactBurnDiscPointerInteraction(
+                releaseMouseCapture: true,
+                allowClickAction: false);
             return;
         }
 
@@ -430,7 +433,9 @@ public partial class MainWindow : Window
     {
         if (_isBurnDiscPointerDown)
         {
-            CompleteCompactBurnDiscPointerInteraction(releaseMouseCapture: false);
+            CompleteCompactBurnDiscPointerInteraction(
+                releaseMouseCapture: false,
+                allowClickAction: false);
         }
     }
 
@@ -452,7 +457,9 @@ public partial class MainWindow : Window
         _burnDiscLastSampleAt = now;
     }
 
-    private void CompleteCompactBurnDiscPointerInteraction(bool releaseMouseCapture)
+    private void CompleteCompactBurnDiscPointerInteraction(
+        bool releaseMouseCapture,
+        bool allowClickAction = true)
     {
         if (!_isBurnDiscPointerDown)
         {
@@ -481,7 +488,8 @@ public partial class MainWindow : Window
                 Mouse.Capture(null);
             }
 
-            if (CompactBurnSlot.IsMouseOver)
+            var shouldOpenBurningWindow = allowClickAction && CompactBurnSlot.IsMouseOver;
+            if (shouldOpenBurningWindow)
             {
                 CompactBurnSlot.Height = BurnDiscEjectedSurfaceHeight;
                 AnimateCompactBurnDisc(
@@ -498,6 +506,13 @@ public partial class MainWindow : Window
                     TimeSpan.FromMilliseconds(220),
                     EasingMode.EaseIn,
                     collapseSurfaceWhenComplete: true);
+            }
+
+            if (shouldOpenBurningWindow)
+            {
+                Dispatcher.BeginInvoke(
+                    () => _ = OpenBurningWindowAsync(),
+                    DispatcherPriority.Input);
             }
             return;
         }
@@ -603,6 +618,76 @@ public partial class MainWindow : Window
             || pointer.Y > BurnDiscCollapsedSurfaceHeight)
         {
             _suppressBurnDiscHoverUntilLeave = false;
+        }
+    }
+
+    private async Task OpenBurningWindowAsync()
+    {
+        if (_isOpeningBurningWindow || Snapshot.HasSession)
+        {
+            return;
+        }
+
+        _isOpeningBurningWindow = true;
+        PushDisableTopmost();
+        try
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Choose an audio file to burn",
+                CheckFileExists = true,
+                Multiselect = false,
+                Filter = "Audio files|*.mp3;*.mp2;*.mp1;*.flac;*.m4a;*.m4b;*.aac;*.ogg;*.oga;*.opus;*.wav;*.aif;*.aiff;*.wma;*.asf;*.ape;*.wv;*.mpc;*.mpp;*.webm;*.dsf;*.aa;*.aax|All files|*.*"
+            };
+            if (picker.ShowDialog(this) != true)
+            {
+                return;
+            }
+
+            Mouse.OverrideCursor = Cursors.Wait;
+            var artworkLoader = new ImageArtworkLoader();
+            var audioTagService = new AudioTagService();
+            BurnTrackDraft draft;
+            try
+            {
+                draft = await audioTagService.ReadAsync(picker.FileName);
+            }
+            catch (Exception ex) when (ex is InvalidDataException
+                                       or IOException
+                                       or UnauthorizedAccessException
+                                       or NotSupportedException)
+            {
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "Unsupported audio file",
+                    $"Mystral could not verify this as a supported audio file.\n\n{ex.Message}");
+                return;
+            }
+            finally
+            {
+                Mouse.OverrideCursor = null;
+            }
+
+            var burningWindow = new BurningWindow(draft, audioTagService, artworkLoader)
+            {
+                Owner = this,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner
+            };
+            burningWindow.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowError(
+                this,
+                "Could not open the CD burner",
+                ex.Message);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            ResetCompactBurnDisc();
+            PopRestoreTopmost();
+            _isOpeningBurningWindow = false;
         }
     }
 
