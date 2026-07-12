@@ -12,10 +12,9 @@ internal sealed class JewelCaseRenderer
     private const int BaseY = 6;
     private const int BaseWidth = 301;
     private const int BaseHeight = 306;
-    // The cropped base and both smart layers are right-aligned on the source canvas.
-    private const int ArtworkX = BaseX;
-    private const int ArtworkY = 8;
-    private const int ArtworkSize = 301;
+    private const int DiscSize = BaseWidth;
+    private const int DiscX = BaseX + ((BaseWidth - DiscSize) / 2);
+    private const int DiscY = BaseY + ((BaseHeight - DiscSize) / 2);
     private static readonly Lazy<Task<FixedLayers>> SharedLayers = new(
         () => Task.Run(LoadFixedLayers),
         LazyThreadSafetyMode.ExecutionAndPublication);
@@ -58,10 +57,14 @@ internal sealed class JewelCaseRenderer
         {
             PixelBuffer? cover = coverArtwork is null
                 ? null
-                : ResizeAspectFill(ReadPixels(coverArtwork), ArtworkSize, ArtworkSize, cancellationToken);
+                : ResizeAspectFill(
+                    ReadPixels(coverArtwork),
+                    _layers.CoverBounds.Width,
+                    _layers.CoverBounds.Height,
+                    cancellationToken);
             PixelBuffer? disc = discArtwork is null
                 ? null
-                : ResizeAspectFill(ReadPixels(discArtwork), ArtworkSize, ArtworkSize, cancellationToken);
+                : ResizeAspectFill(ReadPixels(discArtwork), DiscSize, DiscSize, cancellationToken);
             return (Cover: cover, Disc: disc);
         }, cancellationToken);
 
@@ -101,18 +104,18 @@ internal sealed class JewelCaseRenderer
         BlitNormal(pixels, OutputWidth, OutputHeight, _layers.Base, BaseX, BaseY, 1);
         if (disc is not null)
         {
-            BlitRotatedDisc(pixels, disc.Value, discAngle, cancellationToken);
+            BlitRotatedDisc(pixels, disc.Value, _layers.DiscMask, discAngle, cancellationToken);
         }
 
         if (cover is not null && coverOpacity > 0.001)
         {
-            BlitNormal(
+            BlitMaskedNormal(
                 pixels,
                 OutputWidth,
                 OutputHeight,
                 cover.Value,
-                ArtworkX,
-                ArtworkY,
+                _layers.CoverMask,
+                _layers.CoverBounds,
                 Math.Clamp(coverOpacity, 0, 1));
         }
 
@@ -145,11 +148,7 @@ internal sealed class JewelCaseRenderer
             for (var x = 0; x < OutputWidth; x++)
             {
                 var offset = ((y * OutputWidth) + x) * 4;
-                var isOverTray = x >= BaseX
-                    && x < BaseX + BaseWidth
-                    && y >= BaseY
-                    && y < BaseY + BaseHeight;
-                if (isOverTray)
+                if (destination[offset + 3] > 0)
                 {
                     destination[offset] = (byte)(((destination[offset] * shadow[offset]) + 127) / 255);
                     destination[offset + 1] = (byte)(((destination[offset + 1] * shadow[offset + 1]) + 127) / 255);
@@ -157,7 +156,6 @@ internal sealed class JewelCaseRenderer
                     destination[offset] = Math.Max(destination[offset], highlight[offset]);
                     destination[offset + 1] = Math.Max(destination[offset + 1], highlight[offset + 1]);
                     destination[offset + 2] = Math.Max(destination[offset + 2], highlight[offset + 2]);
-                    destination[offset + 3] = byte.MaxValue;
                     continue;
                 }
 
@@ -184,17 +182,16 @@ internal sealed class JewelCaseRenderer
     private static void BlitRotatedDisc(
         byte[] destination,
         PixelBuffer disc,
+        PixelBuffer mask,
         double angle,
         CancellationToken cancellationToken)
     {
         var radians = -angle * Math.PI / 180;
         var cosine = Math.Cos(radians);
         var sine = Math.Sin(radians);
-        var center = (ArtworkSize - 1) / 2.0;
-        var outerRadius = ArtworkSize * 0.493;
-        var innerRadius = ArtworkSize * 0.074;
+        var center = (DiscSize - 1) / 2.0;
 
-        for (var y = 0; y < ArtworkSize; y++)
+        for (var y = 0; y < DiscSize; y++)
         {
             if ((y & 31) == 0)
             {
@@ -202,28 +199,74 @@ internal sealed class JewelCaseRenderer
             }
 
             var deltaY = y - center;
-            for (var x = 0; x < ArtworkSize; x++)
+            for (var x = 0; x < DiscSize; x++)
             {
-                var deltaX = x - center;
-                var distance = Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY));
-                if (distance >= outerRadius || distance <= innerRadius)
+                var maskOffset = ((y * mask.Width) + x) * 4;
+                var maskAlpha = Luminance(mask.Pixels, maskOffset);
+                if (maskAlpha == 0)
                 {
                     continue;
                 }
 
+                var deltaX = x - center;
                 var sourceX = (cosine * deltaX) - (sine * deltaY) + center;
                 var sourceY = (sine * deltaX) + (cosine * deltaY) + center;
                 var sampled = SampleBilinear(disc, sourceX, sourceY);
-                var edgeAlpha = Math.Min(
-                    Math.Clamp(outerRadius - distance, 0, 1),
-                    Math.Clamp(distance - innerRadius, 0, 1));
-                var alpha = (byte)Math.Clamp(Math.Round(sampled.Alpha * edgeAlpha), 0, 255);
+                var alpha = (byte)(((sampled.Alpha * maskAlpha) + 127) / 255);
                 BlendNormalPixel(
                     destination,
-                    (((ArtworkY + y) * OutputWidth) + ArtworkX + x) * 4,
+                    (((DiscY + y) * OutputWidth) + DiscX + x) * 4,
                     sampled.Blue,
                     sampled.Green,
                     sampled.Red,
+                    alpha);
+            }
+        }
+    }
+
+    private static void BlitMaskedNormal(
+        byte[] destination,
+        int destinationWidth,
+        int destinationHeight,
+        PixelBuffer source,
+        PixelBuffer mask,
+        PixelBounds bounds,
+        double opacity)
+    {
+        for (var y = 0; y < source.Height; y++)
+        {
+            var destinationY = bounds.Top + y;
+            if (destinationY < 0 || destinationY >= destinationHeight)
+            {
+                continue;
+            }
+
+            for (var x = 0; x < source.Width; x++)
+            {
+                var destinationX = bounds.Left + x;
+                if (destinationX < 0 || destinationX >= destinationWidth)
+                {
+                    continue;
+                }
+
+                var sourceOffset = ((y * source.Width) + x) * 4;
+                var maskOffset = ((destinationY * mask.Width) + destinationX) * 4;
+                var maskAlpha = Luminance(mask.Pixels, maskOffset);
+                if (maskAlpha == 0)
+                {
+                    continue;
+                }
+
+                var alpha = (byte)Math.Clamp(
+                    Math.Round(source.Pixels[sourceOffset + 3] * (maskAlpha / 255d) * opacity),
+                    0,
+                    255);
+                BlendNormalPixel(
+                    destination,
+                    ((destinationY * destinationWidth) + destinationX) * 4,
+                    source.Pixels[sourceOffset],
+                    source.Pixels[sourceOffset + 1],
+                    source.Pixels[sourceOffset + 2],
                     alpha);
             }
         }
@@ -349,10 +392,49 @@ internal sealed class JewelCaseRenderer
     private static FixedLayers LoadFixedLayers()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Resources", "Images");
+        var coverMask = ResizeStretch(
+            LoadPixels(Path.Combine(directory, "jewel_mask.png")),
+            OutputWidth,
+            OutputHeight,
+            CancellationToken.None);
         return new FixedLayers(
             ResizeStretch(LoadPixels(Path.Combine(directory, "jewel_base.png")), BaseWidth, BaseHeight, CancellationToken.None),
+            coverMask,
+            ResizeStretch(LoadPixels(Path.Combine(directory, "cd_mask.png")), DiscSize, DiscSize, CancellationToken.None),
             ResizeStretch(LoadPixels(Path.Combine(directory, "jewel_shadow.png")), OutputWidth, OutputHeight, CancellationToken.None),
-            ResizeStretch(LoadPixels(Path.Combine(directory, "jewel_highlight.png")), OutputWidth, OutputHeight, CancellationToken.None));
+            ResizeStretch(LoadPixels(Path.Combine(directory, "jewel_highlight.png")), OutputWidth, OutputHeight, CancellationToken.None),
+            FindMaskBounds(coverMask));
+    }
+
+    private static PixelBounds FindMaskBounds(PixelBuffer mask)
+    {
+        var left = mask.Width;
+        var top = mask.Height;
+        var right = -1;
+        var bottom = -1;
+        for (var y = 0; y < mask.Height; y++)
+        {
+            for (var x = 0; x < mask.Width; x++)
+            {
+                var offset = ((y * mask.Width) + x) * 4;
+                if (Luminance(mask.Pixels, offset) == 0)
+                {
+                    continue;
+                }
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+
+        if (right < left || bottom < top)
+        {
+            throw new InvalidDataException("The jewel artwork mask contains no visible area.");
+        }
+
+        return new PixelBounds(left, top, (right - left) + 1, (bottom - top) + 1);
     }
 
     private static PixelBuffer LoadPixels(string path)
@@ -468,7 +550,14 @@ internal sealed class JewelCaseRenderer
         }
     }
 
-    private sealed record FixedLayers(PixelBuffer Base, PixelBuffer Shadow, PixelBuffer Highlight);
+    private sealed record FixedLayers(
+        PixelBuffer Base,
+        PixelBuffer CoverMask,
+        PixelBuffer DiscMask,
+        PixelBuffer Shadow,
+        PixelBuffer Highlight,
+        PixelBounds CoverBounds);
+    private readonly record struct PixelBounds(int Left, int Top, int Width, int Height);
     private readonly record struct PixelBuffer(int Width, int Height, byte[] Pixels);
     private readonly record struct Pixel(byte Blue, byte Green, byte Red, byte Alpha);
 }
