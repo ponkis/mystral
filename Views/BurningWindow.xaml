@@ -68,50 +68,6 @@
                 </Setter>
             </Style>
 
-            <Style x:Key="AeroCommandButtonStyle" TargetType="Button">
-                <Setter Property="Height" Value="28" />
-                <Setter Property="MinWidth" Value="88" />
-                <Setter Property="Padding" Value="13,0" />
-                <Setter Property="Foreground" Value="#17242C" />
-                <Setter Property="BorderBrush" Value="#A64F7486" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="Cursor" Value="Hand" />
-                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="Shell"
-                                    CornerRadius="4"
-                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="{TemplateBinding BorderThickness}">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                        <GradientStop Color="#F8FFFFFF" Offset="0" />
-                                        <GradientStop Color="#D9F3F8FA" Offset="0.48" />
-                                        <GradientStop Color="#A9B9D1DC" Offset="0.52" />
-                                        <GradientStop Color="#CFE7F0F4" Offset="1" />
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Shell" Property="BorderBrush" Value="#E75EACD4" />
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="Shell" Property="Opacity" Value="0.78" />
-                                </Trigger>
-                                <Trigger Property="IsEnabled" Value="False">
-                                    <Setter TargetName="Shell" Property="Opacity" Value="0.42" />
-                                    <Setter Property="Cursor" Value="No" />
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
             <Style x:Key="EditorTextBoxStyle" TargetType="TextBox">
                 <Setter Property="Height" Value="29" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -244,7 +200,7 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="30" />
-                        <RowDefinition Height="152" />
+                        <RowDefinition Height="140" />
                         <RowDefinition Height="*" />
                         <RowDefinition Height="50" />
                     </Grid.RowDefinitions>
@@ -292,14 +248,14 @@
                             Background="#36000000">
                         <Grid Margin="18,5,20,5">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="166" />
+                                <ColumnDefinition Width="160" />
                                 <ColumnDefinition Width="16" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
                              <controls:JewelCasePreview x:Name="JewelPreview"
-                                                       Width="156"
-                                                       Height="140"
+                                                       Width="126"
+                                                       Height="113"
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center"
                                                        UploadCoverRequested="JewelPreview_UploadCoverRequested" />
@@ -534,7 +490,8 @@
                             </Grid.ColumnDefinitions>
 
                             <Button x:Name="FetchButton"
-                                    Style="{StaticResource AeroCommandButtonStyle}"
+                                    MinWidth="100"
+                                    Height="23"
                                     Click="FetchButton_Click"
                                     Content="Fetch song data" />
 
@@ -549,12 +506,14 @@
                             <StackPanel Grid.Column="2"
                                         Orientation="Horizontal">
                                 <Button x:Name="CancelButton"
-                                        Margin="0,0,8,0"
-                                        Style="{StaticResource AeroCommandButtonStyle}"
+                                        MinWidth="72"
+                                        Height="23"
+                                        Margin="0,0,6,0"
                                         Click="CancelButton_Click"
                                         Content="Cancel" />
                                 <Button x:Name="SaveButton"
-                                        Style="{StaticResource AeroCommandButtonStyle}"
+                                        MinWidth="72"
+                                        Height="23"
                                         Click="SaveButton_Click"
                                         Content="Save" />
                             </StackPanel>
