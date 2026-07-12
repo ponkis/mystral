@@ -29,7 +29,7 @@
     <Content Include="Resources\*.ico">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="Resources\Images\*.png">
+    <Content Include="Resources\Images\*.png" Exclude="Resources\Images\cd.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="Resources\Images\*.ico">

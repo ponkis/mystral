@@ -26,7 +26,8 @@ internal static class Program
             ("lyrics service keys, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
-            ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable)
+            ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
+            ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack)
         };
 
         var failures = new List<string>();
@@ -388,6 +389,88 @@ static class ArtworkTintTests
         Check.NotNull(tint);
         Check.True(tint!.Value.R > tint.Value.G);
         Check.True(tint.Value.G > tint.Value.B);
+    }
+}
+
+static class CdArtworkComposerTests
+{
+    public static void ComposesMaskedLayerStack()
+    {
+        var transparent = Pixel(0, 0, 0, 0);
+        var composed = CdArtworkComposer.Compose(
+            Pixel(100, 150, 200, 255),
+            Pixel(255, 255, 255, 255),
+            Pixel(128, 255, 64, 255),
+            Pixel(0, 128, 255, 255),
+            transparent);
+
+        Check.True(composed.IsFrozen);
+        Check.Equal(1, composed.PixelWidth);
+        Check.Equal(1, composed.PixelHeight);
+        Check.Sequence(new byte[] { 50, 203, 255, 255 }, ReadPixel(composed));
+
+        var halfMasked = CdArtworkComposer.Compose(
+            Pixel(30, 60, 90, 200),
+            Pixel(128, 128, 128, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Sequence(new byte[] { 30, 60, 90, 100 }, ReadPixel(halfMasked));
+
+        var fullyMasked = CdArtworkComposer.Compose(
+            Pixel(30, 60, 90, 255),
+            Pixel(0, 0, 0, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Equal((byte)0, ReadPixel(fullyMasked)[3]);
+
+        var partialAlpha = CdArtworkComposer.Compose(
+            Pixel(0, 0, 255, 128),
+            Pixel(255, 255, 255, 255),
+            transparent,
+            transparent,
+            Pixel(255, 0, 0, 128));
+        Check.Sequence(new byte[] { 170, 0, 85, 192 }, ReadPixel(partialAlpha));
+
+        var centerCrop = CdArtworkComposer.Compose(
+            Bitmap(2, 1,
+            [
+                0, 0, 0, 255,
+                255, 255, 255, 255
+            ]),
+            Pixel(255, 255, 255, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Sequence(new byte[] { 128, 128, 128, 255 }, ReadPixel(centerCrop));
+    }
+
+    private static BitmapSource Pixel(byte blue, byte green, byte red, byte alpha)
+    {
+        return Bitmap(1, 1, [blue, green, red, alpha]);
+    }
+
+    private static BitmapSource Bitmap(int width, int height, byte[] pixels)
+    {
+        var bitmap = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            width * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private static byte[] ReadPixel(BitmapSource bitmap)
+    {
+        var pixel = new byte[4];
+        bitmap.CopyPixels(pixel, 4, 0);
+        return pixel;
     }
 }
 

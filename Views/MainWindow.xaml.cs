@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _mediaPollTimer;
     private readonly DispatcherTimer _loadingIconTimer;
     private readonly DispatcherTimer _volumeToolTipHideTimer;
+    private readonly CancellationTokenSource _burnDiscArtworkCts = new();
     private readonly List<TextBlock> _lyricBlocks = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
     private readonly List<BitmapImage> _loadingIconFrames = [];
@@ -169,6 +170,7 @@ public partial class MainWindow : Window
         _volumeToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
         _volumeToolTipHideTimer.Tick += (_, _) => HideVolumeToolTip();
         LoadLoadingIconFrames();
+        _ = LoadCompactBurnDiscArtworkAsync();
 
         RootCard.Opacity = 0;
         WindowScale.ScaleX = 0.96;
@@ -274,6 +276,25 @@ public partial class MainWindow : Window
         var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
         var seconds = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
         slider.ToolTip = $"Seek to {FormatTime(TimeSpan.FromSeconds(seconds))}";
+    }
+
+    private async Task LoadCompactBurnDiscArtworkAsync()
+    {
+        try
+        {
+            var artwork = await CdArtworkComposer.ComposeDefaultAsync(_burnDiscArtworkCts.Token);
+            if (!_burnDiscArtworkCts.IsCancellationRequested)
+            {
+                CompactBurnDiscImage.Source = artwork;
+            }
+        }
+        catch (OperationCanceledException) when (_burnDiscArtworkCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to compose the burn CD artwork: {ex}");
+        }
     }
 
     private void CompactBurnSlot_MouseEnter(object sender, MouseEventArgs e)
@@ -3702,6 +3723,8 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         CompositionTarget.Rendering -= TimelineCompositionTarget_Rendering;
+        _burnDiscArtworkCts.Cancel();
+        _burnDiscArtworkCts.Dispose();
         _mediaPollTimer.Stop();
         StopLyricsScrollAnimation();
         _loadingIconTimer.Stop();

@@ -1745,9 +1745,9 @@
                         </Transform3DGroup>
                     </Viewport2DVisual3D.Transform>
                     <Viewport2DVisual3D.Visual>
-                        <Image Width="350"
+                        <Image x:Name="CompactBurnDiscImage"
+                               Width="350"
                                Height="350"
-                               Source="pack://siteoforigin:,,,/Resources/Images/cd.png"
                                Stretch="Fill"
                                RenderOptions.BitmapScalingMode="HighQuality" />
                     </Viewport2DVisual3D.Visual>
