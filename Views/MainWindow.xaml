@@ -1741,7 +1741,7 @@
                                 </RotateTransform3D.Rotation>
                             </RotateTransform3D>
                             <TranslateTransform3D x:Name="CompactBurnDiscEject"
-                                                  OffsetY="1.24" />
+                                                  OffsetY="1.30" />
                         </Transform3DGroup>
                     </Viewport2DVisual3D.Transform>
                     <Viewport2DVisual3D.Visual>

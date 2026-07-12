@@ -101,7 +101,7 @@ public partial class MainWindow : Window
     private const double ExpandedSize = 352;
     private const double LyricsWidth = ExpandedSize;
     private const double LyricsHeight = 620;
-    private const double BurnDiscRetractedOffsetY = 1.24;
+    private const double BurnDiscRetractedOffsetY = 1.30;
     private const double BurnDiscEjectedOffsetY = 0.98;
     private const double BurnDiscMaxPulledOffsetY = 0.28;
     private const double BurnDiscEjectedAngle = 72;
