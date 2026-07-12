@@ -64,6 +64,19 @@ public partial class MainWindow : Window
     private bool _isClosing;
     private bool _allowClose;
     private bool _isVolumeDragging;
+    private bool _isBurnDiscPointerDown;
+    private bool _isBurnDiscDragging;
+    private bool _isBurnDiscInserting;
+    private bool _isBurnDiscOverflowActive;
+    private bool _suppressBurnDiscHoverUntilLeave;
+    private double _burnDiscDragStartY;
+    private double _burnDiscDragStartAngle;
+    private double _burnDiscPullDistance;
+    private double _burnDiscLastPointerY;
+    private double _burnDiscReleaseVelocityY;
+    private long _burnDiscDragStartedAt;
+    private long _burnDiscLastSampleAt;
+    private int _burnDiscAnimationGeneration;
     private bool _isUserBrowsingLyrics;
     private bool _isUserBrowsingFullscreenLyrics;
     private bool _isLyricsScrollAnimating;
@@ -89,7 +102,16 @@ public partial class MainWindow : Window
     private const double LyricsHeight = 620;
     private const double BurnDiscRetractedOffsetY = 1.24;
     private const double BurnDiscEjectedOffsetY = 0.98;
+    private const double BurnDiscMaxPulledOffsetY = 0.28;
     private const double BurnDiscEjectedAngle = 72;
+    private const double BurnDiscPullSpinPerDip = 3.6;
+    private const double BurnDiscMaxPullDistance = 100;
+    private const double BurnDiscCollapsedSurfaceHeight = 10;
+    private const double BurnDiscEjectedSurfaceHeight = 43;
+    private const double BurnDiscMaxSurfaceHeight = 142;
+    private const double BurnDiscOverflowWindowHeight = CompactHeight + 80;
+    private const double BurnDiscPullOffsetPerDip =
+        (BurnDiscEjectedOffsetY - BurnDiscMaxPulledOffsetY) / BurnDiscMaxPullDistance;
     private const double LyricsStackVerticalPadding = 132;
     private const double LyricsEndTailSpacerHeight = 180;
     private static readonly TimeSpan LyricWaitMinimumGap = TimeSpan.FromMilliseconds(4200);
@@ -256,11 +278,15 @@ public partial class MainWindow : Window
 
     private void CompactBurnSlot_MouseEnter(object sender, MouseEventArgs e)
     {
-        if (Snapshot.HasSession)
+        if (Snapshot.HasSession
+            || _isBurnDiscPointerDown
+            || _isBurnDiscInserting
+            || _suppressBurnDiscHoverUntilLeave)
         {
             return;
         }
 
+        CompactBurnSlot.Height = BurnDiscEjectedSurfaceHeight;
         AnimateCompactBurnDisc(
             BurnDiscEjectedOffsetY,
             BurnDiscEjectedAngle,
@@ -270,21 +296,307 @@ public partial class MainWindow : Window
 
     private void CompactBurnSlot_MouseLeave(object sender, MouseEventArgs e)
     {
+        if (_isBurnDiscPointerDown || _isBurnDiscDragging || _isBurnDiscInserting)
+        {
+            return;
+        }
+
+        if (_suppressBurnDiscHoverUntilLeave)
+        {
+            _suppressBurnDiscHoverUntilLeave = false;
+            return;
+        }
+
         AnimateCompactBurnDisc(
             BurnDiscRetractedOffsetY,
             0,
             TimeSpan.FromMilliseconds(220),
-            EasingMode.EaseIn);
+            EasingMode.EaseIn,
+            collapseSurfaceWhenComplete: true);
     }
 
-    private void AnimateCompactBurnDisc(double offsetY, double angle, TimeSpan duration, EasingMode easingMode)
+    private void CompactBurnSlot_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (Snapshot.HasSession || _isBurnDiscInserting || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (!Mouse.Capture(CompactBurnSlot, CaptureMode.Element))
+        {
+            return;
+        }
+
+        var currentOffsetY = CompactBurnDiscEject.OffsetY;
+        var currentAngle = CompactBurnDiscSpin.Angle;
+        _burnDiscAnimationGeneration++;
+        CompactBurnDiscEject.BeginAnimation(TranslateTransform3D.OffsetYProperty, null);
+        CompactBurnDiscSpin.BeginAnimation(AxisAngleRotation3D.AngleProperty, null);
+        CompactBurnDiscEject.OffsetY = Math.Min(currentOffsetY, BurnDiscEjectedOffsetY);
+        CompactBurnDiscSpin.Angle = currentAngle;
+
+        var point = e.GetPosition(this);
+        var now = Stopwatch.GetTimestamp();
+        _isBurnDiscPointerDown = true;
+        _isBurnDiscDragging = false;
+        _suppressBurnDiscHoverUntilLeave = false;
+        _burnDiscDragStartY = point.Y;
+        _burnDiscDragStartAngle = currentAngle;
+        _burnDiscPullDistance = 0;
+        _burnDiscLastPointerY = point.Y;
+        _burnDiscReleaseVelocityY = 0;
+        _burnDiscDragStartedAt = now;
+        _burnDiscLastSampleAt = now;
+    }
+
+    private void CompactBurnSlot_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isBurnDiscPointerDown)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            CompleteCompactBurnDiscPointerInteraction(releaseMouseCapture: true);
+            return;
+        }
+
+        var point = e.GetPosition(this);
+        var downwardDelta = point.Y - _burnDiscDragStartY;
+        if (!_isBurnDiscDragging)
+        {
+            if (downwardDelta < SystemParameters.MinimumVerticalDragDistance)
+            {
+                UpdateBurnDiscVelocitySample(point.Y);
+                return;
+            }
+
+            _isBurnDiscDragging = true;
+            EnableCompactBurnDiscOverflow();
+            CompactBurnSlot.Height = BurnDiscMaxSurfaceHeight;
+            CompactBurnSlot.Cursor = Cursors.Hand;
+            Mouse.OverrideCursor = Cursors.Hand;
+        }
+
+        _burnDiscPullDistance = Math.Clamp(
+            downwardDelta - SystemParameters.MinimumVerticalDragDistance,
+            0,
+            BurnDiscMaxPullDistance);
+
+        CompactBurnDiscEject.OffsetY = Math.Max(
+            BurnDiscMaxPulledOffsetY,
+            BurnDiscEjectedOffsetY - (_burnDiscPullDistance * BurnDiscPullOffsetPerDip));
+        CompactBurnDiscSpin.Angle = _burnDiscDragStartAngle
+            + (_burnDiscPullDistance * BurnDiscPullSpinPerDip);
+
+        UpdateBurnDiscVelocitySample(point.Y);
+    }
+
+    private void CompactBurnSlot_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isBurnDiscPointerDown)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        UpdateBurnDiscVelocitySample(e.GetPosition(this).Y);
+        CompleteCompactBurnDiscPointerInteraction(releaseMouseCapture: true);
+    }
+
+    private void CompactBurnSlot_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (_isBurnDiscPointerDown)
+        {
+            CompleteCompactBurnDiscPointerInteraction(releaseMouseCapture: false);
+        }
+    }
+
+    private void UpdateBurnDiscVelocitySample(double pointerY)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var elapsedSeconds = (now - _burnDiscLastSampleAt) / (double)Stopwatch.Frequency;
+        if (elapsedSeconds is > 0 and <= 0.14)
+        {
+            var instantVelocity = (pointerY - _burnDiscLastPointerY) / elapsedSeconds;
+            _burnDiscReleaseVelocityY = (_burnDiscReleaseVelocityY * 0.55) + (instantVelocity * 0.45);
+        }
+        else if (elapsedSeconds > 0.14)
+        {
+            _burnDiscReleaseVelocityY = 0;
+        }
+
+        _burnDiscLastPointerY = pointerY;
+        _burnDiscLastSampleAt = now;
+    }
+
+    private void CompleteCompactBurnDiscPointerInteraction(bool releaseMouseCapture)
+    {
+        if (!_isBurnDiscPointerDown)
+        {
+            return;
+        }
+
+        var wasDragging = _isBurnDiscDragging;
+        var now = Stopwatch.GetTimestamp();
+        var secondsSinceLastSample = (now - _burnDiscLastSampleAt) / (double)Stopwatch.Frequency;
+        var releaseVelocityY = secondsSinceLastSample <= 0.14
+            ? _burnDiscReleaseVelocityY
+            : 0;
+        var interactionSeconds = Math.Max(
+            0.05,
+            (now - _burnDiscDragStartedAt) / (double)Stopwatch.Frequency);
+
+        _isBurnDiscPointerDown = false;
+        _isBurnDiscDragging = false;
+        CompactBurnSlot.Cursor = Cursors.Hand;
+        Mouse.OverrideCursor = null;
+
+        if (!wasDragging)
+        {
+            if (releaseMouseCapture && CompactBurnSlot.IsMouseCaptured)
+            {
+                Mouse.Capture(null);
+            }
+
+            if (CompactBurnSlot.IsMouseOver)
+            {
+                CompactBurnSlot.Height = BurnDiscEjectedSurfaceHeight;
+                AnimateCompactBurnDisc(
+                    BurnDiscEjectedOffsetY,
+                    BurnDiscEjectedAngle,
+                    TimeSpan.FromMilliseconds(120),
+                    EasingMode.EaseOut);
+            }
+            else
+            {
+                AnimateCompactBurnDisc(
+                    BurnDiscRetractedOffsetY,
+                    0,
+                    TimeSpan.FromMilliseconds(220),
+                    EasingMode.EaseIn,
+                    collapseSurfaceWhenComplete: true);
+            }
+            return;
+        }
+
+        _isBurnDiscInserting = true;
+        if (releaseMouseCapture && CompactBurnSlot.IsMouseCaptured)
+        {
+            Mouse.Capture(null);
+        }
+        _suppressBurnDiscHoverUntilLeave = CompactBurnSlot.IsMouseOver;
+
+        var pullRate = _burnDiscPullDistance / interactionSeconds;
+        var inwardFlickSpeed = Math.Max(0, -releaseVelocityY);
+        var speed = Math.Max(pullRate, inwardFlickSpeed * 0.75);
+        var speedFactor = Math.Clamp((speed - 45) / 430, 0, 1);
+        var remainingPull = BurnDiscMaxPullDistance - _burnDiscPullDistance;
+        var coastDistance = Math.Clamp(
+            Math.Max(0, releaseVelocityY) * 0.035,
+            0,
+            Math.Min(12, remainingPull));
+        AnimateCompactBurnDiscInsertion(coastDistance, speedFactor);
+    }
+
+    private void AnimateCompactBurnDiscInsertion(double coastDistance, double speedFactor)
+    {
+        var currentOffsetY = CompactBurnDiscEject.OffsetY;
+        var currentAngle = CompactBurnDiscSpin.Angle;
+        var coastMilliseconds = coastDistance > 0.25
+            ? Math.Clamp(45 + (coastDistance * 3), 45, 80)
+            : 0;
+        var insertMilliseconds = 360 - (230 * speedFactor);
+        var coastTime = TimeSpan.FromMilliseconds(coastMilliseconds);
+        var totalTime = coastTime + TimeSpan.FromMilliseconds(insertMilliseconds);
+        var coastOffsetY = Math.Max(
+            BurnDiscMaxPulledOffsetY,
+            currentOffsetY - (coastDistance * BurnDiscPullOffsetPerDip));
+        var coastAngle = currentAngle + (coastDistance * BurnDiscPullSpinPerDip);
+        var finalAngle = currentAngle + 96 + (150 * speedFactor);
+        var generation = ++_burnDiscAnimationGeneration;
+
+        var offsetAnimation = new DoubleAnimationUsingKeyFrames();
+        var spinAnimation = new DoubleAnimationUsingKeyFrames();
+        if (coastMilliseconds > 0)
+        {
+            var coastSpline = new KeySpline(0.1, 0.7, 0.25, 1);
+            offsetAnimation.KeyFrames.Add(new SplineDoubleKeyFrame(
+                coastOffsetY,
+                KeyTime.FromTimeSpan(coastTime),
+                coastSpline));
+            spinAnimation.KeyFrames.Add(new SplineDoubleKeyFrame(
+                coastAngle,
+                KeyTime.FromTimeSpan(coastTime),
+                coastSpline));
+        }
+
+        var insertSpline = new KeySpline(0.5, 0, 0.85, 0.45);
+        offsetAnimation.KeyFrames.Add(new SplineDoubleKeyFrame(
+            BurnDiscRetractedOffsetY,
+            KeyTime.FromTimeSpan(totalTime),
+            insertSpline));
+        spinAnimation.KeyFrames.Add(new SplineDoubleKeyFrame(
+            finalAngle,
+            KeyTime.FromTimeSpan(totalTime),
+            insertSpline));
+        offsetAnimation.Completed += (_, _) =>
+        {
+            if (generation != _burnDiscAnimationGeneration)
+            {
+                return;
+            }
+
+            _isBurnDiscInserting = false;
+            CompactBurnDiscEject.BeginAnimation(TranslateTransform3D.OffsetYProperty, null);
+            CompactBurnDiscSpin.BeginAnimation(AxisAngleRotation3D.AngleProperty, null);
+            CompactBurnDiscEject.OffsetY = BurnDiscRetractedOffsetY;
+            CompactBurnDiscSpin.Angle = 0;
+            CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
+            DisableCompactBurnDiscOverflow();
+        };
+
         CompactBurnDiscEject.BeginAnimation(
             TranslateTransform3D.OffsetYProperty,
-            new DoubleAnimation(offsetY, duration)
+            offsetAnimation,
+            HandoffBehavior.SnapshotAndReplace);
+        CompactBurnDiscSpin.BeginAnimation(
+            AxisAngleRotation3D.AngleProperty,
+            spinAnimation,
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void AnimateCompactBurnDisc(
+        double offsetY,
+        double angle,
+        TimeSpan duration,
+        EasingMode easingMode,
+        bool collapseSurfaceWhenComplete = false)
+    {
+        var generation = ++_burnDiscAnimationGeneration;
+        var offsetAnimation = new DoubleAnimation(offsetY, duration)
+        {
+            EasingFunction = new CubicEase { EasingMode = easingMode }
+        };
+        if (collapseSurfaceWhenComplete)
+        {
+            offsetAnimation.Completed += (_, _) =>
             {
-                EasingFunction = new CubicEase { EasingMode = easingMode }
-            },
+                if (generation == _burnDiscAnimationGeneration
+                    && !_isBurnDiscPointerDown
+                    && !_isBurnDiscInserting)
+                {
+                    CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
+                }
+            };
+        }
+
+        CompactBurnDiscEject.BeginAnimation(
+            TranslateTransform3D.OffsetYProperty,
+            offsetAnimation,
             HandoffBehavior.SnapshotAndReplace);
 
         CompactBurnDiscSpin.BeginAnimation(
@@ -296,12 +608,55 @@ public partial class MainWindow : Window
             HandoffBehavior.SnapshotAndReplace);
     }
 
+    private void EnableCompactBurnDiscOverflow()
+    {
+        if (_isBurnDiscOverflowActive || _isExpanded || _isLyricsMode || _isFullscreen)
+        {
+            return;
+        }
+
+        _isBurnDiscOverflowActive = true;
+        RootCard.Height = CompactHeight;
+        RootCard.VerticalAlignment = VerticalAlignment.Top;
+        ClearRoundedWindowRegion();
+        SetWindowSize(CompactWidth, BurnDiscOverflowWindowHeight);
+    }
+
+    private void DisableCompactBurnDiscOverflow()
+    {
+        if (!_isBurnDiscOverflowActive)
+        {
+            return;
+        }
+
+        _isBurnDiscOverflowActive = false;
+        SetWindowSize(CompactWidth, CompactHeight);
+        RootCard.ClearValue(HeightProperty);
+        RootCard.ClearValue(VerticalAlignmentProperty);
+        UpdateLayout();
+        ApplyRoundedWindowRegion();
+    }
+
     private void ResetCompactBurnDisc()
     {
+        _burnDiscAnimationGeneration++;
+        _isBurnDiscPointerDown = false;
+        _isBurnDiscDragging = false;
+        _isBurnDiscInserting = false;
+        _suppressBurnDiscHoverUntilLeave = false;
+        CompactBurnSlot.Cursor = Cursors.Hand;
+        Mouse.OverrideCursor = null;
+        if (CompactBurnSlot.IsMouseCaptured)
+        {
+            Mouse.Capture(null);
+        }
+
         CompactBurnDiscEject.BeginAnimation(TranslateTransform3D.OffsetYProperty, null);
         CompactBurnDiscSpin.BeginAnimation(AxisAngleRotation3D.AngleProperty, null);
         CompactBurnDiscEject.OffsetY = BurnDiscRetractedOffsetY;
         CompactBurnDiscSpin.Angle = 0;
+        CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
+        DisableCompactBurnDiscOverflow();
     }
 
     private ToolTip CreateVolumeToolTip(Slider slider)
@@ -700,13 +1055,7 @@ public partial class MainWindow : Window
         {
             radius = 0.0;
         }
-        var clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), radius, radius);
-        if (clip.CanFreeze)
-        {
-            clip.Freeze();
-        }
-
-        element.Clip = clip;
+        ApplyRoundedSurfaceClip(element, e.NewSize, radius);
 
         if (ReferenceEquals(element, LyricsSurface))
         {
@@ -717,6 +1066,22 @@ public partial class MainWindow : Window
         {
             ApplyRoundedWindowRegion();
         }
+    }
+
+    private static void ApplyRoundedSurfaceClip(FrameworkElement element, Size size, double radius)
+    {
+        if (size.Width <= 0 || size.Height <= 0)
+        {
+            return;
+        }
+
+        var clip = new RectangleGeometry(new Rect(0, 0, size.Width, size.Height), radius, radius);
+        if (clip.CanFreeze)
+        {
+            clip.Freeze();
+        }
+
+        element.Clip = clip;
     }
 
     private void CenterLyricsBackgroundArtwork(Size surfaceSize)
@@ -1810,6 +2175,11 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
+        if (_isBurnDiscPointerDown || _isBurnDiscDragging || _isBurnDiscInserting)
+        {
+            ResetCompactBurnDisc();
+        }
+
         if (_isExpanded)
         {
             SetExpandedInfoVisible(false);
@@ -2226,6 +2596,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        ResetCompactBurnDisc();
         _isMinimizing = true;
         SetExpandedMode(false);
 
@@ -2267,7 +2638,11 @@ public partial class MainWindow : Window
 
     private void Window_StateChanged(object sender, EventArgs e)
     {
-        if (WindowState != WindowState.Minimized)
+        if (WindowState == WindowState.Minimized)
+        {
+            ResetCompactBurnDisc();
+        }
+        else
         {
             _isMinimizing = false;
             ResetAfterMinimizeAnimation();
@@ -3197,6 +3572,7 @@ public partial class MainWindow : Window
 
     private void HideToTray()
     {
+        ResetCompactBurnDisc();
         SaveWindowPlacement();
         ResetAfterMinimizeAnimation();
         _isClosing = false;
@@ -3388,6 +3764,15 @@ public partial class MainWindow : Window
         if (region != IntPtr.Zero && SetWindowRgn(handle, region, true) == 0)
         {
             DeleteObject(region);
+        }
+    }
+
+    private void ClearRoundedWindowRegion()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            SetWindowRgn(handle, IntPtr.Zero, true);
         }
     }
 
