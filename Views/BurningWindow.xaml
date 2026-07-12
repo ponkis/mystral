@@ -205,6 +205,11 @@
                         <RowDefinition Height="50" />
                     </Grid.RowDefinitions>
 
+                    <Border Grid.Row="2"
+                            Grid.RowSpan="2"
+                            Background="#FFF0F0F0"
+                            IsHitTestVisible="False" />
+
                     <Grid x:Name="TitleBar"
                           Grid.Row="0"
                           Background="#12000000"
@@ -288,11 +293,10 @@
                     <TabControl x:Name="EditorTabs"
                                 Grid.Row="2"
                                 Margin="14,12,14,8"
-                                Background="#F2F5F6F7"
-                                BorderBrush="#ACD9E5EA">
+                                Background="#FFF0F0F0">
                         <TabItem Header="Details">
                             <Border Padding="20,16"
-                                    Background="#F2F5F6F7">
+                                    Background="#FFF0F0F0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="96" />
@@ -351,7 +355,7 @@
 
                         <TabItem Header="Artwork">
                             <Border Padding="18,16"
-                                    Background="#F2F5F6F7">
+                                    Background="#FFF0F0F0">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -479,9 +483,9 @@
                     </TabControl>
 
                     <Border Grid.Row="3"
-                            BorderBrush="#48FFFFFF"
+                            BorderBrush="#FFD0D0D0"
                             BorderThickness="0,1,0,0"
-                            Background="#2C000000">
+                            Background="#FFF0F0F0">
                         <Grid Margin="12,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -499,7 +503,7 @@
                                        Grid.Column="1"
                                        Margin="12,0"
                                        VerticalAlignment="Center"
-                                       Foreground="#E5EDE8"
+                                       Foreground="#555555"
                                        FontSize="11"
                                        TextTrimming="CharacterEllipsis" />
 
