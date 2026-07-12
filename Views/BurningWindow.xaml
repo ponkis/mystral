@@ -4,12 +4,12 @@
         xmlns:controls="clr-namespace:Mystral.Controls"
         Title="Burn your own CD"
         Icon="pack://siteoforigin:,,,/Resources/ico.ico"
-        Width="720"
-        Height="700"
-        MinWidth="720"
-        MinHeight="700"
-        MaxWidth="720"
-        MaxHeight="700"
+        Width="650"
+        Height="560"
+        MinWidth="650"
+        MinHeight="560"
+        MaxWidth="650"
+        MaxHeight="560"
         ResizeMode="NoResize"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -123,6 +123,14 @@
                 <Setter Property="SelectionBrush" Value="#6BAEE8FF" />
             </Style>
 
+            <Style x:Key="EditorLabelStyle" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,0,12,8" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextAlignment" Value="Right" />
+                <Setter Property="Foreground" Value="#687077" />
+            </Style>
+
             <Style x:Key="UploadTileStyle" TargetType="Button">
                 <Setter Property="Cursor" Value="Hand" />
                 <Setter Property="Background" Value="#EAF8FBFC" />
@@ -232,9 +240,9 @@
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="30" />
-                        <RowDefinition Height="190" />
+                        <RowDefinition Height="150" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="58" />
+                        <RowDefinition Height="50" />
                     </Grid.RowDefinitions>
 
                     <Grid x:Name="TitleBar"
@@ -260,7 +268,8 @@
                                    Foreground="#FCFEFC"
                                    Effect="{StaticResource TextShadow}"
                                    Text="Burn your own CD" />
-                        <Button Grid.Column="2"
+                        <Button x:Name="CloseButton"
+                                Grid.Column="2"
                                 Style="{StaticResource ChromeButtonStyle}"
                                 Click="CloseButton_Click"
                                 ToolTip="Close">
@@ -277,16 +286,16 @@
                             BorderBrush="#55FFFFFF"
                             BorderThickness="0,1,0,1"
                             Background="#36000000">
-                        <Grid Margin="22,10,24,10">
+                        <Grid Margin="18,5,20,5">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="194" />
-                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="166" />
+                                <ColumnDefinition Width="16" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
                              <controls:JewelCasePreview x:Name="JewelPreview"
-                                                       Width="189"
-                                                       Height="170"
+                                                       Width="156"
+                                                       Height="140"
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center"
                                                        UploadCoverRequested="JewelPreview_UploadCoverRequested" />
@@ -294,29 +303,24 @@
                             <StackPanel Grid.Column="2"
                                         VerticalAlignment="Center">
                                 <TextBlock x:Name="PreviewTitleText"
-                                           FontSize="24"
+                                           FontSize="21"
                                            FontWeight="SemiBold"
                                            Foreground="#FCFEFC"
                                            TextTrimming="CharacterEllipsis"
                                            Effect="{StaticResource TextShadow}" />
                                 <TextBlock x:Name="PreviewArtistText"
                                            Margin="0,5,0,0"
-                                           FontSize="15"
+                                           FontSize="14"
                                            FontWeight="SemiBold"
                                            Foreground="#F0F5F1"
                                            TextTrimming="CharacterEllipsis"
                                            Effect="{StaticResource TextShadow}" />
                                 <TextBlock x:Name="PreviewAlbumText"
                                            Margin="0,4,0,0"
-                                           FontSize="14"
+                                           FontSize="13"
                                            Foreground="#DDE7E1"
                                            TextTrimming="CharacterEllipsis"
                                            Effect="{StaticResource TextShadow}" />
-                                <TextBlock x:Name="SourceFileText"
-                                           Margin="0,17,0,0"
-                                           FontSize="11"
-                                           Foreground="#BFD0C7"
-                                           TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </Grid>
                     </Border>
@@ -327,11 +331,11 @@
                                 Background="#F2F5F6F7"
                                 BorderBrush="#ACD9E5EA">
                         <TabItem Header="Details">
-                            <Border Padding="25,21"
+                            <Border Padding="20,16"
                                     Background="#F2F5F6F7">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="112" />
+                                        <ColumnDefinition Width="96" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <Grid.RowDefinitions>
@@ -343,24 +347,50 @@
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
-                                    <TextBlock Grid.Row="0" VerticalAlignment="Center" Foreground="#42484C" Text="Title" />
-                                    <TextBox x:Name="TitleBox" Grid.Row="0" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
-                                    <TextBlock Grid.Row="1" VerticalAlignment="Center" Foreground="#42484C" Text="Artist" />
-                                    <TextBox x:Name="ArtistBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
-                                    <TextBlock Grid.Row="2" VerticalAlignment="Center" Foreground="#42484C" Text="Genre" />
-                                    <TextBox x:Name="GenreBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" />
-                                    <TextBlock Grid.Row="3" VerticalAlignment="Center" Foreground="#42484C" Text="Date" />
-                                    <TextBox x:Name="DateBox" Grid.Row="3" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" ToolTip="Year or date" />
-                                    <TextBlock Grid.Row="4" VerticalAlignment="Center" Foreground="#42484C" Text="Album" />
-                                    <TextBox x:Name="AlbumBox" Grid.Row="4" Grid.Column="1" Margin="0,0,0,10" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
-                                    <TextBlock Grid.Row="5" VerticalAlignment="Center" Foreground="#42484C" Text="Track number" />
-                                    <TextBox x:Name="TrackNumberBox" Grid.Row="5" Grid.Column="1" Style="{StaticResource EditorTextBoxStyle}" />
+                                    <TextBlock Grid.Row="0" Style="{StaticResource EditorLabelStyle}" Text="Title" />
+                                    <TextBox x:Name="TitleBox" Grid.Row="0" Grid.Column="1" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="1" Style="{StaticResource EditorLabelStyle}" Text="Artist" />
+                                    <TextBox x:Name="ArtistBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="2" Style="{StaticResource EditorLabelStyle}" Text="Album" />
+                                    <TextBox x:Name="AlbumBox" Grid.Row="2" Grid.Column="1" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="3" Style="{StaticResource EditorLabelStyle}" Text="Genre" />
+                                    <TextBox x:Name="GenreBox" Grid.Row="3" Grid.Column="1" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="4" Style="{StaticResource EditorLabelStyle}" Text="Year" />
+                                    <TextBox x:Name="YearBox"
+                                             Grid.Row="4"
+                                             Grid.Column="1"
+                                             Width="92"
+                                             MaxLength="4"
+                                             Margin="0,0,0,8"
+                                             HorizontalAlignment="Left"
+                                             Style="{StaticResource EditorTextBoxStyle}"
+                                             TextChanged="MetadataBox_TextChanged"
+                                             ToolTip="Four-digit year" />
+                                    <TextBlock Grid.Row="5" Margin="0,0,12,0" Style="{StaticResource EditorLabelStyle}" Text="Track" />
+                                    <StackPanel Grid.Row="5"
+                                                Grid.Column="1"
+                                                Orientation="Horizontal">
+                                        <TextBox x:Name="TrackNumberBox"
+                                                 Width="64"
+                                                 HorizontalAlignment="Left"
+                                                 Style="{StaticResource EditorTextBoxStyle}"
+                                                 TextChanged="MetadataBox_TextChanged" />
+                                        <TextBlock Margin="9,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="#687077"
+                                                   Text="of" />
+                                        <TextBox x:Name="TrackTotalBox"
+                                                 Width="64"
+                                                 HorizontalAlignment="Left"
+                                                 Style="{StaticResource EditorTextBoxStyle}"
+                                                 TextChanged="MetadataBox_TextChanged" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </TabItem>
 
                         <TabItem Header="Artwork">
-                            <Border Padding="24,22"
+                            <Border Padding="18,16"
                                     Background="#F2F5F6F7">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -371,17 +401,31 @@
 
                                     <Button x:Name="CoverUploadButton"
                                             Grid.Column="0"
-                                            Height="238"
+                                            Height="210"
+                                            Tag="Cover"
                                             Style="{StaticResource UploadTileStyle}"
+                                            ContextMenuOpening="ArtworkButton_ContextMenuOpening"
                                             Click="CoverUploadButton_Click">
-                                        <Grid Margin="13">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Delete artwork" Click="DeleteCoverArtwork_Click">
+                                                    <MenuItem.Icon>
+                                                        <Image Width="16"
+                                                               Height="16"
+                                                               Source="pack://siteoforigin:,,,/Resources/delete.ico"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                        <Grid Margin="11">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="*" />
                                                 <RowDefinition Height="Auto" />
                                                 <RowDefinition Height="Auto" />
                                             </Grid.RowDefinitions>
-                                            <Border Width="142"
-                                                    Height="142"
+                                            <Border Width="120"
+                                                    Height="120"
                                                     HorizontalAlignment="Center"
                                                     CornerRadius="4"
                                                     ClipToBounds="True"
@@ -410,19 +454,33 @@
 
                                     <Button x:Name="DiscUploadButton"
                                             Grid.Column="2"
-                                            Height="238"
+                                            Height="210"
+                                            Tag="Disc"
                                             Style="{StaticResource UploadTileStyle}"
+                                            ContextMenuOpening="ArtworkButton_ContextMenuOpening"
                                             Click="DiscUploadButton_Click">
-                                        <Grid Margin="13">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Delete artwork" Click="DeleteDiscArtwork_Click">
+                                                    <MenuItem.Icon>
+                                                        <Image Width="16"
+                                                               Height="16"
+                                                               Source="pack://siteoforigin:,,,/Resources/delete.ico"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                        <Grid Margin="11">
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="*" />
                                                 <RowDefinition Height="Auto" />
                                                 <RowDefinition Height="Auto" />
                                             </Grid.RowDefinitions>
-                                            <Border Width="142"
-                                                    Height="142"
+                                            <Border Width="120"
+                                                    Height="120"
                                                     HorizontalAlignment="Center"
-                                                    CornerRadius="71"
+                                                    CornerRadius="60"
                                                     ClipToBounds="True"
                                                     BorderBrush="#8B7B8D96"
                                                     BorderThickness="1"
@@ -431,8 +489,8 @@
                                                     <Image x:Name="DiscUploadImage"
                                                            Stretch="UniformToFill"
                                                            RenderOptions.BitmapScalingMode="HighQuality" />
-                                                    <Ellipse Width="23"
-                                                             Height="23"
+                                                    <Ellipse Width="19"
+                                                             Height="19"
                                                              HorizontalAlignment="Center"
                                                              VerticalAlignment="Center"
                                                              Fill="#F2F5F6F7"
@@ -464,7 +522,7 @@
                             BorderBrush="#48FFFFFF"
                             BorderThickness="0,1,0,0"
                             Background="#2C000000">
-                        <Grid Margin="14,10">
+                        <Grid Margin="12,8">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
@@ -476,20 +534,13 @@
                                     Click="FetchButton_Click"
                                     Content="Fetch song data" />
 
-                            <StackPanel Grid.Column="1"
-                                        Margin="12,0"
-                                        VerticalAlignment="Center">
-                                <TextBlock x:Name="StatusText"
-                                           Foreground="#E5EDE8"
-                                           FontSize="11"
-                                           TextTrimming="CharacterEllipsis" />
-                                <ProgressBar x:Name="OperationProgress"
-                                             Height="4"
-                                             Margin="0,4,0,0"
-                                             Minimum="0"
-                                             Maximum="1"
-                                             Visibility="Collapsed" />
-                            </StackPanel>
+                            <TextBlock x:Name="DirtyStatusText"
+                                       Grid.Column="1"
+                                       Margin="12,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="#E5EDE8"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis" />
 
                             <StackPanel Grid.Column="2"
                                         Orientation="Horizontal">

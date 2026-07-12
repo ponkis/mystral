@@ -44,7 +44,7 @@ public sealed class AudioTagService
             throw new InvalidOperationException($"The saved copy must keep the original {sourceExtension} format.");
         }
 
-        _ = ParseDate(draft.Date);
+        ValidateDraft(draft);
 
         var destinationDirectory = Path.GetDirectoryName(destination)
             ?? throw new InvalidOperationException("The destination folder is invalid.");
@@ -120,23 +120,36 @@ public sealed class AudioTagService
                 throw new InvalidDataException("The selected file does not contain valid audio data.");
             }
 
-            var cover = LoadEmbeddedArtwork(track, ATL.PictureInfo.PIC_TYPE.Front, fallbackToAnyPicture: true, cancellationToken);
-            var disc = LoadEmbeddedArtwork(track, ATL.PictureInfo.PIC_TYPE.CD, fallbackToAnyPicture: false, cancellationToken);
+            var cover = LoadEmbeddedArtwork(
+                track,
+                ATL.PictureInfo.PIC_TYPE.Front,
+                fallbackToAnyPicture: true,
+                cancellationToken,
+                out var coverPictureType);
+            var disc = LoadEmbeddedArtwork(
+                track,
+                ATL.PictureInfo.PIC_TYPE.CD,
+                fallbackToAnyPicture: false,
+                cancellationToken,
+                out _);
             return new BurnTrackDraft
             {
                 SourcePath = path,
                 Title = track.Title?.Trim() ?? string.Empty,
                 Artist = track.Artist?.Trim() ?? string.Empty,
                 Genre = track.Genre?.Trim() ?? string.Empty,
-                Date = FormatDate(track),
+                Year = FormatYear(track),
                 Album = track.Album?.Trim() ?? string.Empty,
                 TrackNumber = track.TrackNumberStr?.Trim()
                     ?? track.TrackNumber?.ToString(CultureInfo.InvariantCulture)
                     ?? string.Empty,
+                TrackTotal = track.TrackTotal?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
                 Isrc = track.ISRC?.Trim() ?? string.Empty,
                 Duration = TimeSpan.FromMilliseconds(track.DurationMs),
                 CoverArtwork = cover,
-                DiscArtwork = disc
+                DiscArtwork = disc,
+                CoverArtworkOriginalType = coverPictureType,
+                CoverArtworkOriginalData = cover?.Data
             };
         }
         catch (InvalidDataException)
@@ -166,8 +179,10 @@ public sealed class AudioTagService
         ATL.Track track,
         ATL.PictureInfo.PIC_TYPE type,
         bool fallbackToAnyPicture,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        out ATL.PictureInfo.PIC_TYPE? loadedPictureType)
     {
+        loadedPictureType = null;
         var picture = track.EmbeddedPictures.FirstOrDefault(item => item.PicType == type);
         if (picture is null && fallbackToAnyPicture)
         {
@@ -181,7 +196,9 @@ public sealed class AudioTagService
 
         try
         {
-            return ImageArtworkLoader.Load(data.ToArray(), cancellationToken);
+            var artwork = ImageArtworkLoader.Load(data.ToArray(), cancellationToken);
+            loadedPictureType = picture.PicType;
+            return artwork;
         }
         catch (InvalidDataException)
         {
@@ -238,96 +255,117 @@ public sealed class AudioTagService
         track.Genre = draft.Genre.Trim();
         track.Album = draft.Album.Trim();
         track.TrackNumberStr = draft.TrackNumber.Trim();
-        ApplyDate(track, draft.Date);
+        track.TrackTotal = ParseTrackTotal(draft.TrackTotal, draft.TrackNumber);
+        ApplyYear(track, draft.Year);
 
-        if (draft.CoverArtworkChanged && draft.CoverArtwork is not null)
+        if (draft.CoverArtworkChanged)
         {
-            ReplacePicture(track, draft.CoverArtwork.Data, ATL.PictureInfo.PIC_TYPE.Front);
+            ReplacePicture(
+                track,
+                draft.CoverArtwork?.Data,
+                ATL.PictureInfo.PIC_TYPE.Front,
+                draft.CoverArtworkOriginalType,
+                draft.CoverArtworkOriginalData);
         }
 
-        if (draft.DiscArtworkChanged && draft.DiscArtwork is not null)
+        if (draft.DiscArtworkChanged)
         {
-            ReplacePicture(track, draft.DiscArtwork.Data, ATL.PictureInfo.PIC_TYPE.CD);
+            ReplacePicture(track, draft.DiscArtwork?.Data, ATL.PictureInfo.PIC_TYPE.CD);
         }
     }
 
-    private static void ApplyDate(ATL.Track track, string value)
+    private static void ApplyYear(ATL.Track track, string value)
     {
-        var parsed = ParseDate(value);
+        var year = ParseYear(value);
         track.Date = null;
-        track.Year = null;
-        if (parsed.Year is not null)
-        {
-            track.Year = parsed.Year;
-            return;
-        }
-
-        if (parsed.Date is not null)
-        {
-            track.Date = parsed.Date;
-        }
+        track.Year = year;
     }
 
-    private static (DateTime? Date, int? Year) ParseDate(string value)
+    internal static void ValidateDraft(BurnTrackDraft draft)
     {
-        var dateText = value.Trim();
-        if (dateText.Length == 0)
+        ArgumentNullException.ThrowIfNull(draft);
+        _ = ParseYear(draft.Year);
+        _ = ParseTrackTotal(draft.TrackTotal, draft.TrackNumber);
+    }
+
+    private static int? ParseYear(string value)
+    {
+        var yearText = value.Trim();
+        if (yearText.Length == 0)
         {
-            return (null, null);
+            return null;
         }
 
-        if (dateText.Length == 4
-            && int.TryParse(dateText, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
+        if (yearText.Length == 4
+            && int.TryParse(yearText, NumberStyles.None, CultureInfo.InvariantCulture, out var year)
             && year is >= 1 and <= 9999)
         {
-            return (null, year);
+            return year;
         }
 
-        if (DateTime.TryParseExact(
-                dateText,
-                ["yyyy-MM", "yyyy-MM-dd"],
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out var exactDate)
-            || DateTime.TryParse(
-                dateText,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AllowWhiteSpaces,
-                out exactDate))
-        {
-            return (exactDate, null);
-        }
-
-        throw new InvalidDataException("Date must be a year or a recognizable date.");
+        throw new InvalidDataException("Year must contain exactly four digits.");
     }
 
-    private static string FormatDate(ATL.Track track)
+    private static int? ParseTrackTotal(string value, string trackNumber)
     {
-        if (track.Date is not { } date)
+        var totalText = value.Trim();
+        if (totalText.Length == 0)
         {
-            return track.Year?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+            return null;
         }
 
-        if (date.Month == 1 && date.Day == 1)
+        if (!int.TryParse(totalText, NumberStyles.None, CultureInfo.InvariantCulture, out var total)
+            || total <= 0)
         {
-            return date.Year.ToString("0000", CultureInfo.InvariantCulture);
+            throw new InvalidDataException("Track count must be a positive whole number.");
         }
 
-        if (date.Day == 1)
+        if (int.TryParse(trackNumber.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
+            && number > 0
+            && number > total)
         {
-            return date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            throw new InvalidDataException("Track number cannot be greater than the track count.");
         }
 
-        return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return total;
     }
 
-    private static void ReplacePicture(ATL.Track track, byte[] data, ATL.PictureInfo.PIC_TYPE type)
+    private static string FormatYear(ATL.Track track)
     {
+        var year = track.Year ?? track.Date?.Year;
+        return year?.ToString("0000", CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static void ReplacePicture(
+        ATL.Track track,
+        byte[]? data,
+        ATL.PictureInfo.PIC_TYPE type,
+        ATL.PictureInfo.PIC_TYPE? originalFallbackType = null,
+        byte[]? originalFallbackData = null)
+    {
+        if (data is null
+            && originalFallbackType is { } fallbackType
+            && fallbackType != type
+            && originalFallbackData is { Length: > 0 })
+        {
+            var fallback = track.EmbeddedPictures.FirstOrDefault(item =>
+                item.PicType == fallbackType
+                && item.PictureData is { Length: > 0 } pictureData
+                && pictureData.AsSpan().SequenceEqual(originalFallbackData));
+            if (fallback is not null)
+            {
+                track.EmbeddedPictures.Remove(fallback);
+            }
+        }
+
         foreach (var existing in track.EmbeddedPictures.Where(item => item.PicType == type).ToArray())
         {
             track.EmbeddedPictures.Remove(existing);
         }
 
-        track.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(data, type));
+        if (data is { Length: > 0 })
+        {
+            track.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(data, type));
+        }
     }
 }

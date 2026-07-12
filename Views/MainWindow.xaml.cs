@@ -621,9 +621,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task OpenBurningWindowAsync()
+    private async Task OpenBurningWindowAsync(bool allowDuringPlayback = false)
     {
-        if (_isOpeningBurningWindow || Snapshot.HasSession)
+        if (_isOpeningBurningWindow || (!allowDuringPlayback && Snapshot.HasSession))
         {
             return;
         }
@@ -3412,6 +3412,15 @@ public partial class MainWindow : Window
         settingsItem.Click += (_, _) => ShowSettingsWindow();
         menu.Items.Add(settingsItem);
 
+        var burnItem = new MenuItem
+        {
+            Header = "Burn",
+            Icon = CreateMenuIcon("Resources/burn.ico")
+        };
+        burnItem.Click += (_, _) => _ = OpenBurningWindowAsync(allowDuringPlayback: true);
+        menu.Items.Add(burnItem);
+        menu.Items.Add(new Separator());
+
         var aboutItem = new MenuItem
         {
             Header = "About",
@@ -3543,6 +3552,17 @@ public partial class MainWindow : Window
             ShowSettingsWindow();
         };
 
+        var burnItem = new MenuItem
+        {
+            Header = "Burn",
+            Icon = CreateMenuIcon("Resources/burn.ico")
+        };
+        burnItem.Click += (_, _) =>
+        {
+            RestoreFromTray();
+            _ = OpenBurningWindowAsync(allowDuringPlayback: true);
+        };
+
         var exitItem = new MenuItem
         {
             Header = "Exit",
@@ -3551,6 +3571,7 @@ public partial class MainWindow : Window
         exitItem.Click += (_, _) => ExitApplication();
 
         menu.Items.Add(settingsItem);
+        menu.Items.Add(burnItem);
         menu.Items.Add(new Separator());
 
         if (_settingsService.Settings.LastFm.Enabled)

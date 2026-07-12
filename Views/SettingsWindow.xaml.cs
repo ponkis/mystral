@@ -317,7 +317,7 @@ public partial class SettingsWindow : Window
     internal static async Task CheckForUpdatesAsync(Window owner, bool showNoUpdateMessage, bool showErrors, Button? sourceButton = null)
     {
         var originalContent = sourceButton?.Content;
-        UpdateProgressWindow? progressWindow = null;
+        OperationProgressWindow? progressWindow = null;
         if (sourceButton is not null)
         {
             sourceButton.IsEnabled = false;
@@ -366,12 +366,19 @@ public partial class SettingsWindow : Window
 
             string? installerPath = null;
             Exception? downloadError = null;
-            progressWindow = new UpdateProgressWindow(owner, $"Mystral {latestVersion}", downloadCancellation.Cancel);
+            progressWindow = new OperationProgressWindow(
+                owner,
+                "Downloading update",
+                "Downloading update",
+                $"Mystral {latestVersion}",
+                isIndeterminate: false,
+                downloadCancellation.Cancel,
+                iconPath: "Resources/ico.ico");
             progressWindow.ContentRendered += async (_, _) =>
             {
                 try
                 {
-                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetProgress, downloadCancellation.Token);
+                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetByteProgress, downloadCancellation.Token);
                 }
                 catch (Exception ex)
                 {
@@ -379,7 +386,7 @@ public partial class SettingsWindow : Window
                 }
                 finally
                 {
-                    progressWindow.CloseDownloadWindow();
+                    progressWindow.CloseOperationWindow();
                 }
             };
             progressWindow.ShowDialog();
@@ -419,7 +426,7 @@ public partial class SettingsWindow : Window
         }
         finally
         {
-            progressWindow?.CloseDownloadWindow();
+            progressWindow?.CloseOperationWindow();
             if (sourceButton is not null)
             {
                 sourceButton.Content = originalContent;
@@ -498,194 +505,6 @@ public partial class SettingsWindow : Window
             }
 
             throw;
-        }
-    }
-
-    private sealed class UpdateProgressWindow : Window
-    {
-        private readonly Action _cancelDownload;
-        private readonly ProgressBar _progressBar = new()
-        {
-            Height = 22,
-            Minimum = 0,
-            Maximum = 100,
-            Foreground = System.Windows.Media.Brushes.DodgerBlue
-        };
-
-        private readonly TextBlock _progressText = new()
-        {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = System.Windows.Media.Brushes.Black,
-            FontSize = 11,
-            IsHitTestVisible = false,
-            Text = "0%",
-            TextTrimming = TextTrimming.CharacterEllipsis
-        };
-
-        private readonly Button _cancelButton = new()
-        {
-            Content = "Cancel",
-            Height = 23,
-            MinWidth = 72
-        };
-
-        private bool _canClose;
-        private bool _isClosed;
-        private bool _isCanceling;
-
-        public UpdateProgressWindow(Window owner, string versionInfo, Action cancelDownload)
-        {
-            _cancelDownload = cancelDownload;
-            Title = "Downloading update";
-            Icon = owner.Icon;
-            Width = 430;
-            SizeToContent = SizeToContent.Height;
-            ResizeMode = ResizeMode.NoResize;
-            if (owner.IsVisible)
-            {
-                Owner = owner;
-                WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            }
-            else
-            {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            }
-            ShowInTaskbar = false;
-            Background = System.Windows.Media.Brushes.White;
-            FontFamily = new System.Windows.Media.FontFamily("Segoe UI");
-            SnapsToDevicePixels = true;
-            UseLayoutRounding = true;
-            Resources.MergedDictionaries.Add(new ResourceDictionary
-            {
-                Source = new Uri("/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml", UriKind.Relative)
-            });
-            Closing += (_, e) =>
-            {
-                if (!_canClose)
-                {
-                    RequestCancel();
-                    e.Cancel = true;
-                }
-            };
-            Closed += (_, _) => _isClosed = true;
-            _cancelButton.Click += (_, _) => RequestCancel();
-
-            var progressGrid = new Grid
-            {
-                Margin = new Thickness(0, 12, 0, 0),
-                Children =
-                {
-                    _progressBar,
-                    _progressText
-                }
-            };
-
-            var body = new StackPanel
-            {
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Margin = new Thickness(0, 0, 0, 2),
-                        FontSize = 19,
-                        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(53, 90, 136)),
-                        Text = "Downloading update",
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    new TextBlock
-                    {
-                        Foreground = System.Windows.Media.Brushes.DimGray,
-                        Text = versionInfo,
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    progressGrid
-                }
-            };
-
-            var root = new Grid
-            {
-                Background = new System.Windows.Media.ImageBrush
-                {
-                    ImageSource = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://siteoforigin:,,,/Resources/Images/dialog_background.png")),
-                    Stretch = System.Windows.Media.Stretch.Fill
-                }
-            };
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var contentGrid = new Grid { Margin = new Thickness(16) };
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var iconImage = new Image
-            {
-                Source = IconImageSource.LoadBestFitFrame("Resources/ico.ico", 32),
-                Width = 32,
-                Height = 32,
-                VerticalAlignment = VerticalAlignment.Top
-            };
-            System.Windows.Media.RenderOptions.SetBitmapScalingMode(iconImage, System.Windows.Media.BitmapScalingMode.HighQuality);
-            contentGrid.Children.Add(iconImage);
-            Grid.SetColumn(body, 1);
-            body.Margin = new Thickness(8, 0, 0, 0);
-            contentGrid.Children.Add(body);
-
-            var buttonPanel = new StackPanel
-            {
-                Margin = new Thickness(15, 11, 15, 11),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Orientation = Orientation.Horizontal,
-                Children = { _cancelButton }
-            };
-
-            root.Children.Add(contentGrid);
-            Grid.SetRow(buttonPanel, 1);
-            root.Children.Add(buttonPanel);
-            Content = root;
-        }
-
-        public void SetProgress(long downloadedBytes, long? totalBytes)
-        {
-            if (totalBytes is > 0)
-            {
-                var percent = Math.Clamp(downloadedBytes * 100d / totalBytes.Value, 0, 100);
-                _progressBar.IsIndeterminate = false;
-                _progressBar.Value = percent;
-                _progressText.Text = $"{percent:0}% ({FormatBytes(downloadedBytes)} of {FormatBytes(totalBytes.Value)})";
-                return;
-            }
-
-            _progressBar.IsIndeterminate = true;
-            _progressText.Text = $"Downloaded {FormatBytes(downloadedBytes)}";
-        }
-
-        public void CloseDownloadWindow()
-        {
-            _canClose = true;
-            if (!_isClosed)
-            {
-                Close();
-            }
-        }
-
-        private void RequestCancel()
-        {
-            _cancelButton.IsEnabled = false;
-            _progressText.Text = "Canceling...";
-            if (_isCanceling)
-            {
-                return;
-            }
-
-            _isCanceling = true;
-            _cancelDownload();
-        }
-
-        private static string FormatBytes(long bytes)
-        {
-            return bytes >= 1024 * 1024
-                ? $"{bytes / 1024d / 1024d:0.0} MB"
-                : $"{bytes / 1024d:0.0} KB";
         }
     }
 

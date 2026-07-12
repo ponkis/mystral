@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -76,11 +77,21 @@ public sealed class MusicBrainzService : IDisposable
             .Select(tag => tag.Name?.Trim())
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
-        var trackNumber = release?.Media
-            .SelectMany(medium => medium.Tracks)
+        var matchingMedium = release?.Media
+            .FirstOrDefault(medium => medium.Tracks.Any(track => !string.IsNullOrWhiteSpace(track.Number)))
+            ?? release?.Media.FirstOrDefault();
+        var trackNumber = matchingMedium?.Tracks
             .Select(track => track.Number?.Trim())
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
             ?? string.Empty;
+        var trackTotal = matchingMedium?.TrackCount is > 0
+            ? matchingMedium.TrackCount.Value.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+        var year = ExtractYear(release?.Date);
+        if (year.Length == 0)
+        {
+            year = ExtractYear(recording.FirstReleaseDate);
+        }
 
         byte[]? coverArtwork = null;
         byte[]? discArtwork = null;
@@ -95,9 +106,10 @@ public sealed class MusicBrainzService : IDisposable
             recording.Title?.Trim() ?? string.Empty,
             artistName,
             genre,
-            release?.Date?.Trim() ?? recording.FirstReleaseDate?.Trim() ?? string.Empty,
+            year,
             release?.Title?.Trim() ?? string.Empty,
             trackNumber,
+            trackTotal,
             coverArtwork,
             discArtwork);
     }
@@ -371,6 +383,25 @@ public sealed class MusicBrainzService : IDisposable
         return string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static string ExtractYear(string? date)
+    {
+        var value = date?.Trim();
+        if (value is null
+            || value.Length < 4
+            || (value.Length > 4 && value[4] != '-')
+            || !int.TryParse(
+                value.AsSpan(0, 4),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var year)
+            || year is < 1 or > 9999)
+        {
+            return string.Empty;
+        }
+
+        return year.ToString("0000", CultureInfo.InvariantCulture);
+    }
+
     public void Dispose()
     {
         if (_ownsHttpClient)
@@ -471,6 +502,10 @@ public sealed class MusicBrainzService : IDisposable
     {
         [JsonPropertyName("format")]
         public string? Format { get; init; }
+
+        [JsonPropertyName("track-count")]
+        [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+        public int? TrackCount { get; init; }
 
         [JsonPropertyName("track")]
         public List<TrackResult> Tracks { get; init; } = [];

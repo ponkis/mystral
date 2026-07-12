@@ -556,7 +556,7 @@ static class MusicBrainzServiceTests
                               "id": "release-other",
                               "title": "Other album",
                               "status": "Official",
-                              "media": [{ "format": "CD", "track": [{ "number": "1" }] }]
+                              "media": [{ "format": "CD", "track-count": 9, "track": [{ "number": "1" }] }]
                             },
                             {
                               "id": "release-good",
@@ -564,7 +564,7 @@ static class MusicBrainzServiceTests
                               "status": "Official",
                               "date": "2001-02-03",
                               "release-group": { "id": "group-good", "primary-type": "Album" },
-                              "media": [{ "format": "CD", "track": [{ "number": "07" }] }]
+                              "media": [{ "format": "CD", "track-count": "12", "track": [{ "number": "07" }] }]
                             }
                           ]
                         }
@@ -626,9 +626,10 @@ static class MusicBrainzServiceTests
         Check.Equal("Mapped title", result!.Title);
         Check.Equal("Lead & Guest", result.Artist);
         Check.Equal("rock", result.Genre);
-        Check.Equal("2001-02-03", result.Date);
+        Check.Equal("2001", result.Year);
         Check.Equal("Wanted album", result.Album);
         Check.Equal("07", result.TrackNumber);
+        Check.Equal("12", result.TrackTotal);
         Check.Sequence(coverBytes, result.CoverArtwork!);
         Check.Sequence(discBytes, result.DiscArtwork!);
         Check.Equal(4, handler.Count);
@@ -731,9 +732,15 @@ static class AudioTagServiceTests
         draft.Title = "Burned title";
         draft.Artist = "Burned artist";
         draft.Genre = "Rock";
-        draft.Date = "1995";
+        draft.Year = "1995";
         draft.Album = "Burned album";
         draft.TrackNumber = "7";
+        draft.TrackTotal = "12";
+        var artworkLoader = new ImageArtworkLoader();
+        draft.CoverArtwork = artworkLoader.LoadAsync(Png(1, 1, [10, 20, 30, 255])).GetAwaiter().GetResult();
+        draft.DiscArtwork = artworkLoader.LoadAsync(Png(1, 1, [40, 50, 60, 255])).GetAwaiter().GetResult();
+        draft.CoverArtworkChanged = true;
+        draft.DiscArtworkChanged = true;
         var destinationPath = Path.Combine(temp.Path, "burned.wav");
 
         service.SaveCopyAsync(draft, destinationPath).GetAwaiter().GetResult();
@@ -744,20 +751,84 @@ static class AudioTagServiceTests
         Check.Equal("Burned title", saved.Title);
         Check.Equal("Burned artist", saved.Artist);
         Check.Equal("Rock", saved.Genre);
-        Check.Equal("1995", saved.Date);
+        Check.Equal("1995", saved.Year);
         Check.Equal("Burned album", saved.Album);
         Check.Equal("7", saved.TrackNumber);
+        Check.Equal("12", saved.TrackTotal);
+        Check.NotNull(saved.CoverArtwork);
+        Check.NotNull(saved.DiscArtwork);
 
-        draft.Date = "2001-04";
-        var partialDatePath = Path.Combine(temp.Path, "partial-date.wav");
-        service.SaveCopyAsync(draft, partialDatePath).GetAwaiter().GetResult();
-        Check.Equal("2001-04", service.ReadAsync(partialDatePath).GetAwaiter().GetResult().Date);
+        saved.CoverArtwork = null;
+        saved.DiscArtwork = null;
+        saved.CoverArtworkChanged = true;
+        saved.DiscArtworkChanged = true;
+        var artworkRemovedPath = Path.Combine(temp.Path, "artwork-removed.wav");
+        service.SaveCopyAsync(saved, artworkRemovedPath).GetAwaiter().GetResult();
+        var artworkRemoved = service.ReadAsync(artworkRemovedPath).GetAwaiter().GetResult();
+        Check.Null(artworkRemoved.CoverArtwork);
+        Check.Null(artworkRemoved.DiscArtwork);
 
-        draft.Date = "definitely not a date";
-        var invalidDatePath = Path.Combine(temp.Path, "invalid-date.wav");
+        var fallbackPath = Path.Combine(temp.Path, "fallback-artwork.wav");
+        File.WriteAllBytes(fallbackPath, PcmWave(duration: TimeSpan.FromSeconds(1)));
+        var displayedFallback = Png(1, 1, [70, 80, 90, 255]);
+        var unrelatedArtwork = Png(1, 1, [100, 110, 120, 255]);
+        var fallbackTrack = new ATL.Track(fallbackPath);
+        fallbackTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(displayedFallback, ATL.PictureInfo.PIC_TYPE.Back));
+        fallbackTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(unrelatedArtwork, ATL.PictureInfo.PIC_TYPE.Leaflet));
+        Check.True(fallbackTrack.Save());
+
+        var fallbackDraft = service.ReadAsync(fallbackPath).GetAwaiter().GetResult();
+        Check.True(fallbackDraft.CoverArtworkOriginalType == ATL.PictureInfo.PIC_TYPE.Back);
+        fallbackDraft.CoverArtwork = null;
+        fallbackDraft.CoverArtworkChanged = true;
+        var fallbackRemovedPath = Path.Combine(temp.Path, "fallback-artwork-removed.wav");
+        service.SaveCopyAsync(fallbackDraft, fallbackRemovedPath).GetAwaiter().GetResult();
+
+        var fallbackRemovedTrack = new ATL.Track(fallbackRemovedPath);
+        Check.False(fallbackRemovedTrack.EmbeddedPictures.Any(picture => picture.PicType == ATL.PictureInfo.PIC_TYPE.Back));
+        Check.True(fallbackRemovedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Leaflet
+            && picture.PictureData.AsSpan().SequenceEqual(unrelatedArtwork)));
+
+        var replacementArtwork = Png(1, 1, [130, 140, 150, 255]);
+        var replacementDraft = service.ReadAsync(fallbackPath).GetAwaiter().GetResult();
+        replacementDraft.CoverArtwork = new ImageArtworkLoader()
+            .LoadAsync(replacementArtwork)
+            .GetAwaiter()
+            .GetResult();
+        replacementDraft.CoverArtworkChanged = true;
+        var fallbackReplacedPath = Path.Combine(temp.Path, "fallback-artwork-replaced.wav");
+        service.SaveCopyAsync(replacementDraft, fallbackReplacedPath).GetAwaiter().GetResult();
+
+        var fallbackReplacedTrack = new ATL.Track(fallbackReplacedPath);
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Back
+            && picture.PictureData.AsSpan().SequenceEqual(displayedFallback)));
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Leaflet
+            && picture.PictureData.AsSpan().SequenceEqual(unrelatedArtwork)));
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Front
+            && picture.PictureData.AsSpan().SequenceEqual(replacementArtwork)));
+
+        draft.Year = "2001-04";
+        var invalidDatePath = Path.Combine(temp.Path, "invalid-year.wav");
         Check.Throws<InvalidDataException>(() =>
             service.SaveCopyAsync(draft, invalidDatePath).GetAwaiter().GetResult());
         Check.False(File.Exists(invalidDatePath));
+
+        draft.Year = "2001";
+        draft.TrackTotal = "6";
+        var invalidTrackTotalPath = Path.Combine(temp.Path, "invalid-track-total.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, invalidTrackTotalPath).GetAwaiter().GetResult());
+        Check.False(File.Exists(invalidTrackTotalPath));
+
+        draft.TrackTotal = "twelve";
+        var malformedTrackTotalPath = Path.Combine(temp.Path, "malformed-track-total.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, malformedTrackTotalPath).GetAwaiter().GetResult());
+        Check.False(File.Exists(malformedTrackTotalPath));
         Check.False(Directory.EnumerateFiles(temp.Path, "*.mystral*", SearchOption.TopDirectoryOnly).Any());
 
         var disguisedText = Path.Combine(temp.Path, "not-audio.wav");

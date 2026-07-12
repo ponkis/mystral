@@ -12,7 +12,9 @@ internal sealed class JewelCaseRenderer
     private const int BaseY = 6;
     private const int BaseWidth = 301;
     private const int BaseHeight = 306;
-    private const int ArtworkX = 26;
+    // The case's left spine makes its usable tray sit slightly right of the
+    // full canvas center. Keep both smart layers aligned to that tray.
+    private const int ArtworkX = BaseX + 10;
     private const int ArtworkY = 8;
     private const int ArtworkSize = 301;
     private static readonly Lazy<Task<FixedLayers>> SharedLayers = new(
