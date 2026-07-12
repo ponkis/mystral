@@ -803,6 +803,105 @@
                 </Border>
             </Border>
 
+            <Button x:Name="CompactBurnSlot"
+                    Grid.Row="1"
+                    Grid.RowSpan="2"
+                    Width="240"
+                    Height="43"
+                    Margin="92,65,0,0"
+                    Padding="0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    HorizontalContentAlignment="Stretch"
+                    VerticalContentAlignment="Stretch"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ClipToBounds="True"
+                    Cursor="Hand"
+                    Focusable="False"
+                    IsTabStop="False"
+                    Panel.ZIndex="20"
+                    MouseEnter="CompactBurnSlot_MouseEnter"
+                    MouseLeave="CompactBurnSlot_MouseLeave">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Background="{TemplateBinding Background}"
+                              ClipToBounds="True">
+                            <ContentPresenter HorizontalAlignment="Stretch"
+                                              VerticalAlignment="Stretch" />
+                        </Grid>
+                    </ControlTemplate>
+                </Button.Template>
+
+                <Grid IsHitTestVisible="False">
+                    <Viewport3D x:Name="CompactBurnDiscViewport"
+                                Width="240"
+                                Height="180"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top">
+                    <Viewport3D.Camera>
+                        <PerspectiveCamera Position="0,0,2.8"
+                                           LookDirection="0,0,-1"
+                                           UpDirection="0,1,0"
+                                           FieldOfView="45" />
+                    </Viewport3D.Camera>
+
+                    <ModelVisual3D>
+                        <ModelVisual3D.Content>
+                            <AmbientLight Color="#FFFFFFFF" />
+                        </ModelVisual3D.Content>
+                    </ModelVisual3D>
+
+                    <Viewport2DVisual3D>
+                        <Viewport2DVisual3D.Geometry>
+                            <MeshGeometry3D Positions="-1,1,0 1,1,0 -1,-1,0 1,-1,0"
+                                            TextureCoordinates="0,0 1,0 0,1 1,1"
+                                            TriangleIndices="0 2 1 1 2 3" />
+                        </Viewport2DVisual3D.Geometry>
+                        <Viewport2DVisual3D.Material>
+                            <DiffuseMaterial Brush="White"
+                                             Viewport2DVisual3D.IsVisualHostMaterial="True" />
+                        </Viewport2DVisual3D.Material>
+                        <Viewport2DVisual3D.Transform>
+                            <Transform3DGroup>
+                                <RotateTransform3D>
+                                    <RotateTransform3D.Rotation>
+                                        <AxisAngleRotation3D x:Name="CompactBurnDiscSpin"
+                                                             Axis="0,0,1"
+                                                             Angle="0" />
+                                    </RotateTransform3D.Rotation>
+                                </RotateTransform3D>
+                                <RotateTransform3D>
+                                    <RotateTransform3D.Rotation>
+                                        <AxisAngleRotation3D Axis="1,0,0"
+                                                             Angle="-50" />
+                                    </RotateTransform3D.Rotation>
+                                </RotateTransform3D>
+                                <TranslateTransform3D x:Name="CompactBurnDiscEject"
+                                                      OffsetY="1.24" />
+                            </Transform3DGroup>
+                        </Viewport2DVisual3D.Transform>
+                            <Viewport2DVisual3D.Visual>
+                                <Image Width="350"
+                                       Height="350"
+                                       Source="pack://siteoforigin:,,,/Resources/Images/cd.png"
+                                       Stretch="Fill"
+                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                            </Viewport2DVisual3D.Visual>
+                        </Viewport2DVisual3D>
+                    </Viewport3D>
+
+                    <Image Width="240"
+                           Height="1"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Top"
+                           Panel.ZIndex="2"
+                           SnapsToDevicePixels="True"
+                           Source="pack://siteoforigin:,,,/Resources/Images/cd_thing.png"
+                           Stretch="Fill" />
+                </Grid>
+            </Button>
+
             <Border x:Name="ExpandedPanel"
                     Grid.RowSpan="3"
                     CornerRadius="9"

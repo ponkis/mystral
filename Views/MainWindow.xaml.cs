@@ -11,6 +11,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using Mystral.Configuration;
 using Mystral.Models;
@@ -86,6 +87,9 @@ public partial class MainWindow : Window
     private const double ExpandedSize = 352;
     private const double LyricsWidth = ExpandedSize;
     private const double LyricsHeight = 620;
+    private const double BurnDiscRetractedOffsetY = 1.24;
+    private const double BurnDiscEjectedOffsetY = 0.98;
+    private const double BurnDiscEjectedAngle = 72;
     private const double LyricsStackVerticalPadding = 132;
     private const double LyricsEndTailSpacerHeight = 180;
     private static readonly TimeSpan LyricWaitMinimumGap = TimeSpan.FromMilliseconds(4200);
@@ -248,6 +252,56 @@ public partial class MainWindow : Window
         var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
         var seconds = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
         slider.ToolTip = $"Seek to {FormatTime(TimeSpan.FromSeconds(seconds))}";
+    }
+
+    private void CompactBurnSlot_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (Snapshot.HasSession)
+        {
+            return;
+        }
+
+        AnimateCompactBurnDisc(
+            BurnDiscEjectedOffsetY,
+            BurnDiscEjectedAngle,
+            TimeSpan.FromMilliseconds(280),
+            EasingMode.EaseOut);
+    }
+
+    private void CompactBurnSlot_MouseLeave(object sender, MouseEventArgs e)
+    {
+        AnimateCompactBurnDisc(
+            BurnDiscRetractedOffsetY,
+            0,
+            TimeSpan.FromMilliseconds(220),
+            EasingMode.EaseIn);
+    }
+
+    private void AnimateCompactBurnDisc(double offsetY, double angle, TimeSpan duration, EasingMode easingMode)
+    {
+        CompactBurnDiscEject.BeginAnimation(
+            TranslateTransform3D.OffsetYProperty,
+            new DoubleAnimation(offsetY, duration)
+            {
+                EasingFunction = new CubicEase { EasingMode = easingMode }
+            },
+            HandoffBehavior.SnapshotAndReplace);
+
+        CompactBurnDiscSpin.BeginAnimation(
+            AxisAngleRotation3D.AngleProperty,
+            new DoubleAnimation(angle, duration)
+            {
+                EasingFunction = new CubicEase { EasingMode = easingMode }
+            },
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void ResetCompactBurnDisc()
+    {
+        CompactBurnDiscEject.BeginAnimation(TranslateTransform3D.OffsetYProperty, null);
+        CompactBurnDiscSpin.BeginAnimation(AxisAngleRotation3D.AngleProperty, null);
+        CompactBurnDiscEject.OffsetY = BurnDiscRetractedOffsetY;
+        CompactBurnDiscSpin.Angle = 0;
     }
 
     private ToolTip CreateVolumeToolTip(Slider slider)
@@ -474,9 +528,14 @@ public partial class MainWindow : Window
         }
 
         CompactProgressRow.Visibility = snapshot.HasSession ? Visibility.Visible : Visibility.Collapsed;
+        CompactBurnSlot.Visibility = snapshot.HasSession ? Visibility.Collapsed : Visibility.Visible;
         if (!snapshot.HasSession)
         {
             ShowVolumeSliders(false);
+        }
+        else
+        {
+            ResetCompactBurnDisc();
         }
 
         if (_isFullscreen)
