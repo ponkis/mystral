@@ -31,6 +31,9 @@ public partial class BurningWindow : Window
     private bool _isBusy;
     private bool _isSaving;
     private bool _isClosingConfirmed;
+    private bool _isCloseRequestPending;
+    private bool _isCloseAnimationRunning;
+    private bool _isCloseCommitted;
     private bool _isClosed;
 
     public BurningWindow(
@@ -45,6 +48,9 @@ public partial class BurningWindow : Window
 
         InitializeComponent();
         Closed += Window_Closed;
+        RootCard.Opacity = 0;
+        WindowScale.ScaleX = 0.96;
+        WindowScale.ScaleY = 0.96;
         TitleBox.Text = draft.Title;
         ArtistBox.Text = draft.Artist;
         AlbumBox.Text = draft.Album;
@@ -63,43 +69,57 @@ public partial class BurningWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        PlayOpenAnimation();
         await RefreshArtworkUiAsync();
     }
 
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (_isBusy)
+        if (_isCloseCommitted)
         {
-            e.Cancel = true;
-            return;
-        }
-
-        if (_isClosingConfirmed || !_hasUnsavedChanges)
-        {
-            return;
-        }
-
-        var result = AppDialogWindow.ShowQuestion(
-            this,
-            "Unsaved changes",
-            "Save your CD metadata before closing?");
-        if (result == MessageBoxResult.Cancel)
-        {
-            e.Cancel = true;
-            return;
-        }
-
-        if (result == MessageBoxResult.No)
-        {
-            _isClosingConfirmed = true;
             return;
         }
 
         e.Cancel = true;
-        if (await SaveBurnedFileAsync(showSuccess: false))
+        if (_isBusy || _isCloseRequestPending || _isCloseAnimationRunning)
         {
-            _isClosingConfirmed = true;
-            _ = Dispatcher.BeginInvoke(Close);
+            return;
+        }
+
+        _isCloseRequestPending = true;
+        try
+        {
+            if (!_isClosingConfirmed && _hasUnsavedChanges)
+            {
+                var result = AppDialogWindow.ShowQuestion(
+                    this,
+                    "Unsaved changes",
+                    "Save your CD metadata before closing?");
+                if (result == MessageBoxResult.Cancel)
+                {
+                    return;
+                }
+
+                if (result == MessageBoxResult.No)
+                {
+                    _isClosingConfirmed = true;
+                }
+                else
+                {
+                    if (!await SaveBurnedFileAsync(showSuccess: false))
+                    {
+                        return;
+                    }
+
+                    _isClosingConfirmed = true;
+                }
+            }
+
+            PlayCloseAnimation();
+        }
+        finally
+        {
+            _isCloseRequestPending = false;
         }
     }
 
@@ -300,7 +320,8 @@ public partial class BurningWindow : Window
             "Fetching song data",
             "Searching MusicBrainz and Cover Art Archive…",
             isIndeterminate: true,
-            _operationCts.Cancel);
+            _operationCts.Cancel,
+            progressBrush: Brushes.LightSeaGreen);
         progressWindow.ContentRendered += async (_, _) =>
         {
             try
@@ -657,6 +678,61 @@ public partial class BurningWindow : Window
         return artwork is null
             ? null
             : Convert.ToHexString(SHA256.HashData(artwork.Data));
+    }
+
+    private void PlayOpenAnimation()
+    {
+        RootCard.Opacity = 0;
+        WindowScale.ScaleX = 0.96;
+        WindowScale.ScaleY = 0.96;
+
+        var duration = TimeSpan.FromMilliseconds(190);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+        RootCard.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(1, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(1, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(1, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void PlayCloseAnimation()
+    {
+        if (_isCloseAnimationRunning || _isClosed)
+        {
+            return;
+        }
+
+        _isCloseAnimationRunning = true;
+        var duration = TimeSpan.FromMilliseconds(155);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(0.94, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(0.94, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+
+        var fade = new DoubleAnimation(0, duration) { EasingFunction = easing };
+        fade.Completed += (_, _) =>
+        {
+            if (_isClosed)
+            {
+                return;
+            }
+
+            _isCloseCommitted = true;
+            Close();
+        };
+        RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
     }
 
     private void ApplyArtworkTint(BitmapSource? cover)

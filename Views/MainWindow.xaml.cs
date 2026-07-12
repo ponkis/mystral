@@ -69,6 +69,7 @@ public partial class MainWindow : Window
     private bool _isBurnDiscDragging;
     private bool _isBurnDiscInserting;
     private bool _isOpeningBurningWindow;
+    private BurningWindow? _burningWindow;
     private bool _isBurnDiscOverflowActive;
     private bool _suppressBurnDiscHoverUntilLeave;
     private double _burnDiscDragStartY;
@@ -623,6 +624,17 @@ public partial class MainWindow : Window
 
     private async Task OpenBurningWindowAsync(bool allowDuringPlayback = false)
     {
+        if (_burningWindow is { } openBurningWindow)
+        {
+            if (openBurningWindow.WindowState == WindowState.Minimized)
+            {
+                openBurningWindow.WindowState = WindowState.Normal;
+            }
+
+            openBurningWindow.Activate();
+            return;
+        }
+
         if (_isOpeningBurningWindow || (!allowDuringPlayback && Snapshot.HasSession))
         {
             return;
@@ -639,7 +651,10 @@ public partial class MainWindow : Window
                 Multiselect = false,
                 Filter = "Audio files|*.mp3;*.mp2;*.mp1;*.flac;*.m4a;*.m4b;*.aac;*.ogg;*.oga;*.opus;*.wav;*.aif;*.aiff;*.wma;*.asf;*.ape;*.wv;*.mpc;*.mpp;*.webm;*.dsf;*.aa;*.aax|All files|*.*"
             };
-            if (picker.ShowDialog(this) != true)
+            var pickerAccepted = IsVisible
+                ? picker.ShowDialog(this)
+                : picker.ShowDialog();
+            if (pickerAccepted != true)
             {
                 return;
             }
@@ -670,10 +685,22 @@ public partial class MainWindow : Window
 
             var burningWindow = new BurningWindow(draft, audioTagService, artworkLoader)
             {
-                Owner = this,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                Topmost = _settingsService.Settings.Behavior.AlwaysOnTop
             };
-            burningWindow.ShowDialog();
+            _burningWindow = burningWindow;
+            burningWindow.Closed += BurningWindow_Closed;
+            try
+            {
+                burningWindow.Show();
+                burningWindow.Activate();
+            }
+            catch
+            {
+                burningWindow.Closed -= BurningWindow_Closed;
+                _burningWindow = null;
+                throw;
+            }
         }
         catch (Exception ex)
         {
@@ -688,6 +715,19 @@ public partial class MainWindow : Window
             ResetCompactBurnDisc();
             PopRestoreTopmost();
             _isOpeningBurningWindow = false;
+        }
+    }
+
+    private void BurningWindow_Closed(object? sender, EventArgs e)
+    {
+        if (sender is BurningWindow burningWindow)
+        {
+            burningWindow.Closed -= BurningWindow_Closed;
+        }
+
+        if (ReferenceEquals(_burningWindow, sender))
+        {
+            _burningWindow = null;
         }
     }
 
@@ -3512,6 +3552,10 @@ public partial class MainWindow : Window
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
         Topmost = _settingsService.Settings.Behavior.AlwaysOnTop;
+        if (_burningWindow is not null)
+        {
+            _burningWindow.Topmost = Topmost;
+        }
         SetTopmostUi();
     }
 
@@ -3559,7 +3603,6 @@ public partial class MainWindow : Window
         };
         burnItem.Click += (_, _) =>
         {
-            RestoreFromTray();
             _ = OpenBurningWindowAsync(allowDuringPlayback: true);
         };
 
@@ -3858,6 +3901,7 @@ public partial class MainWindow : Window
         _lastFmScrobbleCts?.Cancel();
         _lastFmScrobbleCts?.Dispose();
         _settingsWindow?.Close();
+        _burningWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         if (_notifyIcon is not null)
         {

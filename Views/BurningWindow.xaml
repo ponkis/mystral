@@ -14,8 +14,8 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ShowInTaskbar="False"
-        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen"
         FontFamily="Segoe UI"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True"
@@ -184,7 +184,11 @@
                 BorderBrush="#A5DCE9EE"
                 Effect="{StaticResource CardShadow}"
                 ClipToBounds="True"
+                RenderTransformOrigin="0.5,0.5"
                 SizeChanged="RoundedSurface_SizeChanged">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="WindowScale" ScaleX="1" ScaleY="1" />
+            </Border.RenderTransform>
             <Border.Background>
                 <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
                     <GradientStop x:Name="CardTopStop" Color="#906F7D84" Offset="0" />

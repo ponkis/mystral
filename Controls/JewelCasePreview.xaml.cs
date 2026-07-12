@@ -235,7 +235,7 @@ public partial class JewelCasePreview : UserControl
         UploadHint.BeginAnimation(OpacityProperty, new DoubleAnimation
         {
             To = opacity,
-            Duration = TimeSpan.FromMilliseconds(140),
+            Duration = TimeSpan.FromMilliseconds(130),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         }, HandoffBehavior.SnapshotAndReplace);
     }

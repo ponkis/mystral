@@ -19,12 +19,21 @@
                 Opacity="0"
                 IsHitTestVisible="False"
                 Background="#72000000">
-            <TextBlock HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       FontFamily="Segoe MDL2 Assets"
-                       FontSize="22"
-                       Foreground="White"
-                       Text="&#xE898;" />
+            <Border Width="26"
+                    Height="26"
+                    CornerRadius="5"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    BorderBrush="#80FFFFFF"
+                    BorderThickness="1"
+                    Background="#6F1A2023">
+                <TextBlock HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="16"
+                           Foreground="#F7FAF7"
+                           Text="&#xE898;" />
+            </Border>
         </Border>
     </Grid>
 </UserControl>

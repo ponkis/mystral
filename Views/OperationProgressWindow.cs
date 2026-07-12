@@ -45,9 +45,11 @@ internal sealed class OperationProgressWindow : Window
         string detail,
         bool isIndeterminate,
         Action cancelOperation,
-        string iconPath = "Resources/burn.ico")
+        string iconPath = "Resources/burn.ico",
+        Brush? progressBrush = null)
     {
         _cancelOperation = cancelOperation;
+        _progressBar.Foreground = progressBrush ?? Brushes.DodgerBlue;
         Title = title;
         Icon = IconImageSource.LoadBestFitFrame(iconPath, 16);
         Width = 430;
