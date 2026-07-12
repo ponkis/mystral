@@ -102,7 +102,7 @@ public partial class MainWindow : Window
     private const double LyricsWidth = ExpandedSize;
     private const double LyricsHeight = 620;
     private const double BurnDiscRetractedOffsetY = 1.30;
-    private const double BurnDiscEjectedOffsetY = 0.98;
+    private const double BurnDiscEjectedOffsetY = 1.03;
     private const double BurnDiscMaxPulledOffsetY = 0.28;
     private const double BurnDiscEjectedAngle = 72;
     private const double BurnDiscPullSpinPerDip = 3.6;
@@ -317,14 +317,13 @@ public partial class MainWindow : Window
 
     private void CompactBurnSlot_MouseLeave(object sender, MouseEventArgs e)
     {
-        if (_isBurnDiscPointerDown || _isBurnDiscDragging || _isBurnDiscInserting)
+        var wasSuppressingHover = _suppressBurnDiscHoverUntilLeave;
+        _suppressBurnDiscHoverUntilLeave = false;
+        if (_isBurnDiscPointerDown
+            || _isBurnDiscDragging
+            || _isBurnDiscInserting
+            || wasSuppressingHover)
         {
-            return;
-        }
-
-        if (_suppressBurnDiscHoverUntilLeave)
-        {
-            _suppressBurnDiscHoverUntilLeave = false;
             return;
         }
 
@@ -344,26 +343,25 @@ public partial class MainWindow : Window
         }
 
         e.Handled = true;
+        _suppressBurnDiscHoverUntilLeave = false;
         if (!Mouse.Capture(CompactBurnSlot, CaptureMode.Element))
         {
             return;
         }
 
-        var currentOffsetY = CompactBurnDiscEject.OffsetY;
-        var currentAngle = CompactBurnDiscSpin.Angle;
+        _isBurnDiscPointerDown = true;
+        _isBurnDiscDragging = false;
         _burnDiscAnimationGeneration++;
         CompactBurnDiscEject.BeginAnimation(TranslateTransform3D.OffsetYProperty, null);
         CompactBurnDiscSpin.BeginAnimation(AxisAngleRotation3D.AngleProperty, null);
-        CompactBurnDiscEject.OffsetY = Math.Min(currentOffsetY, BurnDiscEjectedOffsetY);
-        CompactBurnDiscSpin.Angle = currentAngle;
+        CompactBurnSlot.Height = BurnDiscEjectedSurfaceHeight;
+        CompactBurnDiscEject.OffsetY = BurnDiscEjectedOffsetY;
+        CompactBurnDiscSpin.Angle = BurnDiscEjectedAngle;
 
         var point = e.GetPosition(this);
         var now = Stopwatch.GetTimestamp();
-        _isBurnDiscPointerDown = true;
-        _isBurnDiscDragging = false;
-        _suppressBurnDiscHoverUntilLeave = false;
         _burnDiscDragStartY = point.Y;
-        _burnDiscDragStartAngle = currentAngle;
+        _burnDiscDragStartAngle = BurnDiscEjectedAngle;
         _burnDiscPullDistance = 0;
         _burnDiscLastPointerY = point.Y;
         _burnDiscReleaseVelocityY = 0;
@@ -577,6 +575,7 @@ public partial class MainWindow : Window
             CompactBurnDiscEject.OffsetY = BurnDiscRetractedOffsetY;
             CompactBurnDiscSpin.Angle = 0;
             CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
+            ClearStaleBurnDiscHoverSuppression();
             DisableCompactBurnDiscOverflow();
         };
 
@@ -588,6 +587,23 @@ public partial class MainWindow : Window
             AxisAngleRotation3D.AngleProperty,
             spinAnimation,
             HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void ClearStaleBurnDiscHoverSuppression()
+    {
+        if (!_suppressBurnDiscHoverUntilLeave)
+        {
+            return;
+        }
+
+        var pointer = Mouse.GetPosition(CompactBurnSlot);
+        if (pointer.X < 0
+            || pointer.X > CompactBurnSlot.ActualWidth
+            || pointer.Y < 0
+            || pointer.Y > BurnDiscCollapsedSurfaceHeight)
+        {
+            _suppressBurnDiscHoverUntilLeave = false;
+        }
     }
 
     private void AnimateCompactBurnDisc(
