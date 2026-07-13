@@ -13,7 +13,6 @@ public partial class SocialProfileFrame : UserControl
     private const int OnlineFrameDurationMilliseconds = 42;
 
     private readonly ImageSource _offlineFrame;
-    private readonly ImageSource _onlineFrame;
     private readonly ImageSource _onlineFrameAnimation;
     private bool _isOnline;
     private long _transitionId;
@@ -23,7 +22,6 @@ public partial class SocialProfileFrame : UserControl
         InitializeComponent();
 
         _offlineFrame = IconImageSource.LoadSiteImage("Resources/Images/XLFrameOffline.png");
-        _onlineFrame = IconImageSource.LoadSiteImage("Resources/Images/XLFrameActive.png");
         _onlineFrameAnimation = IconImageSource.LoadSiteImage("Resources/Images/XLFrameActiveAnimation.png");
 
         SetProfile(
@@ -95,7 +93,9 @@ public partial class SocialProfileFrame : UserControl
 
     private void AnimatePresenceChange(bool isOnline)
     {
-        FrontFrameImage.Source = _isOnline ? _onlineFrame : _offlineFrame;
+        // Match Aerochat's ProfilePictureFrame exactly: online always uses the
+        // non-looping animation sheet, including as the outgoing/settled source.
+        FrontFrameImage.Source = _isOnline ? _onlineFrameAnimation : _offlineFrame;
         FrontFrameTranslate.X = 0;
         FrontFrameImage.Opacity = 1;
 
@@ -103,10 +103,13 @@ public partial class SocialProfileFrame : UserControl
         BackFrameTranslate.X = 0;
         BackFrameImage.Opacity = 0;
 
-        var crossFadeDelay = isOnline
-            ? TimeSpan.FromMilliseconds(400)
-            : TimeSpan.Zero;
-        var crossFadeDuration = TimeSpan.FromMilliseconds(isOnline ? 280 : 320);
+        var newFrameCount = isOnline ? OnlineFrameCount : 1;
+        var halfTimeMilliseconds = newFrameCount * OnlineFrameDurationMilliseconds / 2.0;
+        var crossFadeDelayMilliseconds = _isOnline
+            ? halfTimeMilliseconds
+            : halfTimeMilliseconds / 2.0;
+        var crossFadeDelay = TimeSpan.FromMilliseconds(crossFadeDelayMilliseconds);
+        var crossFadeDuration = TimeSpan.FromMilliseconds(halfTimeMilliseconds / 2.0);
 
         FrontFrameImage.BeginAnimation(
             OpacityProperty,
@@ -123,15 +126,16 @@ public partial class SocialProfileFrame : UserControl
                 FillBehavior = FillBehavior.HoldEnd
             });
 
-        Opacity = isOnline ? 1 : 0.5;
+        var currentOpacity = Opacity;
+        var targetOpacity = isOnline ? 1 : 0.5;
+        Opacity = targetOpacity;
         BeginAnimation(
             OpacityProperty,
             new DoubleAnimation(
-                isOnline ? 0.5 : 1,
-                isOnline ? 1 : 0.5,
+                currentOpacity,
+                targetOpacity,
                 TimeSpan.FromSeconds(1))
             {
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
                 FillBehavior = FillBehavior.HoldEnd
             });
 
@@ -159,7 +163,7 @@ public partial class SocialProfileFrame : UserControl
     {
         StopFrameAnimations();
         Opacity = isOnline ? 1 : 0.5;
-        BackFrameImage.Source = isOnline ? _onlineFrame : _offlineFrame;
+        BackFrameImage.Source = isOnline ? _onlineFrameAnimation : _offlineFrame;
         BackFrameImage.Opacity = 1;
         BackFrameTranslate.X = 0;
         FrontFrameImage.Source = null;
@@ -169,7 +173,9 @@ public partial class SocialProfileFrame : UserControl
 
     private void StopAnimations()
     {
+        var currentOpacity = Opacity;
         BeginAnimation(OpacityProperty, null);
+        Opacity = currentOpacity;
         ProfilePictureImage.BeginAnimation(OpacityProperty, null);
         StopFrameAnimations();
     }

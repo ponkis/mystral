@@ -81,24 +81,21 @@
                     </LinearGradientBrush>
                 </Grid.Background>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="112" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0"
-                        BorderBrush="#C8D8E8"
-                        BorderThickness="0,0,1,0">
-                    <Image x:Name="AboutLogoImage"
-                           Width="92"
-                           Height="92"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           Stretch="Uniform" />
-                </Border>
+                <Image x:Name="AboutLogoImage"
+                       Grid.Column="0"
+                       Width="92"
+                       Height="92"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Stretch="Uniform" />
 
                 <StackPanel Grid.Column="1"
-                            Margin="16,12"
+                            Margin="6,12,12,12"
                             VerticalAlignment="Center">
                     <TextBlock x:Name="AboutAppNameText"
                                FontSize="15"

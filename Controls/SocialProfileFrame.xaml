@@ -23,25 +23,7 @@
                    RenderOptions.BitmapScalingMode="HighQuality" />
         </Grid>
 
-        <Canvas Width="139"
-                Height="139"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                ClipToBounds="True">
-            <Image x:Name="BackFrameImage"
-                   Canvas.Left="0"
-                   Canvas.Top="0"
-                   Height="139"
-                   HorizontalAlignment="Left"
-                   VerticalAlignment="Top"
-                   Stretch="None"
-                   SnapsToDevicePixels="True">
-                <Image.RenderTransform>
-                    <TranslateTransform x:Name="BackFrameTranslate" />
-                </Image.RenderTransform>
-            </Image>
-        </Canvas>
-
+        <!-- Aerochat keeps the outgoing frame below the incoming frame. -->
         <Canvas Width="139"
                 Height="139"
                 HorizontalAlignment="Left"
@@ -57,6 +39,25 @@
                    SnapsToDevicePixels="True">
                 <Image.RenderTransform>
                     <TranslateTransform x:Name="FrontFrameTranslate" />
+                </Image.RenderTransform>
+            </Image>
+        </Canvas>
+
+        <Canvas Width="139"
+                Height="139"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                ClipToBounds="True">
+            <Image x:Name="BackFrameImage"
+                   Canvas.Left="0"
+                   Canvas.Top="0"
+                   Height="139"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top"
+                   Stretch="None"
+                   SnapsToDevicePixels="True">
+                <Image.RenderTransform>
+                    <TranslateTransform x:Name="BackFrameTranslate" />
                 </Image.RenderTransform>
             </Image>
         </Canvas>
