@@ -296,7 +296,7 @@ public partial class MainWindow : Window
             if (!_burnDiscArtworkCts.IsCancellationRequested)
             {
                 _defaultCompactBurnDiscArtwork = artwork;
-                if (_burningWindow is null || _isBurnPresentationDetached || Snapshot.HasSession)
+                if (_burningWindow is null || Snapshot.HasSession)
                 {
                     CompactBurnDiscImage.Source = artwork;
                 }
@@ -613,6 +613,7 @@ public partial class MainWindow : Window
             CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
             ClearStaleBurnDiscHoverSuppression();
             DisableCompactBurnDiscOverflow();
+            RestoreBurnPresentationAfterDiscInsertion();
         };
 
         CompactBurnDiscEject.BeginAnimation(
@@ -829,7 +830,10 @@ public partial class MainWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             ApplyArtworkTint(Snapshot.CoverArt);
-            ResetBurnPresentationDiscArtwork();
+            if (burningWindow is null || Snapshot.HasSession)
+            {
+                ResetBurnPresentationDiscArtwork();
+            }
             return;
         }
 
@@ -872,7 +876,6 @@ public partial class MainWindow : Window
             if (generation == _burnPresentationArtworkGeneration
                 && !cancellation.IsCancellationRequested
                 && _burningWindow is not null
-                && !_isBurnPresentationDetached
                 && !Snapshot.HasSession)
             {
                 CompactBurnDiscImage.Source = composed;
@@ -997,6 +1000,21 @@ public partial class MainWindow : Window
         CompactBurnDiscSpin.Angle = 0;
         CompactBurnSlot.Height = BurnDiscCollapsedSurfaceHeight;
         DisableCompactBurnDiscOverflow();
+        RestoreBurnPresentationAfterDiscInsertion();
+    }
+
+    private void RestoreBurnPresentationAfterDiscInsertion()
+    {
+        if (!_isBurnPresentationDetached || _burningWindow is null)
+        {
+            return;
+        }
+
+        _isBurnPresentationDetached = false;
+        if (!Snapshot.HasSession)
+        {
+            RefreshCompactBurnPresentation();
+        }
     }
 
     private ToolTip CreateVolumeToolTip(Slider slider)
