@@ -243,51 +243,78 @@
 
                     <Grid Height="112"
                           Margin="0,8,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="112" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                        <Grid x:Name="SocialProfileContent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
 
-                        <Viewbox Width="112"
-                                 Height="112"
-                                 HorizontalAlignment="Left"
-                                 VerticalAlignment="Top"
-                                 Stretch="Uniform">
-                            <controls:SocialProfileFrame x:Name="SocialProfileFrame" />
-                        </Viewbox>
+                            <Viewbox Width="112"
+                                     Height="112"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Top"
+                                     Stretch="Uniform">
+                                <controls:SocialProfileFrame x:Name="SocialProfileFrame" />
+                            </Viewbox>
 
-                        <Grid x:Name="SocialProfileDetailsHost"
-                              Grid.Column="1"
-                              Margin="12,0,0,0"
-                              VerticalAlignment="Center">
-                            <StackPanel x:Name="UnlinkedSocialProfilePanel">
-                                <TextBlock FontSize="18"
-                                           FontWeight="SemiBold"
-                                           Foreground="#111111"
-                                           Text="Not signed in" />
-                                <TextBlock Margin="0,1,0,0"
-                                           Foreground="#666666"
-                                           Text="No account linked" />
-                                <TextBlock Margin="0,12,0,0">
-                                    <Hyperlink Click="LinkSocialAccount_Click">link your account</Hyperlink>
-                                </TextBlock>
-                            </StackPanel>
+                            <Grid x:Name="SocialProfileDetailsHost"
+                                  Grid.Column="1"
+                                  Margin="12,0,0,0"
+                                  VerticalAlignment="Center">
+                                <StackPanel x:Name="UnlinkedSocialProfilePanel">
+                                    <TextBlock FontSize="18"
+                                               FontWeight="SemiBold"
+                                               Foreground="#111111"
+                                               Text="Not signed in" />
+                                    <TextBlock Margin="0,1,0,0"
+                                               Foreground="#666666"
+                                               Text="No account linked" />
+                                    <TextBlock Margin="0,12,0,0">
+                                        <Hyperlink Click="LinkSocialAccount_Click">link your account</Hyperlink>
+                                    </TextBlock>
+                                </StackPanel>
 
-                            <StackPanel x:Name="LinkedSocialProfilePanel"
-                                        Visibility="Collapsed">
-                                <TextBlock Foreground="#666666"
-                                           Text="@ponkis" />
-                                <TextBlock Margin="0,0,0,1"
-                                           FontSize="20"
-                                           Foreground="#111111"
-                                           Text="Ponkis" />
-                                <TextBlock Foreground="#666666"
-                                           Text="14 CDs burned total" />
-                                <TextBlock Margin="0,10,0,0">
-                                    <Hyperlink Click="UnlinkSocialAccount_Click">unlink your account</Hyperlink>
-                                </TextBlock>
-                            </StackPanel>
+                                <StackPanel x:Name="LinkedSocialProfilePanel"
+                                            Visibility="Collapsed">
+                                    <TextBlock Foreground="#666666"
+                                               Text="@ponkis" />
+                                    <TextBlock Margin="0,0,0,1"
+                                               FontSize="20"
+                                               Foreground="#111111"
+                                               Text="Ponkis" />
+                                    <TextBlock Foreground="#666666"
+                                               Text="14 CDs burned total" />
+                                    <TextBlock Margin="0,10,0,0">
+                                        <Hyperlink Click="UnlinkSocialAccount_Click">unlink your account</Hyperlink>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
                         </Grid>
+
+                        <StackPanel x:Name="SocialSigningInPanel"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed">
+                            <TextBlock HorizontalAlignment="Center"
+                                       FontSize="18"
+                                       Foreground="#777777"
+                                       Text="Signing in..." />
+                            <Canvas Width="48"
+                                    Height="36"
+                                    Margin="0,12,0,0"
+                                    HorizontalAlignment="Center"
+                                    ClipToBounds="True">
+                                <Image Width="1536"
+                                       Height="36"
+                                       Source="pack://siteoforigin:,,,/Resources/Images/Speen.png"
+                                       Stretch="None"
+                                       SnapsToDevicePixels="True">
+                                    <Image.RenderTransform>
+                                        <TranslateTransform x:Name="SocialSigningInSpriteTranslate" />
+                                    </Image.RenderTransform>
+                                </Image>
+                            </Canvas>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
 

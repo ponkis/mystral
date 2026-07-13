@@ -90,7 +90,7 @@
 
             <Style x:Key="UploadTileStyle" TargetType="Button">
                 <Setter Property="Cursor" Value="Hand" />
-                <Setter Property="Background" Value="#EAF8FBFC" />
+                <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderBrush" Value="#A65C7A89" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -103,17 +103,6 @@
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}">
                                 <Grid>
-                                    <Border Height="46"
-                                            VerticalAlignment="Top"
-                                            CornerRadius="0"
-                                            IsHitTestVisible="False">
-                                        <Border.Background>
-                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                <GradientStop Color="#B9FFFFFF" Offset="0" />
-                                                <GradientStop Color="#00FFFFFF" Offset="1" />
-                                            </LinearGradientBrush>
-                                        </Border.Background>
-                                    </Border>
                                     <ContentPresenter HorizontalAlignment="Stretch"
                                                       VerticalAlignment="Stretch" />
                                 </Grid>
@@ -121,7 +110,7 @@
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="Tile" Property="BorderBrush" Value="#EF4C9DCC" />
-                                    <Setter TargetName="Tile" Property="Background" Value="#F6FFFFFF" />
+                                    <Setter TargetName="Tile" Property="Background" Value="Transparent" />
                                 </Trigger>
                                 <Trigger Property="IsPressed" Value="True">
                                     <Setter TargetName="Tile" Property="Opacity" Value="0.76" />
@@ -435,13 +424,13 @@
                                             LostMouseCapture="DiscUploadTile_LostMouseCapture">
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background" Value="#EAF8FBFC" />
+                                                <Setter Property="Background" Value="Transparent" />
                                                 <Setter Property="BorderBrush" Value="#A65C7A89" />
                                                 <Setter Property="BorderThickness" Value="1" />
                                                 <Style.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
                                                         <Setter Property="BorderBrush" Value="#EF4C9DCC" />
-                                                        <Setter Property="Background" Value="#F6FFFFFF" />
+                                                        <Setter Property="Background" Value="Transparent" />
                                                     </Trigger>
                                                 </Style.Triggers>
                                             </Style>
@@ -459,16 +448,6 @@
                                             </ContextMenu>
                                         </Border.ContextMenu>
                                         <Grid>
-                                            <Border Height="46"
-                                                    VerticalAlignment="Top"
-                                                    IsHitTestVisible="False">
-                                                <Border.Background>
-                                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                                                        <GradientStop Color="#B9FFFFFF" Offset="0" />
-                                                        <GradientStop Color="#00FFFFFF" Offset="1" />
-                                                    </LinearGradientBrush>
-                                                </Border.Background>
-                                            </Border>
                                             <Grid Margin="11">
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="*" />

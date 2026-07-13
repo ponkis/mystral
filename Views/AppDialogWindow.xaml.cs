@@ -3,7 +3,6 @@ using System.IO;
 using System.Media;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -68,20 +67,16 @@ public partial class AppDialogWindow : Window
                     new DialogButtonSpec("OK", MessageBoxResult.OK, IsDefault: true, IsCancel: true)
                 ]);
 
-        dialog.AboutStampImage.Visibility = Visibility.Visible;
-        dialog.DialogTitleText.Text = AppMetadata.Name;
-        dialog.DialogDescriptionText.Inlines.Clear();
-        dialog.DialogDescriptionText.Inlines.Add(new Run($"Version {AppMetadata.Version}"));
-        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
-        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
-        dialog.DialogDescriptionText.Inlines.Add(new Run("Made with love by "));
-        var link = new Hyperlink(new Run("ponkis"))
-        {
-            NavigateUri = new Uri("https://ponkis.xyz/"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0, 102, 204))
-        };
-        link.RequestNavigate += Hyperlink_RequestNavigate;
-        dialog.DialogDescriptionText.Inlines.Add(link);
+        dialog.Width = 430;
+        dialog.MinHeight = 0;
+        dialog.Height = 340;
+        dialog.SizeToContent = SizeToContent.Manual;
+        dialog.StandardDialogContent.Visibility = Visibility.Collapsed;
+        dialog.AboutDialogContent.Visibility = Visibility.Visible;
+        dialog.AboutLogoImage.Source = IconImageSource.LoadBestFrame("Resources/ico.ico");
+        dialog.AboutAppNameText.Text = AppMetadata.Name;
+        dialog.AboutVersionText.Text = $"version {AppMetadata.Version}";
+        dialog.AboutCopyrightText.Text = $"Copyright © {DateTime.Now.Year} ponkis.";
 
         return ShowDialog(owner, dialog);
     }
@@ -138,7 +133,7 @@ public partial class AppDialogWindow : Window
         return dialog.Result;
     }
 
-    private static void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {
         OpenExternalUrl(e.Uri.AbsoluteUri);
         e.Handled = true;

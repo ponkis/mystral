@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
 using Mystral.Configuration;
 using Mystral.Models;
@@ -24,7 +25,10 @@ public partial class SettingsWindow : Window
     private bool _isSaving;
     private bool _isCloseRequestPending;
     private bool _isSocialAccountLinked;
+    private bool _isSocialSigningIn;
     private long _socialProfileTransitionId;
+    private long _socialSignInTransitionId;
+    private CancellationTokenSource? _socialSignInCancellation;
 
     internal event EventHandler? CloseRequestCanceled;
 
@@ -47,6 +51,7 @@ public partial class SettingsWindow : Window
         LocalScrobbleCacheService.Instance.ScrobbleAdded += LocalScrobbleCache_ScrobbleAdded;
         Closed += (s, e) =>
         {
+            CancelSocialSignIn(restoreProfile: false);
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
     }
@@ -239,21 +244,49 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void LinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    private async void LinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
-        if (_isSocialAccountLinked)
+        if (_isSocialAccountLinked || _isSocialSigningIn)
         {
             return;
         }
 
-        _isSocialAccountLinked = true;
-        AutomaticallyShareBurnsCheckBox.IsChecked = false;
-        UpdateSocialPanel(animate: true);
-        RefreshDirtyState();
+        var transitionId = ++_socialSignInTransitionId;
+        using var cancellation = new CancellationTokenSource();
+        _socialSignInCancellation = cancellation;
+        SetSocialSigningInState(true);
+
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(1800), cancellation.Token);
+            if (cancellation.IsCancellationRequested ||
+                transitionId != _socialSignInTransitionId ||
+                !IsLoaded)
+            {
+                return;
+            }
+
+            _isSocialAccountLinked = true;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+            UpdateSocialPanel(animate: true);
+            RefreshDirtyState();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (transitionId == _socialSignInTransitionId)
+            {
+                _socialSignInCancellation = null;
+                SetSocialSigningInState(false);
+            }
+        }
     }
 
     private void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
+        CancelSocialSignIn(restoreProfile: true);
         if (!_isSocialAccountLinked)
         {
             return;
@@ -265,9 +298,83 @@ public partial class SettingsWindow : Window
         RefreshDirtyState();
     }
 
+    private void SetSocialSigningInState(bool isSigningIn)
+    {
+        _isSocialSigningIn = isSigningIn;
+        SocialProfileContent.Visibility = isSigningIn
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        SocialSigningInPanel.Visibility = isSigningIn
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AutomaticallyShareBurnsCheckBox.IsEnabled = !isSigningIn && _isSocialAccountLinked;
+
+        if (isSigningIn)
+        {
+            StartSocialSignInAnimation();
+        }
+        else
+        {
+            StopSocialSignInAnimation();
+        }
+    }
+
+    private void StartSocialSignInAnimation()
+    {
+        const int frameCount = 32;
+        const int frameWidth = 48;
+        const int frameDurationMilliseconds = 58;
+
+        SocialSigningInSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        SocialSigningInSpriteTranslate.X = 0;
+
+        var spriteAnimation = new DoubleAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromMilliseconds(frameCount * frameDurationMilliseconds),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        for (var frame = 0; frame < frameCount; frame++)
+        {
+            spriteAnimation.KeyFrames.Add(new DiscreteDoubleKeyFrame(
+                -frame * frameWidth,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(frame * frameDurationMilliseconds))));
+        }
+
+        SocialSigningInSpriteTranslate.BeginAnimation(
+            TranslateTransform.XProperty,
+            spriteAnimation);
+    }
+
+    private void StopSocialSignInAnimation()
+    {
+        SocialSigningInSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        SocialSigningInSpriteTranslate.X = 0;
+    }
+
+    private void CancelSocialSignIn(bool restoreProfile)
+    {
+        if (!_isSocialSigningIn && _socialSignInCancellation is null)
+        {
+            return;
+        }
+
+        _socialSignInTransitionId++;
+        _socialSignInCancellation?.Cancel();
+        _socialSignInCancellation = null;
+
+        if (restoreProfile)
+        {
+            SetSocialSigningInState(false);
+        }
+        else
+        {
+            _isSocialSigningIn = false;
+        }
+    }
+
     private void UpdateSocialPanel(bool animate)
     {
-        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked;
+        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked && !_isSocialSigningIn;
         SocialProfileFrame.SetProfile(
             _isSocialAccountLinked,
             IconImageSource.LoadSiteImage(

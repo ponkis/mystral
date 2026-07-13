@@ -31,21 +31,8 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Canvas Grid.RowSpan="2"
-                IsHitTestVisible="False">
-            <Image x:Name="AboutStampImage"
-                   Canvas.Top="-50"
-                   Canvas.Right="-16"
-                   Width="356"
-                   Height="204"
-                   Opacity="0.38"
-                   RenderOptions.BitmapScalingMode="HighQuality"
-                   Source="pack://siteoforigin:,,,/Resources/Images/ponkis.png"
-                   Stretch="UniformToFill"
-                   Visibility="Collapsed" />
-        </Canvas>
-
-        <Grid Grid.Row="0"
+        <Grid x:Name="StandardDialogContent"
+              Grid.Row="0"
               Margin="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="32" />
@@ -71,6 +58,119 @@
                            Foreground="#333333"
                            TextWrapping="Wrap" />
             </StackPanel>
+        </Grid>
+
+        <Grid x:Name="AboutDialogContent"
+              Grid.Row="0"
+              Background="#E5EEF8"
+              Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="130" />
+                <RowDefinition Height="1" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0.5,0"
+                                         EndPoint="0.5,1">
+                        <GradientStop Offset="0"
+                                      Color="#FFFFFF" />
+                        <GradientStop Offset="1"
+                                      Color="#E8F0F8" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        BorderBrush="#C8D8E8"
+                        BorderThickness="0,0,1,0">
+                    <Image x:Name="AboutLogoImage"
+                           Width="92"
+                           Height="92"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Stretch="Uniform" />
+                </Border>
+
+                <StackPanel Grid.Column="1"
+                            Margin="16,12"
+                            VerticalAlignment="Center">
+                    <TextBlock x:Name="AboutAppNameText"
+                               FontSize="15"
+                               FontWeight="Bold"
+                               Foreground="#333333" />
+                    <TextBlock x:Name="AboutVersionText"
+                               Margin="0,3,0,0"
+                               Foreground="#1060A0" />
+                    <TextBlock x:Name="AboutCopyrightText"
+                               Margin="0,8,0,0"
+                               FontSize="10.5"
+                               Foreground="#555555"
+                               TextWrapping="Wrap" />
+                    <TextBlock Margin="0,2,0,0"
+                               FontSize="10.5"
+                               Foreground="#555555"
+                               Text="Mystral is not affiliated with Microsoft Corporation."
+                               TextWrapping="Wrap" />
+                    <TextBlock Margin="0,6,0,0"
+                               FontSize="10.5">
+                        <Hyperlink NavigateUri="https://github.com/ponkis/mystral"
+                                   RequestNavigate="Hyperlink_RequestNavigate">
+                            <Run Text="github.com/ponkis/mystral" />
+                        </Hyperlink>
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
+
+            <Rectangle Grid.Row="1"
+                       Fill="#C0CCDA" />
+
+            <DockPanel Grid.Row="2"
+                       Margin="12,8">
+                <TextBlock DockPanel.Dock="Top"
+                           Margin="0,0,0,4"
+                           FontSize="10.5"
+                           Foreground="#555555"
+                           Text="Credits" />
+                <RichTextBox DockPanel.Dock="Top"
+                             HorizontalAlignment="Stretch"
+                             VerticalAlignment="Stretch"
+                             Background="#F5F9FF"
+                             BorderBrush="#C0CCDA"
+                             FontFamily="Segoe UI"
+                             FontSize="10.5"
+                             IsDocumentEnabled="True"
+                             IsReadOnly="True"
+                             IsReadOnlyCaretVisible="True"
+                             VerticalScrollBarVisibility="Auto">
+                    <FlowDocument PagePadding="4">
+                        <Paragraph Margin="0,0,0,8">
+                            <Run Text="Mystral is an independent fan project created in good faith. Microsoft names, artwork, and interface assets remain the property of Microsoft Corporation." />
+                        </Paragraph>
+                        <Paragraph Margin="0,0,0,8">
+                            <Run Text="Some code and assets are adapted from " />
+                            <Hyperlink NavigateUri="https://github.com/not-nullptr/Aerochat"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                <Run Text="not-nullptr/Aerochat" />
+                            </Hyperlink>
+                            <Run Text="." />
+                        </Paragraph>
+                        <Paragraph Margin="0">
+                            <Run Text="Most Windows UI assets are sourced from " />
+                            <Hyperlink NavigateUri="https://github.com/bartekl1/windows-ui-assets/"
+                                       RequestNavigate="Hyperlink_RequestNavigate">
+                                <Run Text="bartekl1/windows-ui-assets" />
+                            </Hyperlink>
+                            <Run Text="." />
+                        </Paragraph>
+                    </FlowDocument>
+                </RichTextBox>
+            </DockPanel>
         </Grid>
 
         <StackPanel x:Name="ButtonPanel"

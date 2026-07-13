@@ -51,7 +51,7 @@ public partial class SocialProfileFrame : UserControl
         AnimateProfilePicture(profilePicture, transitionId);
         if (_isOnline != isOnline)
         {
-            AnimatePresenceChange(isOnline, transitionId);
+            AnimatePresenceChange(isOnline);
         }
         else
         {
@@ -93,7 +93,7 @@ public partial class SocialProfileFrame : UserControl
         ProfilePictureImage.BeginAnimation(OpacityProperty, fadeOut);
     }
 
-    private void AnimatePresenceChange(bool isOnline, long transitionId)
+    private void AnimatePresenceChange(bool isOnline)
     {
         FrontFrameImage.Source = _isOnline ? _onlineFrame : _offlineFrame;
         FrontFrameTranslate.X = 0;
@@ -152,17 +152,6 @@ public partial class SocialProfileFrame : UserControl
                 KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(frame * OnlineFrameDurationMilliseconds))));
         }
 
-        spriteAnimation.Completed += (_, _) =>
-        {
-            if (transitionId != _transitionId || !_isOnline)
-            {
-                return;
-            }
-
-            BackFrameTranslate.BeginAnimation(TranslateTransform.XProperty, null);
-            BackFrameTranslate.X = 0;
-            BackFrameImage.Source = _onlineFrame;
-        };
         BackFrameTranslate.BeginAnimation(TranslateTransform.XProperty, spriteAnimation);
     }
 
