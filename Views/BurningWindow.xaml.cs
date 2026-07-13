@@ -71,6 +71,33 @@ public partial class BurningWindow : Window
 
     internal BitmapSource PresentationDisc => _draft.DiscArtwork?.Preview ?? _defaultDiscArtwork;
 
+    internal void ShowAfterDiscInsertion()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        RootCard.BeginAnimation(OpacityProperty, null);
+        WindowScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        WindowScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        RootCard.Opacity = 0;
+        WindowScale.ScaleX = 0.96;
+        WindowScale.ScaleY = 0.96;
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        PlayOpenAnimation();
+        Activate();
+    }
+
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         PlayOpenAnimation();
