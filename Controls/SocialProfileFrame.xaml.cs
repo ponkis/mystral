@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using Mystral.Services;
 
 namespace Mystral.Controls;
@@ -95,11 +96,15 @@ public partial class SocialProfileFrame : UserControl
     {
         // Match Aerochat's ProfilePictureFrame exactly: online always uses the
         // non-looping animation sheet, including as the outgoing/settled source.
-        FrontFrameImage.Source = _isOnline ? _onlineFrameAnimation : _offlineFrame;
+        SetFrameSource(
+            FrontFrameImage,
+            _isOnline ? _onlineFrameAnimation : _offlineFrame);
         FrontFrameTranslate.X = 0;
         FrontFrameImage.Opacity = 1;
 
-        BackFrameImage.Source = isOnline ? _onlineFrameAnimation : _offlineFrame;
+        SetFrameSource(
+            BackFrameImage,
+            isOnline ? _onlineFrameAnimation : _offlineFrame);
         BackFrameTranslate.X = 0;
         BackFrameImage.Opacity = 0;
 
@@ -163,12 +168,31 @@ public partial class SocialProfileFrame : UserControl
     {
         StopFrameAnimations();
         Opacity = isOnline ? 1 : 0.5;
-        BackFrameImage.Source = isOnline ? _onlineFrameAnimation : _offlineFrame;
+        SetFrameSource(
+            BackFrameImage,
+            isOnline ? _onlineFrameAnimation : _offlineFrame);
         BackFrameImage.Opacity = 1;
         BackFrameTranslate.X = 0;
-        FrontFrameImage.Source = null;
+        SetFrameSource(FrontFrameImage, null);
         FrontFrameImage.Opacity = 0;
         FrontFrameTranslate.X = 0;
+    }
+
+    private static void SetFrameSource(Image image, ImageSource? source)
+    {
+        image.Source = source;
+        if (source is BitmapSource bitmap)
+        {
+            // Aerochat's AnimatedTileImage deliberately uses pixel dimensions
+            // instead of DPI-derived WPF dimensions so every 139px sprite step
+            // lands on an exact frame boundary.
+            image.Width = bitmap.PixelWidth;
+            image.Height = bitmap.PixelHeight;
+            return;
+        }
+
+        image.ClearValue(WidthProperty);
+        image.ClearValue(HeightProperty);
     }
 
     private void StopAnimations()

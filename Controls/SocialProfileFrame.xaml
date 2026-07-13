@@ -32,10 +32,9 @@
             <Image x:Name="FrontFrameImage"
                    Canvas.Left="0"
                    Canvas.Top="0"
-                   Height="139"
                    HorizontalAlignment="Left"
                    VerticalAlignment="Top"
-                   Stretch="None"
+                   Stretch="Uniform"
                    SnapsToDevicePixels="True">
                 <Image.RenderTransform>
                     <TranslateTransform x:Name="FrontFrameTranslate" />
@@ -51,10 +50,9 @@
             <Image x:Name="BackFrameImage"
                    Canvas.Left="0"
                    Canvas.Top="0"
-                   Height="139"
                    HorizontalAlignment="Left"
                    VerticalAlignment="Top"
-                   Stretch="None"
+                   Stretch="Uniform"
                    SnapsToDevicePixels="True">
                 <Image.RenderTransform>
                     <TranslateTransform x:Name="BackFrameTranslate" />
