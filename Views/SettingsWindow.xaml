@@ -1,6 +1,8 @@
 <Window x:Class="Mystral.Views.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Mystral.Controls"
+        xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
         Title="Settings"
         Icon="pack://siteoforigin:,,,/Resources/settings.ico"
         Width="520"
@@ -99,6 +101,7 @@
                  SelectionChanged="CategoriesListBox_SelectionChanged">
             <ListBoxItem x:Name="LastFmCategoryItem" Height="28" Content="Last.fm" />
             <ListBoxItem x:Name="BehaviorCategoryItem" Height="28" Content="Behavior" />
+            <ListBoxItem x:Name="SocialCategoryItem" Height="28" Content="Social" />
             <ListBoxItem x:Name="HistoryCategoryItem" Height="28" Content="History" />
         </ListBox>
 
@@ -208,6 +211,84 @@
                               Margin="0,8,0,0"
                               Content="Check for updates on startup"
                               Click="SettingsControl_Changed" />
+                </StackPanel>
+
+                <StackPanel x:Name="SocialPanel"
+                            Visibility="Collapsed">
+                    <TextBlock FontWeight="Bold"
+                               Text="Link to globe" />
+                    <TextBlock Margin="0,5,0,10"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="Link your globe account to share your rips with the world." />
+
+                    <Border Height="103"
+                            BorderBrush="#A8A8A8"
+                            BorderThickness="1"
+                            Background="White"
+                            Cursor="Hand"
+                            ToolTip="Visit chat.ponkis.xyz"
+                            MouseLeftButtonUp="SocialAd_MouseLeftButtonUp">
+                        <Image Stretch="Uniform"
+                               gif:AnimationBehavior.SourceUri="pack://siteoforigin:,,,/Resources/Images/ad.gif"
+                               gif:AnimationBehavior.AutoStart="True"
+                               gif:AnimationBehavior.RepeatBehavior="Forever"
+                               gif:AnimationBehavior.CacheFramesInMemory="False" />
+                    </Border>
+
+                    <CheckBox x:Name="AutomaticallyShareBurnsCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Automatically share burns I make to my profile"
+                              Click="SettingsControl_Changed" />
+
+                    <Grid Height="112"
+                          Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="112" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Viewbox Width="112"
+                                 Height="112"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Top"
+                                 Stretch="Uniform">
+                            <controls:SocialProfileFrame x:Name="SocialProfileFrame" />
+                        </Viewbox>
+
+                        <Grid x:Name="SocialProfileDetailsHost"
+                              Grid.Column="1"
+                              Margin="12,0,0,0"
+                              VerticalAlignment="Center">
+                            <StackPanel x:Name="UnlinkedSocialProfilePanel">
+                                <TextBlock FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="#111111"
+                                           Text="Not signed in" />
+                                <TextBlock Margin="0,1,0,0"
+                                           Foreground="#666666"
+                                           Text="No account linked" />
+                                <TextBlock Margin="0,12,0,0">
+                                    <Hyperlink Click="LinkSocialAccount_Click">link your account</Hyperlink>
+                                </TextBlock>
+                            </StackPanel>
+
+                            <StackPanel x:Name="LinkedSocialProfilePanel"
+                                        Visibility="Collapsed">
+                                <TextBlock Foreground="#666666"
+                                           Text="@ponkis" />
+                                <TextBlock Margin="0,0,0,1"
+                                           FontSize="20"
+                                           Foreground="#111111"
+                                           Text="Ponkis" />
+                                <TextBlock Foreground="#666666"
+                                           Text="14 CDs burned total" />
+                                <TextBlock Margin="0,10,0,0">
+                                    <Hyperlink Click="UnlinkSocialAccount_Click">unlink your account</Hyperlink>
+                                </TextBlock>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
                 </StackPanel>
 
                 <StackPanel x:Name="HistoryPanel"

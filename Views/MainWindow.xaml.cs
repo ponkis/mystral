@@ -4130,24 +4130,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settingsService.Save(new AppSettings
+        _settingsService.Save(current with
         {
-            LastFm = new LastFmCredentials
+            LastFm = current.LastFm with
             {
-                Enabled = current.LastFm.Enabled,
-                ApiKey = current.LastFm.ApiKey,
-                ApiSecret = current.LastFm.ApiSecret,
-                Username = current.LastFm.Username,
-                Password = current.LastFm.Password,
                 ScrobblingEnabled = !current.LastFm.ScrobblingEnabled
-            },
-            Behavior = new BehaviorSettings
-            {
-                CloseToTray = current.Behavior.CloseToTray,
-                EnableNotifications = current.Behavior.EnableNotifications,
-                AlwaysOnTop = current.Behavior.AlwaysOnTop,
-                StartWithWindows = current.Behavior.StartWithWindows,
-                CheckForUpdatesOnStartup = current.Behavior.CheckForUpdatesOnStartup
             }
         });
     }

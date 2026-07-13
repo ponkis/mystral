@@ -61,9 +61,14 @@ public sealed class AppSettingsService
     {
         settings.LastFm ??= new LastFmCredentials();
         settings.Behavior ??= new BehaviorSettings();
+        settings.Social ??= new SocialSettings();
         settings.LastFm.ApiKey = settings.LastFm.ApiKey.Trim();
         settings.LastFm.ApiSecret = settings.LastFm.ApiSecret.Trim();
         settings.LastFm.Username = settings.LastFm.Username.Trim();
+        if (!settings.Social.IsAccountLinked)
+        {
+            settings.Social.AutomaticallyShareBurns = false;
+        }
         return settings;
     }
 }

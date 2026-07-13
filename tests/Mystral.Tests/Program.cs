@@ -141,7 +141,12 @@ static class AppSettingsServiceTests
                 Password = " pass ",
                 ScrobblingEnabled = true
             },
-            Behavior = new BehaviorSettings { AlwaysOnTop = false }
+            Behavior = new BehaviorSettings { AlwaysOnTop = false },
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
         });
 
         Check.Equal(1, changed);
@@ -150,20 +155,30 @@ static class AppSettingsServiceTests
         Check.Equal("user", service.Settings.LastFm.Username);
         Check.Equal(" pass ", service.Settings.LastFm.Password);
         Check.False(service.Settings.Behavior.AlwaysOnTop);
+        Check.True(service.Settings.Social.IsAccountLinked);
+        Check.True(service.Settings.Social.AutomaticallyShareBurns);
 
         var reloaded = new AppSettingsService(path);
         Check.True(reloaded.Settings.LastFm.IsConfigured);
         Check.False(reloaded.Settings.Behavior.AlwaysOnTop);
+        Check.True(reloaded.Settings.Social.IsAccountLinked);
+        Check.True(reloaded.Settings.Social.AutomaticallyShareBurns);
 
-        File.WriteAllText(path, """{"LastFm":null,"Behavior":null}""");
+        File.WriteAllText(path, """{"LastFm":null,"Behavior":null,"Social":null}""");
         var nullNested = new AppSettingsService(path);
         Check.NotNull(nullNested.Settings.LastFm);
         Check.NotNull(nullNested.Settings.Behavior);
+        Check.NotNull(nullNested.Settings.Social);
+
+        File.WriteAllText(path, """{"Social":{"IsAccountLinked":false,"AutomaticallyShareBurns":true}}""");
+        var unlinked = new AppSettingsService(path);
+        Check.False(unlinked.Settings.Social.AutomaticallyShareBurns);
 
         File.WriteAllText(path, "{ nope");
         var corrupt = new AppSettingsService(path);
         Check.False(corrupt.Settings.LastFm.IsConfigured);
         Check.True(corrupt.Settings.Behavior.AlwaysOnTop);
+        Check.False(corrupt.Settings.Social.IsAccountLinked);
     }
 }
 

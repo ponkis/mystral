@@ -6,6 +6,8 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media.Animation;
 using Mystral.Configuration;
 using Mystral.Models;
 using Mystral.Services;
@@ -21,6 +23,8 @@ public partial class SettingsWindow : Window
     private bool _isClosingConfirmed;
     private bool _isSaving;
     private bool _isCloseRequestPending;
+    private bool _isSocialAccountLinked;
+    private long _socialProfileTransitionId;
 
     internal event EventHandler? CloseRequestCanceled;
 
@@ -61,6 +65,9 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
+        _isSocialAccountLinked = settings.Social.IsAccountLinked;
+        AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
+        UpdateSocialPanel(animate: false);
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -74,6 +81,7 @@ public partial class SettingsWindow : Window
         
         LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        SocialPanel.Visibility = selectedItem == SocialCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
 
         if (selectedItem == LastFmCategoryItem)
@@ -86,6 +94,11 @@ public partial class SettingsWindow : Window
             SettingsTitleText.Text = "Behavior";
             SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         }
+        else if (selectedItem == SocialCategoryItem)
+        {
+            SettingsTitleText.Text = "Social";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/globe.ico", 16);
+        }
         else if (selectedItem == HistoryCategoryItem)
         {
             SettingsTitleText.Text = "Playback History";
@@ -95,6 +108,11 @@ public partial class SettingsWindow : Window
     }
 
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
+    {
+        RefreshDirtyState();
+    }
+
+    private void RefreshDirtyState()
     {
         if (_isLoadingSettings)
         {
@@ -115,6 +133,7 @@ public partial class SettingsWindow : Window
     private async Task<bool> SaveSettingsAsync(bool showSuccess = true)
     {
         var settings = CreateSettingsFromFields();
+        var lastFmChanged = settings.LastFm != _settingsService.Settings.LastFm;
         if (!CanSave(settings))
         {
             UpdateLastFmStatus();
@@ -126,7 +145,7 @@ public partial class SettingsWindow : Window
         UpdateDirtyStatus();
         try
         {
-            if (settings.LastFm.IsConfigured)
+            if (lastFmChanged && settings.LastFm.IsConfigured)
             {
                 SetLastFmStatus(
                     settings.LastFm.ScrobblingEnabled
@@ -193,8 +212,108 @@ public partial class SettingsWindow : Window
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
                 CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true
+            },
+            Social = new SocialSettings
+            {
+                IsAccountLinked = _isSocialAccountLinked,
+                AutomaticallyShareBurns = _isSocialAccountLinked
+                    && AutomaticallyShareBurnsCheckBox.IsChecked == true
             }
         };
+    }
+
+    private void SocialAd_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://chat.ponkis.xyz/",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowWarning(this, "Could not open Globe", ex.Message);
+        }
+    }
+
+    private void LinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isSocialAccountLinked)
+        {
+            return;
+        }
+
+        _isSocialAccountLinked = true;
+        AutomaticallyShareBurnsCheckBox.IsChecked = false;
+        UpdateSocialPanel(animate: true);
+        RefreshDirtyState();
+    }
+
+    private void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_isSocialAccountLinked)
+        {
+            return;
+        }
+
+        _isSocialAccountLinked = false;
+        AutomaticallyShareBurnsCheckBox.IsChecked = false;
+        UpdateSocialPanel(animate: true);
+        RefreshDirtyState();
+    }
+
+    private void UpdateSocialPanel(bool animate)
+    {
+        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked;
+        SocialProfileFrame.SetProfile(
+            _isSocialAccountLinked,
+            IconImageSource.LoadSiteImage(
+                _isSocialAccountLinked
+                    ? "Resources/Images/pfp_test.jpg"
+                    : "Resources/Images/placeholder_pfp.png"),
+            animate);
+
+        var transitionId = ++_socialProfileTransitionId;
+        SocialProfileDetailsHost.BeginAnimation(OpacityProperty, null);
+        if (!animate)
+        {
+            ApplySocialProfileDetailsVisibility();
+            SocialProfileDetailsHost.Opacity = 1;
+            return;
+        }
+
+        SocialProfileDetailsHost.Opacity = 0;
+        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(120));
+        fadeOut.Completed += (_, _) =>
+        {
+            if (transitionId != _socialProfileTransitionId)
+            {
+                return;
+            }
+
+            ApplySocialProfileDetailsVisibility();
+            SocialProfileDetailsHost.Opacity = 1;
+            SocialProfileDetailsHost.BeginAnimation(
+                OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                });
+        };
+        SocialProfileDetailsHost.BeginAnimation(OpacityProperty, fadeOut);
+    }
+
+    private void ApplySocialProfileDetailsVisibility()
+    {
+        UnlinkedSocialProfilePanel.Visibility = _isSocialAccountLinked
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        LinkedSocialProfilePanel.Visibility = _isSocialAccountLinked
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)

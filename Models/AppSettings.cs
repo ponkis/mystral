@@ -4,6 +4,7 @@ public sealed record class AppSettings
 {
     public LastFmCredentials LastFm { get; set; } = new();
     public BehaviorSettings Behavior { get; set; } = new();
+    public SocialSettings Social { get; set; } = new();
 }
 
 public sealed record class LastFmCredentials
@@ -30,4 +31,10 @@ public sealed record class BehaviorSettings
     public bool AlwaysOnTop { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;
     public bool CheckForUpdatesOnStartup { get; set; } = true;
+}
+
+public sealed record class SocialSettings
+{
+    public bool IsAccountLinked { get; set; }
+    public bool AutomaticallyShareBurns { get; set; }
 }
