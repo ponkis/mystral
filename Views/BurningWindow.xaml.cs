@@ -73,6 +73,8 @@ public partial class BurningWindow : Window
 
     internal event EventHandler? TrackReplaced;
 
+    internal event EventHandler? BurnCompleted;
+
     internal event EventHandler? CloseRequestCanceled;
 
     internal string PresentationTitle => TitleBox.Text.Trim();
@@ -857,6 +859,7 @@ public partial class BurningWindow : Window
             {
                 AppDialogWindow.ShowConfirmation(this, "Burn complete", "Your CD has been burned!");
             }
+            BurnCompleted?.Invoke(this, EventArgs.Empty);
 
             return true;
         }

@@ -198,7 +198,7 @@
                               Click="SettingsControl_Changed" />
                     <CheckBox x:Name="EnableNotificationsCheckBox"
                               Margin="0,8,0,0"
-                              Content="Enable track change notifications"
+                              Content="Enable notifications"
                               Click="SettingsControl_Changed" />
                     <CheckBox x:Name="StartWithWindowsCheckBox"
                               Margin="0,8,0,0"

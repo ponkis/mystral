@@ -75,6 +75,7 @@ public partial class MainWindow : Window
     private bool _isBurnPresentationReading;
     private bool _isBurningWindowHiddenByDiscRemoval;
     private bool _isWaitingForBurningWindowClose;
+    private bool _isWaitingForSettingsWindowClose;
     private BitmapSource? _defaultCompactBurnDiscArtwork;
     private BitmapSource? _burnPresentationDiscSource;
     private CancellationTokenSource? _burnPresentationArtworkCts;
@@ -730,6 +731,7 @@ public partial class MainWindow : Window
             burningWindow.Closed += BurningWindow_Closed;
             burningWindow.PresentationChanged += BurningWindow_PresentationChanged;
             burningWindow.TrackReplaced += BurningWindow_TrackReplaced;
+            burningWindow.BurnCompleted += BurningWindow_BurnCompleted;
             burningWindow.CloseRequestCanceled += BurningWindow_CloseRequestCanceled;
             try
             {
@@ -744,6 +746,7 @@ public partial class MainWindow : Window
                 burningWindow.Closed -= BurningWindow_Closed;
                 burningWindow.PresentationChanged -= BurningWindow_PresentationChanged;
                 burningWindow.TrackReplaced -= BurningWindow_TrackReplaced;
+                burningWindow.BurnCompleted -= BurningWindow_BurnCompleted;
                 burningWindow.CloseRequestCanceled -= BurningWindow_CloseRequestCanceled;
                 _burningWindow = null;
                 throw;
@@ -775,6 +778,7 @@ public partial class MainWindow : Window
             burningWindow.Closed -= BurningWindow_Closed;
             burningWindow.PresentationChanged -= BurningWindow_PresentationChanged;
             burningWindow.TrackReplaced -= BurningWindow_TrackReplaced;
+            burningWindow.BurnCompleted -= BurningWindow_BurnCompleted;
             burningWindow.CloseRequestCanceled -= BurningWindow_CloseRequestCanceled;
         }
 
@@ -818,6 +822,23 @@ public partial class MainWindow : Window
         _isBurnPresentationDetached = false;
         _isBurningWindowHiddenByDiscRemoval = false;
         RefreshCompactBurnPresentation();
+    }
+
+    private void BurningWindow_BurnCompleted(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_burningWindow, sender) || sender is not BurningWindow burningWindow)
+        {
+            return;
+        }
+
+        var details = string.Join(
+            " — ",
+            new[] { burningWindow.PresentationTitle, burningWindow.PresentationArtist }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+        ShowNotification(
+            "Your CD has been burned!",
+            details,
+            burningWindow.PresentationCover);
     }
 
     private void BurningWindow_CloseRequestCanceled(object? sender, EventArgs e)
@@ -1267,7 +1288,7 @@ public partial class MainWindow : Window
         });
     }
 
-    private void ShowTrackNotification(string title, string artist, ImageSource? coverArt)
+    private void ShowNotification(string title, string artist, ImageSource? coverArt)
     {
         if (!_settingsService.Settings.Behavior.EnableNotifications)
         {
@@ -1286,7 +1307,7 @@ public partial class MainWindow : Window
             {
                 _lastNotificationTrackTitle = snapshot.Title;
                 _lastNotificationTrackArtist = snapshot.Description;
-                ShowTrackNotification(snapshot.Title, snapshot.Description, snapshot.CoverArt);
+                ShowNotification(snapshot.Title, snapshot.Description, snapshot.CoverArt);
             }
             else
             {
@@ -2665,6 +2686,7 @@ public partial class MainWindow : Window
         if (_isBurnDiscPointerDown || _isBurnDiscDragging || _isBurnDiscInserting)
         {
             ResetCompactBurnDisc();
+            RestoreBurnPresentationAfterDiscInsertion();
         }
 
         if (_isExpanded)
@@ -3144,8 +3166,21 @@ public partial class MainWindow : Window
 
     private void PlayCloseAnimation()
     {
-        if (_isClosing || _isWaitingForBurningWindowClose)
+        if (_isClosing || _isWaitingForSettingsWindowClose || _isWaitingForBurningWindowClose)
         {
+            return;
+        }
+
+        if (!ShouldCloseToTray())
+        {
+            _isExitingFromTray = true;
+        }
+
+        if (!ShouldCloseToTray() && _settingsWindow is { } settingsWindow)
+        {
+            _isWaitingForSettingsWindowClose = true;
+            settingsWindow.PrepareForCloseRequest();
+            settingsWindow.Close();
             return;
         }
 
@@ -3869,21 +3904,51 @@ public partial class MainWindow : Window
 
         PushDisableTopmost();
 
-        _settingsWindow = new SettingsWindow(_settingsService, _lastFmService)
+        var settingsWindow = new SettingsWindow(_settingsService, _lastFmService)
         {
             WindowStartupLocation = IsVisible ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen
         };
+        _settingsWindow = settingsWindow;
         if (IsVisible)
         {
-            _settingsWindow.Owner = this;
+            settingsWindow.Owner = this;
         }
 
-        _settingsWindow.Closed += (_, _) =>
+        settingsWindow.Closed += SettingsWindow_Closed;
+        settingsWindow.CloseRequestCanceled += SettingsWindow_CloseRequestCanceled;
+        settingsWindow.Show();
+    }
+
+    private void SettingsWindow_Closed(object? sender, EventArgs e)
+    {
+        if (sender is SettingsWindow settingsWindow)
+        {
+            settingsWindow.Closed -= SettingsWindow_Closed;
+            settingsWindow.CloseRequestCanceled -= SettingsWindow_CloseRequestCanceled;
+        }
+
+        if (ReferenceEquals(_settingsWindow, sender))
         {
             _settingsWindow = null;
             PopRestoreTopmost();
-        };
-        _settingsWindow.Show();
+        }
+
+        if (_isWaitingForSettingsWindowClose)
+        {
+            _isWaitingForSettingsWindowClose = false;
+            Dispatcher.BeginInvoke(PlayCloseAnimation, DispatcherPriority.Normal);
+        }
+    }
+
+    private void SettingsWindow_CloseRequestCanceled(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_settingsWindow, sender) || !_isWaitingForSettingsWindowClose)
+        {
+            return;
+        }
+
+        _isWaitingForSettingsWindowClose = false;
+        _isExitingFromTray = false;
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)
@@ -4136,7 +4201,6 @@ public partial class MainWindow : Window
         _allowClose = false;
         _trayContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
         _trayContextMenu = null;
-        _settingsWindow?.Close();
         PlayCloseAnimation();
     }
 

@@ -20,6 +20,9 @@ public partial class SettingsWindow : Window
     private bool _hasUnsavedChanges;
     private bool _isClosingConfirmed;
     private bool _isSaving;
+    private bool _isCloseRequestPending;
+
+    internal event EventHandler? CloseRequestCanceled;
 
     public SettingsWindow(AppSettingsService settingsService, LastFmService lastFmService)
     {
@@ -155,6 +158,14 @@ public partial class SettingsWindow : Window
             }
             return true;
         }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowError(
+                this,
+                "Could not save settings",
+                ex.Message);
+            return false;
+        }
         finally
         {
             _isSaving = false;
@@ -191,11 +202,33 @@ public partial class SettingsWindow : Window
         Close();
     }
 
+    internal void PrepareForCloseRequest()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        Activate();
+    }
+
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (_isCloseRequestPending)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (_isSaving)
         {
             e.Cancel = true;
+            CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -204,28 +237,41 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var result = AppDialogWindow.ShowQuestion(
-            this,
-            "Unsaved changes",
-            "Save your settings before closing?");
-
-        if (result == MessageBoxResult.Cancel)
+        _isCloseRequestPending = true;
+        try
         {
+            var result = AppDialogWindow.ShowQuestion(
+                this,
+                "Unsaved changes",
+                "Save your settings before closing?");
+
+            if (result == MessageBoxResult.Cancel)
+            {
+                e.Cancel = true;
+                CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (result == MessageBoxResult.No)
+            {
+                _isClosingConfirmed = true;
+                return;
+            }
+
             e.Cancel = true;
-            return;
+            if (await SaveSettingsAsync(showSuccess: false))
+            {
+                _isClosingConfirmed = true;
+                _ = Dispatcher.BeginInvoke(Close);
+            }
+            else
+            {
+                CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+            }
         }
-
-        if (result == MessageBoxResult.No)
+        finally
         {
-            _isClosingConfirmed = true;
-            return;
-        }
-
-        e.Cancel = true;
-        if (await SaveSettingsAsync(showSuccess: false))
-        {
-            _isClosingConfirmed = true;
-            _ = Dispatcher.BeginInvoke(Close);
+            _isCloseRequestPending = false;
         }
     }
 
