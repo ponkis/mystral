@@ -21,7 +21,11 @@ internal static class Program
         {
             ("LRC parser handles empty, invalid, repeated, and ordered lines", LrcParserTests.ParseCoversImportantCases),
             ("metadata cleaner normalizes media snapshots and rejects non-songs", LastFmMetadataCleanerTests.CleansAndClassifiesTracks),
-            ("settings service persists normalized settings and recovers from bad files", AppSettingsServiceTests.PersistsNormalizesAndFallsBack),
+            ("settings service protects and migrates Last.fm credentials", AppSettingsServiceTests.ProtectsMigratesNormalizesAndFallsBack),
+            ("DPAPI store protects current-user credentials at rest", DpapiCredentialStoreTests.ProtectsRoundTripsAndDeletes),
+            ("desktop activation accepts only the environment-specific Social route", DesktopActivationServiceTests.ValidatesProtocolRoute),
+            ("Globe service links, refreshes profiles, shares idempotently, and unlinks", GlobeConnectionServiceTests.LinksSharesAndUnlinks),
+            ("Globe service detects revoked tokens once and disables sharing", GlobeConnectionServiceTests.DetectsRevocationOnce),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
             ("lyrics service keys, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
@@ -57,6 +61,62 @@ internal static class Program
 
         Console.Error.WriteLine(string.Join(Environment.NewLine + Environment.NewLine, failures));
         return 1;
+    }
+}
+
+static class DesktopActivationServiceTests
+{
+    public static void ValidatesProtocolRoute()
+    {
+        var scheme = DesktopActivationService.ProtocolScheme;
+#if APP_ENVIRONMENT_DEVELOPMENT
+        Check.Equal("Development", Mystral.Configuration.AppMetadata.EnvironmentName);
+        Check.Equal("mystral-dev", scheme);
+        Check.True(DesktopActivationService.CanSelfRegisterProtocol);
+#else
+        Check.Equal("Production", Mystral.Configuration.AppMetadata.EnvironmentName);
+        Check.Equal("mystral", scheme);
+        Check.False(DesktopActivationService.CanSelfRegisterProtocol);
+#endif
+        Check.Equal(
+            "\"C:\\Program Files\\Mystral\\Mystral.exe\" \"%1\"",
+            DesktopActivationService.BuildProtocolOpenCommand(
+                "C:\\Program Files\\Mystral\\Mystral.exe",
+                null));
+        Check.Equal(
+            "\"C:\\Program Files\\dotnet\\dotnet.exe\" exec \"C:\\Dev Builds\\Mystral.dll\" \"%1\"",
+            DesktopActivationService.BuildProtocolOpenCommand(
+                "C:\\Program Files\\dotnet\\dotnet.exe",
+                "C:\\Dev Builds\\Mystral.dll"));
+        Check.Null(DesktopActivationService.BuildProtocolOpenCommand(
+            "C:\\Program Files\\dotnet\\dotnet.exe",
+            null));
+        Check.True(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { DesktopActivationService.RegisterProtocolArgument }));
+        Check.True(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { "--REGISTER-PROTOCOL" }));
+        Check.False(DesktopActivationService.IsProtocolRegistrationRequest(Array.Empty<string>()));
+        Check.False(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { DesktopActivationService.RegisterProtocolArgument, "unexpected" }));
+        Check.True(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social"));
+        Check.True(DesktopActivationService.IsSocialSettingsActivation($"{scheme}:///settings/social"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation("activate"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation("https://chat.ponkis.xyz/settings/social"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social?token=never-accept-secrets"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social/extra"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation(
+            scheme == "mystral" ? "mystral-dev://settings/social" : "mystral://settings/social"));
+
+        var socialActivation = $"{scheme}://settings/social";
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(null, socialActivation));
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(socialActivation, DesktopActivationService.ActivateMessage));
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(DesktopActivationService.ActivateMessage, socialActivation));
     }
 }
 
@@ -122,11 +182,12 @@ static class LastFmMetadataCleanerTests
 
 static class AppSettingsServiceTests
 {
-    public static void PersistsNormalizesAndFallsBack()
+    public static void ProtectsMigratesNormalizesAndFallsBack()
     {
         using var temp = TempDir.Create();
         var path = Path.Combine(temp.Path, "settings.json");
-        var service = new AppSettingsService(path);
+        var credentialStore = new MemorySecureCredentialStore();
+        var service = new AppSettingsService(path, credentialStore);
         var changed = 0;
         service.SettingsChanged += (_, _) => changed++;
 
@@ -158,27 +219,361 @@ static class AppSettingsServiceTests
         Check.True(service.Settings.Social.IsAccountLinked);
         Check.True(service.Settings.Social.AutomaticallyShareBurns);
 
-        var reloaded = new AppSettingsService(path);
+        var persistedJson = File.ReadAllText(path);
+        Check.False(persistedJson.Contains("ApiKey", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("ApiSecret", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("Username", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("Password", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("secret", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains(" pass ", StringComparison.Ordinal));
+
+        var reloaded = new AppSettingsService(path, credentialStore);
         Check.True(reloaded.Settings.LastFm.IsConfigured);
         Check.False(reloaded.Settings.Behavior.AlwaysOnTop);
-        Check.True(reloaded.Settings.Social.IsAccountLinked);
+        Check.False(reloaded.Settings.Social.IsAccountLinked);
         Check.True(reloaded.Settings.Social.AutomaticallyShareBurns);
 
-        File.WriteAllText(path, """{"LastFm":null,"Behavior":null,"Social":null}""");
-        var nullNested = new AppSettingsService(path);
+        reloaded.SetGlobeConnectionState(isLinked: false);
+        Check.False(reloaded.Settings.Social.AutomaticallyShareBurns);
+
+        var nullPath = Path.Combine(temp.Path, "null-settings.json");
+        File.WriteAllText(nullPath, """{"LastFm":null,"Behavior":null,"Social":null}""");
+        var nullNested = new AppSettingsService(nullPath, new MemorySecureCredentialStore());
         Check.NotNull(nullNested.Settings.LastFm);
         Check.NotNull(nullNested.Settings.Behavior);
         Check.NotNull(nullNested.Settings.Social);
 
-        File.WriteAllText(path, """{"Social":{"IsAccountLinked":false,"AutomaticallyShareBurns":true}}""");
-        var unlinked = new AppSettingsService(path);
-        Check.False(unlinked.Settings.Social.AutomaticallyShareBurns);
+        var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
+        var legacyStore = new MemorySecureCredentialStore();
+        File.WriteAllText(
+            legacyPath,
+            """
+            {
+              "LastFm": {
+                "Enabled": true,
+                "ApiKey": "legacy-key",
+                "ApiSecret": "legacy-secret",
+                "Username": "legacy-user",
+                "Password": "legacy-password",
+                "ScrobblingEnabled": true
+              },
+              "Social": { "AutomaticallyShareBurns": false }
+            }
+            """);
+        var migrated = new AppSettingsService(legacyPath, legacyStore);
+        Check.Equal("legacy-key", migrated.Settings.LastFm.ApiKey);
+        Check.Equal("legacy-secret", migrated.Settings.LastFm.ApiSecret);
+        Check.Equal("legacy-user", migrated.Settings.LastFm.Username);
+        Check.Equal("legacy-password", migrated.Settings.LastFm.Password);
+        var migratedJson = File.ReadAllText(legacyPath);
+        Check.False(migratedJson.Contains("legacy-key", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-secret", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-user", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-password", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("ApiSecret", StringComparison.Ordinal));
+        var migratedReload = new AppSettingsService(legacyPath, legacyStore);
+        Check.True(migratedReload.Settings.LastFm.IsConfigured);
 
-        File.WriteAllText(path, "{ nope");
-        var corrupt = new AppSettingsService(path);
+        var partialMigrationPath = Path.Combine(temp.Path, "partial-migration-settings.json");
+        var partialMigrationStore = new MemorySecureCredentialStore();
+        File.WriteAllText(
+            partialMigrationPath,
+            """
+            {
+              "LastFm": {
+                "Enabled": true,
+                "ApiKey": "stale-plaintext-key",
+                "ApiSecret": "stale-plaintext-secret",
+                "Username": "stale-plaintext-user",
+                "Password": "stale-plaintext-password",
+                "ScrobblingEnabled": true
+              }
+            }
+            """);
+        partialMigrationStore.Write(
+            "lastfm.credentials.v1",
+            """{"ApiKey":"protected-key","ApiSecret":"protected-secret","Username":"protected-user","Password":"protected-password"}""");
+        var partialMigration = new AppSettingsService(partialMigrationPath, partialMigrationStore);
+        Check.Equal("protected-key", partialMigration.Settings.LastFm.ApiKey);
+        Check.Equal("protected-secret", partialMigration.Settings.LastFm.ApiSecret);
+        Check.Equal("protected-user", partialMigration.Settings.LastFm.Username);
+        Check.Equal("protected-password", partialMigration.Settings.LastFm.Password);
+        var sanitizedPartialMigrationJson = File.ReadAllText(partialMigrationPath);
+        Check.False(sanitizedPartialMigrationJson.Contains("stale-plaintext", StringComparison.Ordinal));
+        Check.False(sanitizedPartialMigrationJson.Contains("ApiSecret", StringComparison.Ordinal));
+
+        var corruptPath = Path.Combine(temp.Path, "corrupt-settings.json");
+        File.WriteAllText(corruptPath, "{ nope");
+        var corrupt = new AppSettingsService(corruptPath, new MemorySecureCredentialStore());
         Check.False(corrupt.Settings.LastFm.IsConfigured);
         Check.True(corrupt.Settings.Behavior.AlwaysOnTop);
         Check.False(corrupt.Settings.Social.IsAccountLinked);
+    }
+}
+
+static class DpapiCredentialStoreTests
+{
+    public static void ProtectsRoundTripsAndDeletes()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDir.Create();
+        var directory = Path.Combine(temp.Path, "credentials");
+        const string key = "test-token";
+        const string secret = "never-write-this-token-in-plaintext";
+        var store = new DpapiCredentialStore(directory);
+        store.Write(key, secret);
+
+        var files = Directory.GetFiles(directory, "*.credential");
+        Check.Equal(1, files.Length);
+        var bytesAtRest = File.ReadAllBytes(files[0]);
+        Check.False(Encoding.UTF8.GetString(bytesAtRest).Contains(secret, StringComparison.Ordinal));
+        Check.Equal(secret, store.Read(key));
+        Check.Equal(secret, new DpapiCredentialStore(directory).Read(key));
+
+        store.Delete(key);
+        Check.Null(store.Read(key));
+    }
+}
+
+static class GlobeConnectionServiceTests
+{
+    public static void LinksSharesAndUnlinks()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
+        });
+
+        var claimCalls = 0;
+        var burnCalls = 0;
+        var burnIds = new List<string>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/mystral/link/claim")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                claimCalls++;
+                using var claimBody = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                var linkCode = claimBody.RootElement.GetProperty("link_code").GetString();
+                Check.True(!string.IsNullOrWhiteSpace(linkCode));
+                if (claimCalls == 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.Accepted)
+                    {
+                        Content = new StringContent("{\"pending\":true}", Encoding.UTF8, "application/json")
+                    };
+                }
+
+                return Json(new
+                {
+                    linked = true,
+                    token = "globe-secret-token",
+                    username = "listener",
+                    name = "",
+                    avatar_url = "/avatars/listener.png"
+                });
+            }
+
+            Check.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Check.Equal("globe-secret-token", request.Headers.Authorization?.Parameter);
+            if (path == "/api/mystral/link/status")
+            {
+                Check.Equal(HttpMethod.Get, request.Method);
+                return Json(new
+                {
+                    linked = true,
+                    username = "listener",
+                    name = "Changed Name",
+                    avatar_url = "/avatars/updated.png"
+                });
+            }
+
+            if (path == "/api/mystral/burns")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                burnCalls++;
+                var idempotencyKey = request.Headers.GetValues("Idempotency-Key").Single();
+                burnIds.Add(idempotencyKey);
+                using var burnBody = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                var root = burnBody.RootElement;
+                Check.Equal(idempotencyKey, root.GetProperty("client_burn_id").GetString());
+                Check.Equal("Album", root.GetProperty("album").GetString());
+                Check.Equal("Artist", root.GetProperty("artist").GetString());
+                Check.Equal(12, root.GetProperty("track_count").GetInt32());
+                if (burnCalls <= 2)
+                {
+                    Check.Contains("data:image/png;base64,", root.GetProperty("cover").GetString()!);
+                }
+                else
+                {
+                    Check.False(root.TryGetProperty("cover", out _));
+                }
+
+                if (burnCalls == 1)
+                {
+                    var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent("{\"message\":\"Slow down and retry.\"}", Encoding.UTF8, "application/json")
+                    };
+                    limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+                    return limited;
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(
+                        "{\"shared\":true,\"created\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            if (path == "/api/mystral/link/revoke")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+
+            throw new InvalidOperationException("Unexpected Globe request: " + request.RequestUri);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(
+            apiClient,
+            secureStore,
+            settings,
+            new GlobeConnectionOptions
+            {
+                LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                LinkTimeout = TimeSpan.FromSeconds(1),
+                StatusPollInterval = TimeSpan.FromHours(1)
+            });
+
+        Uri? approvalUri = null;
+        var linkedProfile = connection.LinkAsync(uri => approvalUri = uri).GetAwaiter().GetResult();
+        Check.NotNull(approvalUri);
+        Check.Equal("/settings/connections/mystral/approve", approvalUri!.AbsolutePath);
+        Check.Contains("code=", approvalUri.Query);
+        Check.Equal(2, claimCalls);
+        Check.Equal("listener", linkedProfile.DisplayName);
+        Check.Equal("@listener", linkedProfile.DisplayUsername);
+        Check.True(connection.State.IsLinked);
+        Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+
+        Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal("Changed Name", connection.State.Profile!.DisplayName);
+        Check.Equal("http://localhost:3000/avatars/updated.png", connection.State.Profile.AvatarUrl);
+
+        var request = new GlobeBurnShareRequest(
+            " Album ",
+            " Artist ",
+            new DateTimeOffset(2026, 7, 13, 12, 0, 0, TimeSpan.FromHours(-6)),
+            12,
+            [0x89, 0x50, 0x4E, 0x47, 1, 2, 3],
+            "stable-burn-id");
+        GlobeApiException? rateLimit = null;
+        try
+        {
+            _ = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        }
+        catch (GlobeApiException ex)
+        {
+            rateLimit = ex;
+        }
+
+        Check.NotNull(rateLimit);
+        Check.Equal(HttpStatusCode.TooManyRequests, rateLimit!.StatusCode);
+        Check.Equal("Slow down and retry.", rateLimit.Message);
+        Check.Equal(TimeSpan.FromSeconds(7), rateLimit.RetryAfter!.Value);
+        Check.True(connection.State.IsLinked);
+
+        var shared = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        Check.Equal("82", shared.PostId);
+        Check.Equal("41", shared.CollectionEntryId);
+        Check.Equal(2, burnIds.Count);
+        Check.Equal(burnIds[0], burnIds[1]);
+
+        var oversizedCover = new byte[(5 * 1024 * 1024) + 1];
+        oversizedCover[0] = 0x89;
+        oversizedCover[1] = 0x50;
+        oversizedCover[2] = 0x4E;
+        oversizedCover[3] = 0x47;
+        _ = connection.ShareBurnAsync(new GlobeBurnShareRequest(
+            "Album",
+            "Artist",
+            DateTimeOffset.UtcNow,
+            12,
+            oversizedCover,
+            "oversized-cover-burn")).GetAwaiter().GetResult();
+
+        connection.UnlinkAsync().GetAwaiter().GetResult();
+        Check.False(connection.State.IsLinked);
+        Check.False(connection.HasStoredToken);
+        Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.False(settings.Settings.Social.AutomaticallyShareBurns);
+    }
+
+    public static void DetectsRevocationOnce()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
+        });
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "revoked-token");
+        var statusCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/status", request.RequestUri!.AbsolutePath);
+            statusCalls++;
+            return new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent(
+                    "{\"linked\":false,\"error\":\"mystral_link_invalid\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        var revocations = 0;
+        GlobeLinkRevokedEventArgs? revocation = null;
+        connection.LinkRevoked += (_, args) =>
+        {
+            revocations++;
+            revocation = args;
+        };
+
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(1, statusCalls);
+        Check.Equal(1, revocations);
+        Check.Equal(GlobeLinkRevocationSource.StatusCheck, revocation!.Source);
+        Check.Equal("Your Globe account is no longer linked.", revocation.Message);
+        Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.False(settings.Settings.Social.AutomaticallyShareBurns);
+        Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
     }
 }
 
@@ -378,6 +773,17 @@ static class ModelTests
         Check.False(MediaSnapshot.Empty.HasSession);
         Check.Equal(DateTimeOffset.FromUnixTimeSeconds(0).LocalDateTime.ToString("yyyy-MM-dd"), new ScrobbleRecord { Timestamp = 0 }.FormattedTime[..10]);
         Check.False(new ScrobbleRecord().IsSelected);
+
+        var globeBurn = GlobeBurnShareRequest.FromDraft(new BurnTrackDraft
+        {
+            SourcePath = "song.wav",
+            Album = " ",
+            Artist = "",
+            TrackTotal = "9999"
+        });
+        Check.Equal("Unknown album", globeBurn.Album);
+        Check.Equal("Unknown artist", globeBurn.Artist);
+        Check.Equal(GlobeBurnShareRequest.MaximumTrackCount, globeBurn.TrackCount);
 
         var lines = new[] { new LyricLine(TimeSpan.Zero, "line") };
         Check.Equal(LyricsStatus.Synced, LyricsResult.Synced(lines).Status);
@@ -1037,6 +1443,35 @@ sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage
     {
         Count++;
         return Task.FromResult(respond(request));
+    }
+}
+
+sealed class MemorySecureCredentialStore : ISecureCredentialStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public string? Read(string key)
+    {
+        lock (_values)
+        {
+            return _values.GetValueOrDefault(key);
+        }
+    }
+
+    public void Write(string key, string value)
+    {
+        lock (_values)
+        {
+            _values[key] = value;
+        }
+    }
+
+    public void Delete(string key)
+    {
+        lock (_values)
+        {
+            _values.Remove(key);
+        }
     }
 }
 

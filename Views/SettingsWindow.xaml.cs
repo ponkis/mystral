@@ -19,6 +19,7 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettingsService _settingsService;
     private readonly LastFmService _lastFmService;
+    private readonly GlobeConnectionService _globeConnectionService;
     private bool _isLoadingSettings;
     private bool _hasUnsavedChanges;
     private bool _isClosingConfirmed;
@@ -29,13 +30,20 @@ public partial class SettingsWindow : Window
     private long _socialProfileTransitionId;
     private long _socialSignInTransitionId;
     private CancellationTokenSource? _socialSignInCancellation;
+    private GlobeProfile? _socialProfile;
+    private ImageSource? _socialProfileImage;
+    private int _socialAvatarGeneration;
 
     internal event EventHandler? CloseRequestCanceled;
 
-    public SettingsWindow(AppSettingsService settingsService, LastFmService lastFmService)
+    public SettingsWindow(
+        AppSettingsService settingsService,
+        LastFmService lastFmService,
+        GlobeConnectionService globeConnectionService)
     {
         _settingsService = settingsService;
         _lastFmService = lastFmService;
+        _globeConnectionService = globeConnectionService;
 
         InitializeComponent();
 #if DEBUG
@@ -45,6 +53,7 @@ public partial class SettingsWindow : Window
 #endif
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
+        _globeConnectionService.StateChanged += GlobeConnectionService_StateChanged;
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
 
@@ -52,8 +61,20 @@ public partial class SettingsWindow : Window
         Closed += (s, e) =>
         {
             CancelSocialSignIn(restoreProfile: false);
+            _globeConnectionService.StateChanged -= GlobeConnectionService_StateChanged;
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
+    }
+
+    internal void ShowSocialSection()
+    {
+        CategoriesListBox.SelectedItem = SocialCategoryItem;
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
     }
 
     private void LoadSettings()
@@ -70,9 +91,15 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
-        _isSocialAccountLinked = settings.Social.IsAccountLinked;
+        var globeState = _globeConnectionService.State;
+        _isSocialAccountLinked = globeState.IsLinked;
+        _socialProfile = globeState.Profile;
         AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
         UpdateSocialPanel(animate: false);
+        if (_socialProfile is not null)
+        {
+            _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
+        }
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -234,7 +261,7 @@ public partial class SettingsWindow : Window
         {
             Process.Start(new ProcessStartInfo
             {
-                FileName = "https://chat.ponkis.xyz/",
+                FileName = AppMetadata.GlobeBaseUri.AbsoluteUri,
                 UseShellExecute = true
             });
         }
@@ -251,14 +278,30 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        if (_globeConnectionService.HasStoredToken)
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "Checking Globe link",
+                "Mystral is still checking the saved Globe link. Wait a moment and try again.");
+            return;
+        }
+
         var transitionId = ++_socialSignInTransitionId;
         using var cancellation = new CancellationTokenSource();
         _socialSignInCancellation = cancellation;
+        SocialSigningInText.Text = "Waiting for Globe approval...";
         SetSocialSigningInState(true);
 
         try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(1800), cancellation.Token);
+            var profile = await _globeConnectionService.LinkAsync(
+                approvalUri => Process.Start(new ProcessStartInfo
+                {
+                    FileName = approvalUri.AbsoluteUri,
+                    UseShellExecute = true
+                }),
+                cancellation.Token);
             if (cancellation.IsCancellationRequested ||
                 transitionId != _socialSignInTransitionId ||
                 !IsLoaded)
@@ -267,12 +310,25 @@ public partial class SettingsWindow : Window
             }
 
             _isSocialAccountLinked = true;
+            _socialProfile = profile;
             AutomaticallyShareBurnsCheckBox.IsChecked = false;
             UpdateSocialPanel(animate: true);
+            _ = RefreshSocialAvatarAsync(profile, animate: true);
             RefreshDirtyState();
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Globe account linked",
+                $"Mystral is now linked to {profile.DisplayUsername}.");
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded)
+            {
+                AppDialogWindow.ShowError(this, "Could not link Globe", ex.Message);
+            }
         }
         finally
         {
@@ -284,7 +340,7 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    private async void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
         CancelSocialSignIn(restoreProfile: true);
         if (!_isSocialAccountLinked)
@@ -292,10 +348,41 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        _isSocialAccountLinked = false;
-        AutomaticallyShareBurnsCheckBox.IsChecked = false;
-        UpdateSocialPanel(animate: true);
-        RefreshDirtyState();
+        if (AppDialogWindow.ShowQuestion(
+                this,
+                "Unlink Globe account",
+                "Unlink this Globe account from Mystral?") != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        SocialSigningInText.Text = "Unlinking from Globe...";
+        SetSocialSigningInState(true);
+        try
+        {
+            await _globeConnectionService.UnlinkAsync();
+            _isSocialAccountLinked = false;
+            _socialProfile = null;
+            _socialProfileImage = null;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+            UpdateSocialPanel(animate: true);
+            RefreshDirtyState();
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Globe account unlinked",
+                "Your Globe account was unlinked from Mystral.");
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowError(this, "Could not unlink Globe", ex.Message);
+        }
+        finally
+        {
+            if (IsLoaded)
+            {
+                SetSocialSigningInState(false);
+            }
+        }
     }
 
     private void SetSocialSigningInState(bool isSigningIn)
@@ -372,15 +459,108 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void GlobeConnectionService_StateChanged(
+        object? sender,
+        GlobeConnectionStateChangedEventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => GlobeConnectionService_StateChanged(sender, e));
+            return;
+        }
+
+        var wasLinked = _isSocialAccountLinked;
+        _isSocialAccountLinked = e.State.IsLinked;
+        _socialProfile = e.State.Profile;
+        if (e.State.Status == GlobeConnectionStatus.Unlinked)
+        {
+            _socialProfileImage = null;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+        }
+
+        UpdateSocialPanel(animate: wasLinked != _isSocialAccountLinked);
+        if (_socialProfile is not null
+            && !e.State.IsChecking
+            && string.IsNullOrWhiteSpace(e.State.ErrorMessage))
+        {
+            _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
+        }
+        RefreshDirtyState();
+    }
+
+    private async Task RefreshSocialAvatarAsync(GlobeProfile profile, bool animate)
+    {
+        var generation = ++_socialAvatarGeneration;
+        var placeholder = IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png");
+        if (!Uri.TryCreate(profile.AvatarUrl, UriKind.Absolute, out var avatarUri)
+            || (avatarUri.Scheme != Uri.UriSchemeHttp
+                && avatarUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _socialProfileImage = placeholder;
+            UpdateSocialPanel(animate);
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var response = await client.GetAsync(
+                avatarUri,
+                HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > 5 * 1024 * 1024)
+            {
+                throw new InvalidDataException("The Globe profile image is too large.");
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            if (bytes.Length > 5 * 1024 * 1024)
+            {
+                throw new InvalidDataException("The Globe profile image is too large.");
+            }
+
+            using var stream = new MemoryStream(bytes, writable: false);
+            var image = new System.Windows.Media.Imaging.BitmapImage();
+            image.BeginInit();
+            image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+            if (generation != _socialAvatarGeneration
+                || _socialProfile?.AvatarUrl != profile.AvatarUrl
+                || !IsLoaded)
+            {
+                return;
+            }
+
+            _socialProfileImage = image;
+            UpdateSocialPanel(animate);
+        }
+        catch
+        {
+            if (generation == _socialAvatarGeneration
+                && _socialProfile?.AvatarUrl == profile.AvatarUrl
+                && IsLoaded)
+            {
+                _socialProfileImage = placeholder;
+                UpdateSocialPanel(animate);
+            }
+        }
+    }
+
     private void UpdateSocialPanel(bool animate)
     {
         AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked && !_isSocialSigningIn;
+        var profile = _socialProfile;
+        SocialUsernameText.Text = profile?.DisplayUsername ?? string.Empty;
+        SocialDisplayNameText.Text = profile?.DisplayName ?? string.Empty;
+        var cdCount = profile?.CdCount ?? 0;
+        SocialCdCountText.Text = $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
         SocialProfileFrame.SetProfile(
             _isSocialAccountLinked,
-            IconImageSource.LoadSiteImage(
-                _isSocialAccountLinked
-                    ? "Resources/Images/pfp_test.jpg"
-                    : "Resources/Images/placeholder_pfp.png"),
+            _socialProfileImage
+            ?? IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png"),
             animate);
 
         var transitionId = ++_socialProfileTransitionId;

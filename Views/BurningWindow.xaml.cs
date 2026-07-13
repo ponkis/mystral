@@ -29,6 +29,8 @@ public partial class BurningWindow : Window
     private BurnTrackDraft _draft;
     private readonly AudioTagService _audioTagService;
     private readonly ImageArtworkLoader _artworkLoader;
+    private readonly AppSettingsService _settingsService;
+    private readonly GlobeConnectionService _globeConnectionService;
     private readonly MusicBrainzService _musicBrainzService = new();
     private readonly BitmapSource _placeholderArtwork;
     private readonly BitmapSource _defaultDiscArtwork;
@@ -53,11 +55,15 @@ public partial class BurningWindow : Window
     public BurningWindow(
         BurnTrackDraft draft,
         AudioTagService audioTagService,
-        ImageArtworkLoader artworkLoader)
+        ImageArtworkLoader artworkLoader,
+        AppSettingsService settingsService,
+        GlobeConnectionService globeConnectionService)
     {
         _draft = draft;
         _audioTagService = audioTagService;
         _artworkLoader = artworkLoader;
+        _settingsService = settingsService;
+        _globeConnectionService = globeConnectionService;
         _placeholderArtwork = artworkLoader.LoadApplicationImage("unknown.png");
         _defaultDiscArtwork = artworkLoader.LoadApplicationImage("cd_default_cover.png");
 
@@ -855,10 +861,8 @@ public partial class BurningWindow : Window
             _draft.CoverArtworkChanged = false;
             _draft.DiscArtworkChanged = false;
             UpdateDirtyStatus();
-            if (showSuccess)
-            {
-                AppDialogWindow.ShowConfirmation(this, "Burn complete", "Your CD has been burned!");
-            }
+            var shareRequest = GlobeBurnShareRequest.FromDraft(_draft);
+            await HandleBurnCompletionAsync(shareRequest, showSuccess);
             BurnCompleted?.Invoke(this, EventArgs.Empty);
 
             return true;
@@ -872,6 +876,88 @@ public partial class BurningWindow : Window
                 SetBusy(false);
             }
         }
+    }
+
+    private async Task HandleBurnCompletionAsync(
+        GlobeBurnShareRequest shareRequest,
+        bool showSuccess)
+    {
+        var isLinked = _globeConnectionService.State.IsLinked;
+        var automaticallyShare = isLinked
+            && _settingsService.Settings.Social.AutomaticallyShareBurns;
+
+        if (automaticallyShare)
+        {
+            try
+            {
+                await _globeConnectionService.ShareBurnAsync(shareRequest);
+                if (showSuccess)
+                {
+                    AppDialogWindow.ShowConfirmation(
+                        this,
+                        "Burn complete",
+                        "Successfully shared to your globe profile.");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!showSuccess)
+                {
+                    return;
+                }
+
+                var retry = AppDialogWindow.ShowAction(
+                    this,
+                    "Burn complete — Globe share failed",
+                    $"Your CD was burned, but automatic sharing failed: {ex.Message}",
+                    "Retry",
+                    isError: true);
+                if (retry)
+                {
+                    ShowShareStatus(shareRequest);
+                }
+            }
+            return;
+        }
+
+        if (!showSuccess)
+        {
+            return;
+        }
+
+        if (isLinked)
+        {
+            var share = AppDialogWindow.ShowAction(
+                this,
+                "Burn complete",
+                "Your CD has been burned!",
+                "Share to globe");
+            if (share)
+            {
+                ShowShareStatus(shareRequest);
+            }
+            return;
+        }
+
+        var link = AppDialogWindow.ShowAction(
+            this,
+            "Burn complete",
+            "Your CD has been burned!",
+            "Link your globe account");
+        if (link && Application.Current.MainWindow is MainWindow mainWindow)
+        {
+            mainWindow.ActivateFromExternalRequest(openSocialSettings: true);
+        }
+    }
+
+    private void ShowShareStatus(GlobeBurnShareRequest shareRequest)
+    {
+        var statusWindow = new ShareStatusWindow(
+            this,
+            cancellationToken => _globeConnectionService.ShareBurnAsync(
+                shareRequest,
+                cancellationToken));
+        statusWindow.ShowDialog();
     }
 
     private async Task<ArtworkAsset?> TryLoadFetchedArtworkAsync(byte[] data, CancellationToken cancellationToken)

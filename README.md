@@ -80,6 +80,12 @@ Release builds store settings in:
 %LOCALAPPDATA%\Mystral\settings.json
 ```
 
+Last.fm credentials and the Globe bearer token are never written to
+`settings.json`. They are stored in the environment-specific `credentials`
+directory and encrypted for the current Windows user with DPAPI. Existing
+plaintext Last.fm fields are migrated to that protected store the next time
+settings are loaded successfully.
+
 ## Versioning
 
 The project version is centralized in `Directory.Build.props`:
@@ -96,6 +102,25 @@ The build environment is selected through MSBuild:
 
 - Debug defaults to `AppEnvironment=Development`.
 - Release defaults to `AppEnvironment=Production`.
+
+Build outputs are isolated by both values under
+`bin\<Configuration>\<AppEnvironment>` so a Development executable cannot be
+silently replaced by a Production-flavored build in the same folder.
+
+Development builds connect to `http://localhost:3000/` and register
+`mystral-dev://settings/social`. Set `MYSTRAL_GLOBE_BASE_URL` when the local
+Globe server uses another origin. Production builds always use
+`https://chat.ponkis.xyz/` and `mystral://settings/social`.
+
+The development packaging script registers the published executable without
+opening a window. A regular Debug build also registers itself when launched,
+or it can be registered explicitly without starting the UI. Run this from the
+same normal Windows account as the browser (not an elevated/admin shell),
+because the handler is stored in that user's `HKCU` registry hive:
+
+```powershell
+.\scripts\Register-DevProtocol.cmd
+```
 
 ```powershell
 dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development

@@ -220,7 +220,7 @@
                     <TextBlock Margin="0,5,0,10"
                                Foreground="#555555"
                                TextWrapping="Wrap"
-                               Text="Link your globe account to share your rips with the world." />
+                               Text="Link your globe account to share your burned CDs with the world." />
 
                     <Border Height="103"
                             BorderBrush="#A8A8A8"
@@ -238,7 +238,7 @@
 
                     <CheckBox x:Name="AutomaticallyShareBurnsCheckBox"
                               Margin="0,8,0,0"
-                              Content="Automatically share burns I make to my profile"
+                              Content="Automatically share burned CDs to globe"
                               Click="SettingsControl_Changed" />
 
                     <Grid Height="112"
@@ -276,14 +276,14 @@
 
                                 <StackPanel x:Name="LinkedSocialProfilePanel"
                                             Visibility="Collapsed">
-                                    <TextBlock Foreground="#666666"
-                                               Text="@ponkis" />
-                                    <TextBlock Margin="0,0,0,1"
+                                    <TextBlock x:Name="SocialUsernameText"
+                                               Foreground="#666666" />
+                                    <TextBlock x:Name="SocialDisplayNameText"
+                                               Margin="0,0,0,1"
                                                FontSize="20"
-                                               Foreground="#111111"
-                                               Text="Ponkis" />
-                                    <TextBlock Foreground="#666666"
-                                               Text="14 CDs burned total" />
+                                               Foreground="#111111" />
+                                    <TextBlock x:Name="SocialCdCountText"
+                                               Foreground="#666666" />
                                     <TextBlock Margin="0,10,0,0">
                                         <Hyperlink Click="UnlinkSocialAccount_Click">unlink your account</Hyperlink>
                                     </TextBlock>
@@ -295,7 +295,8 @@
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
                                     Visibility="Collapsed">
-                            <TextBlock HorizontalAlignment="Center"
+                            <TextBlock x:Name="SocialSigningInText"
+                                       HorizontalAlignment="Center"
                                        FontSize="18"
                                        Foreground="#777777"
                                        Text="Signing in..." />

@@ -75,6 +75,8 @@ Assert-NativeCommandSucceeded "dotnet restore"
 Assert-NativeCommandSucceeded "dotnet publish"
 
 $exePath = Join-Path $publishDir "Mystral.exe"
+$registrationScript = Join-Path $PSScriptRoot "Register-DevProtocol.ps1"
+& $registrationScript -ExecutablePath $exePath
 
 Write-Host ""
 Write-Host "Development build created:"
@@ -82,6 +84,7 @@ Write-Host $exePath
 Write-Host ""
 Write-Host "Environment: $appEnvironment"
 Write-Host "Version:     $version"
+Write-Host "Protocol:    mystral-dev://"
 
 if ($Run) {
     Start-Process -FilePath $exePath -WorkingDirectory $publishDir

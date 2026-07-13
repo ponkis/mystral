@@ -72,6 +72,18 @@ For packaged development builds:
 - If scrobbling is enabled, confirm now-playing/scrobble status does not report repeated failures.
 - Play an ad, podcast, very short clip, or idle state and confirm it is not treated as a scrobbleable song.
 
+## Globe
+
+- Run Globe locally on port 3000, open Settings → Social, and link through the browser approval page.
+- Confirm the linked name, username, avatar, and CD count update without restarting Mystral.
+- Burn once with automatic sharing off: the completion popup must offer `Share to globe`, and its status modal must move from progress to success.
+- Burn once with automatic sharing on: the completion popup must say `Successfully shared to your globe profile.` only after the server accepted it.
+- Stop Globe or force the burn endpoint to fail, burn with automatic sharing on, and confirm the popup reports the failure and offers Retry.
+- Unlink in Mystral and confirm Globe rejects the old bearer token, local link state clears, auto-share turns off, and a confirmation appears.
+- Link again, unlink from Globe's web settings, and confirm Mystral warns once on the next status check and disables Globe controls.
+- Open `mystral-dev://settings/social` and confirm an existing process is activated rather than starting a second instance.
+- Confirm Globe shows the burned-CD wall post and jewel-case collection entry, and that collection reordering survives a reload.
+
 ## Installer
 
 - Build the release folder output.
@@ -79,6 +91,7 @@ For packaged development builds:
 - Install the generated setup executable.
 - Launch Mystral from the installed shortcut or install location.
 - Confirm resources load: icon, artwork placeholder, buttons, busy animation, and sounds.
+- Open `mystral://settings/social` and confirm the installed production app opens Settings → Social.
 - Uninstall and confirm the app is removed cleanly.
 
 ## Pass Criteria

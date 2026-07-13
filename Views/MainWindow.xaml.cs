@@ -26,6 +26,7 @@ public partial class MainWindow : Window
     private readonly LyricsService _lyricsService;
     private readonly VolumeService _volumeService;
     private readonly LastFmService _lastFmService;
+    private readonly GlobeConnectionService _globeConnectionService;
     private readonly AppSettingsService _settingsService;
     private readonly DispatcherTimer _mediaPollTimer;
     private readonly DispatcherTimer _loadingIconTimer;
@@ -148,6 +149,7 @@ public partial class MainWindow : Window
     private bool _isExitingFromTray;
     private string _lastNotificationTrackTitle = string.Empty;
     private string _lastNotificationTrackArtist = string.Empty;
+    private bool _globeRevocationWarningPending;
 
     private MediaSnapshot Snapshot { get; set; } = MediaSnapshot.Empty;
     private LyricsResult Lyrics { get; set; } = LyricsResult.Empty;
@@ -162,9 +164,11 @@ public partial class MainWindow : Window
         _lyricsService = new LyricsService();
         _volumeService = new VolumeService();
         _lastFmService = new LastFmService(_settingsService);
+        _globeConnectionService = new GlobeConnectionService(_settingsService);
 
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
+        _globeConnectionService.LinkRevoked += GlobeConnectionService_LinkRevoked;
 
         _mediaPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _mediaPollTimer.Tick += async (_, _) => await _mediaService.RefreshAsync();
@@ -207,6 +211,7 @@ public partial class MainWindow : Window
         CompositionTarget.Rendering += TimelineCompositionTarget_Rendering;
         _mediaPollTimer.Start();
         ShowUpdatedSuccessfullyIfNeeded();
+        _ = StartGlobeConnectionAsync();
         if (_settingsService.Settings.Behavior.CheckForUpdatesOnStartup)
         {
             _ = SettingsWindow.CheckForUpdatesAsync(this, showNoUpdateMessage: false, showErrors: false);
@@ -221,6 +226,24 @@ public partial class MainWindow : Window
             TitleText.Text = "Media controls unavailable";
             DescriptionText.Text = ex.Message;
             SetTransportEnabled(false);
+        }
+    }
+
+    private async Task StartGlobeConnectionAsync()
+    {
+        try
+        {
+            await _globeConnectionService.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            if (IsLoaded && !_isClosing)
+            {
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "Could not check Globe link",
+                    ex.Message);
+            }
         }
     }
 
@@ -720,7 +743,12 @@ public partial class MainWindow : Window
                 Mouse.OverrideCursor = null;
             }
 
-            var burningWindow = new BurningWindow(draft, audioTagService, artworkLoader)
+            var burningWindow = new BurningWindow(
+                draft,
+                audioTagService,
+                artworkLoader,
+                _settingsService,
+                _globeConnectionService)
             {
                 WindowStartupLocation = WindowStartupLocation.CenterScreen
             };
@@ -3904,7 +3932,10 @@ public partial class MainWindow : Window
 
         PushDisableTopmost();
 
-        var settingsWindow = new SettingsWindow(_settingsService, _lastFmService)
+        var settingsWindow = new SettingsWindow(
+            _settingsService,
+            _lastFmService,
+            _globeConnectionService)
         {
             WindowStartupLocation = IsVisible ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen
         };
@@ -3917,6 +3948,30 @@ public partial class MainWindow : Window
         settingsWindow.Closed += SettingsWindow_Closed;
         settingsWindow.CloseRequestCanceled += SettingsWindow_CloseRequestCanceled;
         settingsWindow.Show();
+    }
+
+    internal void ActivateFromExternalRequest(bool openSocialSettings)
+    {
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        ShowInTaskbar = true;
+        Activate();
+
+        if (!openSocialSettings)
+        {
+            return;
+        }
+
+        ShowSettingsWindow();
+        _settingsWindow?.ShowSocialSection();
     }
 
     private void SettingsWindow_Closed(object? sender, EventArgs e)
@@ -3953,6 +4008,14 @@ public partial class MainWindow : Window
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => OnSettingsChanged(sender, e),
+                DispatcherPriority.Normal);
+            return;
+        }
+
         ResetScrobblingState();
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
@@ -3967,6 +4030,36 @@ public partial class MainWindow : Window
             Topmost = alwaysOnTop;
         }
         SetTopmostUi();
+    }
+
+    private void GlobeConnectionService_LinkRevoked(object? sender, GlobeLinkRevokedEventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => GlobeConnectionService_LinkRevoked(sender, e),
+                DispatcherPriority.Normal);
+            return;
+        }
+
+        if (_globeRevocationWarningPending)
+        {
+            return;
+        }
+
+        _globeRevocationWarningPending = true;
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            _globeRevocationWarningPending = false;
+            var owner = Application.Current.Windows
+                .OfType<Window>()
+                .FirstOrDefault(window => window.IsVisible && window.IsActive)
+                ?? this;
+            AppDialogWindow.ShowWarning(
+                owner,
+                "Globe account unlinked",
+                "Your Globe account is no longer linked. Automatic sharing has been turned off. You can link it again from Settings → Social.");
+        }, DispatcherPriority.Normal);
     }
 
     private void InitializeTrayIcon()
@@ -4301,6 +4394,7 @@ public partial class MainWindow : Window
         _lastFmScrobbleCts?.Dispose();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
+        _globeConnectionService.LinkRevoked -= GlobeConnectionService_LinkRevoked;
         if (_notifyIcon is not null)
         {
             _notifyIcon.MouseUp -= NotifyIcon_MouseUp;
@@ -4312,6 +4406,7 @@ public partial class MainWindow : Window
         _trayContextMenu = null;
         _volumeService.Dispose();
         _lastFmService.Dispose();
+        _globeConnectionService.Dispose();
         _lyricsService.Dispose();
         _mediaService.Dispose();
         base.OnClosed(e);

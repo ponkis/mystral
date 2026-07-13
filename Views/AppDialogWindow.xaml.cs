@@ -3,6 +3,7 @@ using System.IO;
 using System.Media;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -51,6 +52,32 @@ public partial class AppDialogWindow : Window
     public static MessageBoxResult ShowError(Window owner, string title, string message)
     {
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons(), "error.wav");
+    }
+
+    internal static bool ShowAction(
+        Window owner,
+        string title,
+        string message,
+        string actionCaption,
+        bool isError = false)
+    {
+        var actionSelected = false;
+        var dialog = new AppDialogWindow(
+            title,
+            FromSystemIcon(isError ? System.Drawing.SystemIcons.Error : System.Drawing.SystemIcons.Information),
+            ContinueButtons());
+        dialog.DialogDescriptionText.Inlines.Add(new Run(message));
+        dialog.DialogDescriptionText.Inlines.Add(new Run(" "));
+        var action = new Hyperlink(new Run(actionCaption));
+        action.Click += (_, _) =>
+        {
+            actionSelected = true;
+            dialog.Result = MessageBoxResult.OK;
+            dialog.Close();
+        };
+        dialog.DialogDescriptionText.Inlines.Add(action);
+        ShowDialog(owner, dialog, isError ? "error.wav" : "confirmation.wav");
+        return actionSelected;
     }
 
     public static MessageBoxResult ShowAbout(Window owner, Func<Window, Button, Task>? checkForUpdates = null)
