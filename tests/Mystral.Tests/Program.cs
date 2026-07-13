@@ -30,6 +30,7 @@ internal static class Program
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
             ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
             ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
+            ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
             ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
 
@@ -708,6 +709,68 @@ static class MusicBrainzServiceTests
                     TimeSpan.Zero)
                 .GetAwaiter()
                 .GetResult());
+    }
+}
+
+static class BurnMetadataValidationTests
+{
+    public static void ValidatesFieldsAndSuggestedFileNames()
+    {
+        var draft = new BurnTrackDraft
+        {
+            SourcePath = @"C:\Music\original.flac",
+            Title = new string('T', BurnTrackDraft.MaxTitleLength),
+            Artist = new string('A', BurnTrackDraft.MaxArtistLength),
+            Album = new string('L', BurnTrackDraft.MaxAlbumLength),
+            Genre = new string('G', BurnTrackDraft.MaxGenreLength),
+            Year = "2026",
+            TrackNumber = "9998",
+            TrackTotal = "9999"
+        };
+
+        AudioTagService.ValidateDraft(draft);
+
+        draft.Title += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Title = "AC/DC: Live?";
+
+        draft.Artist += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Artist = "Artist";
+
+        draft.Album += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Album = "Album";
+
+        draft.Genre += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Genre = "Genre";
+
+        draft.Year = "20A6";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Year = "2026";
+
+        draft.TrackNumber = "seven";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.TrackNumber = "0";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.TrackNumber = "12";
+        draft.TrackTotal = "11";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+
+        draft.TrackNumber = "7";
+        draft.TrackTotal = "12";
+        AudioTagService.ValidateDraft(draft);
+        Check.Equal("AC_DC_ Live_.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+
+        draft.Title = "CON";
+        Check.Equal("_CON.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+        draft.Title = "  ...  ";
+        Check.Equal("Untitled.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+        draft.Title = new string('x', 300);
+        var boundedName = AudioTagService.CreateSuggestedOutputFileName(draft);
+        Check.Equal(255, boundedName.Length);
+        Check.True(boundedName.EndsWith(".flac", StringComparison.OrdinalIgnoreCase));
     }
 }
 

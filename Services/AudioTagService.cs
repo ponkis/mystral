@@ -8,6 +8,7 @@ namespace Mystral.Services;
 public sealed class AudioTagService
 {
     private const int CopyBufferSize = 1024 * 1024;
+    private const int MaxSuggestedFileNameLength = 255;
 
     static AudioTagService()
     {
@@ -20,6 +21,38 @@ public sealed class AudioTagService
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var fullPath = Path.GetFullPath(path);
         return Task.Run(() => Read(fullPath, cancellationToken), cancellationToken);
+    }
+
+    public static string CreateSuggestedOutputFileName(BurnTrackDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        var extension = Path.GetExtension(draft.SourcePath);
+        var invalidCharacters = Path.GetInvalidFileNameChars();
+        var title = new string(draft.Title
+            .Trim()
+            .Select(character => character < ' ' || invalidCharacters.Contains(character) ? '_' : character)
+            .ToArray())
+            .Trim()
+            .TrimEnd('.', ' ');
+
+        if (title.Length == 0)
+        {
+            title = "Untitled";
+        }
+
+        if (IsReservedWindowsFileName(title))
+        {
+            title = $"_{title}";
+        }
+
+        var maximumTitleLength = Math.Max(1, MaxSuggestedFileNameLength - extension.Length);
+        if (title.Length > maximumTitleLength)
+        {
+            title = title[..maximumTitleLength].TrimEnd('.', ' ');
+        }
+
+        return $"{title}{extension}";
     }
 
     public async Task SaveCopyAsync(
@@ -284,8 +317,24 @@ public sealed class AudioTagService
     internal static void ValidateDraft(BurnTrackDraft draft)
     {
         ArgumentNullException.ThrowIfNull(draft);
+        ValidateFieldLength("Title", draft.Title, BurnTrackDraft.MaxTitleLength);
+        ValidateFieldLength("Artist", draft.Artist, BurnTrackDraft.MaxArtistLength);
+        ValidateFieldLength("Album", draft.Album, BurnTrackDraft.MaxAlbumLength);
+        ValidateFieldLength("Genre", draft.Genre, BurnTrackDraft.MaxGenreLength);
+        ValidateFieldLength("Year", draft.Year, BurnTrackDraft.MaxYearLength);
+        ValidateFieldLength("Track number", draft.TrackNumber, BurnTrackDraft.MaxTrackNumberLength);
+        ValidateFieldLength("Track count", draft.TrackTotal, BurnTrackDraft.MaxTrackTotalLength);
         _ = ParseYear(draft.Year);
-        _ = ParseTrackTotal(draft.TrackTotal, draft.TrackNumber);
+        var trackNumber = ParseTrackNumber(draft.TrackNumber);
+        _ = ParseTrackTotal(draft.TrackTotal, trackNumber);
+    }
+
+    private static void ValidateFieldLength(string fieldName, string value, int maximumLength)
+    {
+        if (value.Length > maximumLength)
+        {
+            throw new InvalidDataException($"{fieldName} cannot be longer than {maximumLength} characters.");
+        }
     }
 
     private static int? ParseYear(string value)
@@ -306,28 +355,61 @@ public sealed class AudioTagService
         throw new InvalidDataException("Year must contain exactly four digits.");
     }
 
+    private static int? ParseTrackNumber(string value)
+    {
+        return ParseTrackValue(value, "Track number");
+    }
+
     private static int? ParseTrackTotal(string value, string trackNumber)
     {
-        var totalText = value.Trim();
-        if (totalText.Length == 0)
-        {
-            return null;
-        }
+        return ParseTrackTotal(value, ParseTrackNumber(trackNumber));
+    }
 
-        if (!int.TryParse(totalText, NumberStyles.None, CultureInfo.InvariantCulture, out var total)
-            || total <= 0)
-        {
-            throw new InvalidDataException("Track count must be a positive whole number.");
-        }
+    private static int? ParseTrackTotal(string value, int? trackNumber)
+    {
+        var total = ParseTrackValue(value, "Track count");
 
-        if (int.TryParse(trackNumber.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var number)
-            && number > 0
-            && number > total)
+        if (trackNumber is { } number && total is { } count && number > count)
         {
             throw new InvalidDataException("Track number cannot be greater than the track count.");
         }
 
         return total;
+    }
+
+    private static int? ParseTrackValue(string value, string fieldName)
+    {
+        var text = value.Trim();
+        if (text.Length == 0)
+        {
+            return null;
+        }
+
+        if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            || parsed is < 1 or > BurnTrackDraft.MaxTrackValue)
+        {
+            throw new InvalidDataException(
+                $"{fieldName} must be a whole number from 1 to {BurnTrackDraft.MaxTrackValue}.");
+        }
+
+        return parsed;
+    }
+
+    private static bool IsReservedWindowsFileName(string fileName)
+    {
+        var name = fileName.Split('.')[0];
+        if (name.Equals("CON", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return name.Length == 4
+            && (name.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+            && name[3] is >= '1' and <= '9';
     }
 
     private static string FormatYear(ATL.Track track)

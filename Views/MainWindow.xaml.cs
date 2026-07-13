@@ -70,6 +70,13 @@ public partial class MainWindow : Window
     private bool _isBurnDiscInserting;
     private bool _isOpeningBurningWindow;
     private BurningWindow? _burningWindow;
+    private bool _isBurningWindowSuppressingTopmost;
+    private bool _isBurnPresentationDetached;
+    private bool _isWaitingForBurningWindowClose;
+    private BitmapSource? _defaultCompactBurnDiscArtwork;
+    private BitmapSource? _burnPresentationDiscSource;
+    private CancellationTokenSource? _burnPresentationArtworkCts;
+    private int _burnPresentationArtworkGeneration;
     private bool _isBurnDiscOverflowActive;
     private bool _suppressBurnDiscHoverUntilLeave;
     private double _burnDiscDragStartY;
@@ -109,6 +116,7 @@ public partial class MainWindow : Window
     private const double BurnDiscEjectedAngle = 72;
     private const double BurnDiscPullSpinPerDip = 3.6;
     private const double BurnDiscMaxPullDistance = 100;
+    private const double BurnDiscPresentationDetachDistance = BurnDiscMaxPullDistance * 0.65;
     private const double BurnDiscCollapsedSurfaceHeight = 10;
     private const double BurnDiscEjectedSurfaceHeight = 43;
     private const double BurnDiscMaxSurfaceHeight = 142;
@@ -287,7 +295,11 @@ public partial class MainWindow : Window
             var artwork = await CdArtworkComposer.ComposeDefaultAsync(_burnDiscArtworkCts.Token);
             if (!_burnDiscArtworkCts.IsCancellationRequested)
             {
-                CompactBurnDiscImage.Source = artwork;
+                _defaultCompactBurnDiscArtwork = artwork;
+                if (_burningWindow is null || _isBurnPresentationDetached || Snapshot.HasSession)
+                {
+                    CompactBurnDiscImage.Source = artwork;
+                }
             }
         }
         catch (OperationCanceledException) when (_burnDiscArtworkCts.IsCancellationRequested)
@@ -408,6 +420,14 @@ public partial class MainWindow : Window
             downwardDelta - SystemParameters.MinimumVerticalDragDistance,
             0,
             BurnDiscMaxPullDistance);
+        if (!_isBurnPresentationDetached
+            && _burningWindow is not null
+            && !Snapshot.HasSession
+            && _burnDiscPullDistance >= BurnDiscPresentationDetachDistance)
+        {
+            _isBurnPresentationDetached = true;
+            RefreshCompactBurnPresentation();
+        }
 
         CompactBurnDiscEject.OffsetY = Math.Max(
             BurnDiscMaxPulledOffsetY,
@@ -642,11 +662,12 @@ public partial class MainWindow : Window
 
         _isOpeningBurningWindow = true;
         PushDisableTopmost();
+        var retainTopmostSuppression = false;
         try
         {
             var picker = new Microsoft.Win32.OpenFileDialog
             {
-                Title = "Choose an audio file to burn",
+                Title = "Choose an audio file to burn to a CD",
                 CheckFileExists = true,
                 Multiselect = false,
                 Filter = "Audio files|*.mp3;*.mp2;*.mp1;*.flac;*.m4a;*.m4b;*.aac;*.ogg;*.oga;*.opus;*.wav;*.aif;*.aiff;*.wma;*.asf;*.ape;*.wv;*.mpc;*.mpp;*.webm;*.dsf;*.aa;*.aax|All files|*.*"
@@ -675,7 +696,7 @@ public partial class MainWindow : Window
                 AppDialogWindow.ShowWarning(
                     this,
                     "Unsupported audio file",
-                    $"Mystral could not verify this as a supported audio file.\n\n{ex.Message}");
+                    "The selected file is not a supported audio file.");
                 return;
             }
             finally
@@ -685,19 +706,28 @@ public partial class MainWindow : Window
 
             var burningWindow = new BurningWindow(draft, audioTagService, artworkLoader)
             {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen,
-                Topmost = _settingsService.Settings.Behavior.AlwaysOnTop
+                WindowStartupLocation = WindowStartupLocation.CenterScreen
             };
             _burningWindow = burningWindow;
+            _isBurnPresentationDetached = false;
             burningWindow.Closed += BurningWindow_Closed;
+            burningWindow.PresentationChanged += BurningWindow_PresentationChanged;
+            burningWindow.TrackReplaced += BurningWindow_TrackReplaced;
+            burningWindow.CloseRequestCanceled += BurningWindow_CloseRequestCanceled;
             try
             {
                 burningWindow.Show();
                 burningWindow.Activate();
+                _isBurningWindowSuppressingTopmost = true;
+                retainTopmostSuppression = true;
+                RefreshCompactBurnPresentation();
             }
             catch
             {
                 burningWindow.Closed -= BurningWindow_Closed;
+                burningWindow.PresentationChanged -= BurningWindow_PresentationChanged;
+                burningWindow.TrackReplaced -= BurningWindow_TrackReplaced;
+                burningWindow.CloseRequestCanceled -= BurningWindow_CloseRequestCanceled;
                 _burningWindow = null;
                 throw;
             }
@@ -713,7 +743,10 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = null;
             ResetCompactBurnDisc();
-            PopRestoreTopmost();
+            if (!retainTopmostSuppression)
+            {
+                PopRestoreTopmost();
+            }
             _isOpeningBurningWindow = false;
         }
     }
@@ -723,11 +756,156 @@ public partial class MainWindow : Window
         if (sender is BurningWindow burningWindow)
         {
             burningWindow.Closed -= BurningWindow_Closed;
+            burningWindow.PresentationChanged -= BurningWindow_PresentationChanged;
+            burningWindow.TrackReplaced -= BurningWindow_TrackReplaced;
+            burningWindow.CloseRequestCanceled -= BurningWindow_CloseRequestCanceled;
         }
 
         if (ReferenceEquals(_burningWindow, sender))
         {
             _burningWindow = null;
+        }
+
+        _isBurnPresentationDetached = false;
+        RefreshCompactBurnPresentation();
+        if (_isBurningWindowSuppressingTopmost)
+        {
+            _isBurningWindowSuppressingTopmost = false;
+            PopRestoreTopmost();
+        }
+        if (_isWaitingForBurningWindowClose)
+        {
+            _isWaitingForBurningWindowClose = false;
+            Dispatcher.BeginInvoke(PlayCloseAnimation, DispatcherPriority.Normal);
+        }
+    }
+
+    private void BurningWindow_PresentationChanged(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(_burningWindow, sender))
+        {
+            RefreshCompactBurnPresentation();
+        }
+    }
+
+    private void BurningWindow_TrackReplaced(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_burningWindow, sender))
+        {
+            return;
+        }
+
+        _isBurnPresentationDetached = false;
+        RefreshCompactBurnPresentation();
+    }
+
+    private void BurningWindow_CloseRequestCanceled(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(_burningWindow, sender) || !_isWaitingForBurningWindowClose)
+        {
+            return;
+        }
+
+        _isWaitingForBurningWindowClose = false;
+        _isExitingFromTray = false;
+    }
+
+    private void RefreshCompactBurnPresentation()
+    {
+        var burningWindow = _burningWindow;
+        var isBurningPresentationActive = !Snapshot.HasSession
+            && burningWindow is not null
+            && !_isBurnPresentationDetached;
+        if (!isBurningPresentationActive)
+        {
+            TitleText.Text = Snapshot.Title;
+            DescriptionText.Text = Snapshot.Description;
+            DescriptionText.Visibility = Visibility.Visible;
+            SetImageSourceIfChanged(ArtImage, Snapshot.CoverArt);
+            SetImageSourceIfChanged(BlurredArtImage, Snapshot.CoverArt);
+            ArtImage.BeginAnimation(OpacityProperty, null);
+            ArtImage.Opacity = 1;
+            ArtPlaceholderText.Visibility = Snapshot.CoverArt is null
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            ApplyArtworkTint(Snapshot.CoverArt);
+            ResetBurnPresentationDiscArtwork();
+            return;
+        }
+
+        TitleText.Text = "Burning...";
+        var details = string.Join(
+            " — ",
+            new[] { burningWindow!.PresentationTitle, burningWindow.PresentationArtist }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+        DescriptionText.Text = details;
+        DescriptionText.Visibility = details.Length == 0
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        var cover = burningWindow.PresentationCover;
+        SetImageSourceIfChanged(ArtImage, cover);
+        SetImageSourceIfChanged(BlurredArtImage, cover);
+        ArtImage.BeginAnimation(OpacityProperty, null);
+        ArtImage.Opacity = 1;
+        ArtPlaceholderText.Visibility = cover is null ? Visibility.Visible : Visibility.Collapsed;
+        ApplyArtworkTint(cover);
+        _ = UpdateBurnPresentationDiscArtworkAsync(burningWindow.PresentationDisc);
+    }
+
+    private async Task UpdateBurnPresentationDiscArtworkAsync(BitmapSource artwork)
+    {
+        if (ReferenceEquals(_burnPresentationDiscSource, artwork))
+        {
+            return;
+        }
+
+        _burnPresentationDiscSource = artwork;
+        var generation = ++_burnPresentationArtworkGeneration;
+        var cancellation = new CancellationTokenSource();
+        var previousCancellation = Interlocked.Exchange(ref _burnPresentationArtworkCts, cancellation);
+        previousCancellation?.Cancel();
+        previousCancellation?.Dispose();
+        try
+        {
+            var composed = await CdArtworkComposer.ComposeAsync(artwork, cancellation.Token);
+            if (generation == _burnPresentationArtworkGeneration
+                && !cancellation.IsCancellationRequested
+                && _burningWindow is not null
+                && !_isBurnPresentationDetached
+                && !Snapshot.HasSession)
+            {
+                CompactBurnDiscImage.Source = composed;
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to compose the active burn CD artwork: {ex}");
+        }
+        finally
+        {
+            if (ReferenceEquals(
+                    Interlocked.CompareExchange(ref _burnPresentationArtworkCts, null, cancellation),
+                    cancellation))
+            {
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private void ResetBurnPresentationDiscArtwork()
+    {
+        _burnPresentationDiscSource = null;
+        _burnPresentationArtworkGeneration++;
+        var cancellation = Interlocked.Exchange(ref _burnPresentationArtworkCts, null);
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+        if (_defaultCompactBurnDiscArtwork is not null)
+        {
+            CompactBurnDiscImage.Source = _defaultCompactBurnDiscArtwork;
         }
     }
 
@@ -1060,6 +1238,7 @@ public partial class MainWindow : Window
             SyncFullscreenPlaybackState();
         }
 
+        RefreshCompactBurnPresentation();
         RefreshLyricsForSnapshot(snapshot);
         RefreshLastFmForSnapshot(snapshot);
         UpdateScrobblingForSnapshot(snapshot);
@@ -2739,16 +2918,16 @@ public partial class MainWindow : Window
 
     private void TopmostButton_Click(object sender, RoutedEventArgs e)
     {
-        Topmost = !Topmost;
-        SetTopmostUi();
-        _settingsService.Settings.Behavior.AlwaysOnTop = Topmost;
+        _settingsService.Settings.Behavior.AlwaysOnTop =
+            !_settingsService.Settings.Behavior.AlwaysOnTop;
         _settingsService.Save(_settingsService.Settings);
     }
 
     private void SetTopmostUi()
     {
-        TopmostButton.Opacity = Topmost ? 1 : 0.45;
-        TopmostButton.ToolTip = Topmost ? "Always on top" : "Normal window";
+        var alwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop;
+        TopmostButton.Opacity = alwaysOnTop ? 1 : 0.45;
+        TopmostButton.ToolTip = alwaysOnTop ? "Always on top" : "Normal window";
     }
 
     private void MinimizeButton_Click(object sender, RoutedEventArgs e)
@@ -2819,8 +2998,15 @@ public partial class MainWindow : Window
 
     private void PlayCloseAnimation()
     {
-        if (_isClosing)
+        if (_isClosing || _isWaitingForBurningWindowClose)
         {
+            return;
+        }
+
+        if (!ShouldCloseToTray() && _burningWindow is { } burningWindow)
+        {
+            _isWaitingForBurningWindowClose = true;
+            burningWindow.Close();
             return;
         }
 
@@ -3551,10 +3737,15 @@ public partial class MainWindow : Window
         ResetScrobblingState();
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
-        Topmost = _settingsService.Settings.Behavior.AlwaysOnTop;
-        if (_burningWindow is not null)
+        var alwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop;
+        if (_openDialogCount > 0)
         {
-            _burningWindow.Topmost = Topmost;
+            _savedTopmostState = alwaysOnTop;
+            Topmost = false;
+        }
+        else
+        {
+            Topmost = alwaysOnTop;
         }
         SetTopmostUi();
     }
@@ -3788,12 +3979,11 @@ public partial class MainWindow : Window
     private void ExitApplication()
     {
         _isExitingFromTray = true;
-        _allowClose = true;
+        _allowClose = false;
         _trayContextMenu?.SetCurrentValue(ContextMenu.IsOpenProperty, false);
         _trayContextMenu = null;
         _settingsWindow?.Close();
-        ShowInTaskbar = false;
-        Close();
+        PlayCloseAnimation();
     }
 
     private bool ShouldCloseToTray()
@@ -3890,6 +4080,9 @@ public partial class MainWindow : Window
         CompositionTarget.Rendering -= TimelineCompositionTarget_Rendering;
         _burnDiscArtworkCts.Cancel();
         _burnDiscArtworkCts.Dispose();
+        var burnPresentationArtworkCts = Interlocked.Exchange(ref _burnPresentationArtworkCts, null);
+        burnPresentationArtworkCts?.Cancel();
+        burnPresentationArtworkCts?.Dispose();
         _mediaPollTimer.Stop();
         StopLyricsScrollAnimation();
         _loadingIconTimer.Stop();
@@ -3901,7 +4094,6 @@ public partial class MainWindow : Window
         _lastFmScrobbleCts?.Cancel();
         _lastFmScrobbleCts?.Dispose();
         _settingsWindow?.Close();
-        _burningWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         if (_notifyIcon is not null)
         {

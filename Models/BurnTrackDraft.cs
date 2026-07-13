@@ -2,6 +2,15 @@ namespace Mystral.Models;
 
 public sealed class BurnTrackDraft
 {
+    public const int MaxTitleLength = 256;
+    public const int MaxArtistLength = 256;
+    public const int MaxAlbumLength = 256;
+    public const int MaxGenreLength = 128;
+    public const int MaxYearLength = 4;
+    public const int MaxTrackNumberLength = 4;
+    public const int MaxTrackTotalLength = 4;
+    public const int MaxTrackValue = 9999;
+
     public required string SourcePath { get; init; }
     public string Title { get; set; } = string.Empty;
     public string Artist { get; set; } = string.Empty;

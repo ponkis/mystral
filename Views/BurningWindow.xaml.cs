@@ -17,11 +17,12 @@ namespace Mystral.Views;
 public partial class BurningWindow : Window
 {
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
-    private readonly BurnTrackDraft _draft;
+    private BurnTrackDraft _draft;
     private readonly AudioTagService _audioTagService;
     private readonly ImageArtworkLoader _artworkLoader;
     private readonly MusicBrainzService _musicBrainzService = new();
     private readonly BitmapSource _placeholderArtwork;
+    private readonly BitmapSource _defaultDiscArtwork;
     private CancellationTokenSource? _operationCts;
     private BurnEditorState _baselineState;
     private string? _coverArtworkHash;
@@ -35,6 +36,7 @@ public partial class BurningWindow : Window
     private bool _isCloseAnimationRunning;
     private bool _isCloseCommitted;
     private bool _isClosed;
+    private bool _isDiscUploadTilePointerDown;
 
     public BurningWindow(
         BurnTrackDraft draft,
@@ -45,27 +47,29 @@ public partial class BurningWindow : Window
         _audioTagService = audioTagService;
         _artworkLoader = artworkLoader;
         _placeholderArtwork = artworkLoader.LoadApplicationImage("unknown.png");
+        _defaultDiscArtwork = artworkLoader.LoadApplicationImage("cd_default_cover.png");
 
         InitializeComponent();
         Closed += Window_Closed;
         RootCard.Opacity = 0;
         WindowScale.ScaleX = 0.96;
         WindowScale.ScaleY = 0.96;
-        TitleBox.Text = draft.Title;
-        ArtistBox.Text = draft.Artist;
-        AlbumBox.Text = draft.Album;
-        GenreBox.Text = draft.Genre;
-        YearBox.Text = draft.Year;
-        TrackNumberBox.Text = draft.TrackNumber;
-        TrackTotalBox.Text = draft.TrackTotal;
-        _coverArtworkHash = HashArtwork(draft.CoverArtwork);
-        _discArtworkHash = HashArtwork(draft.DiscArtwork);
-        _isInitialized = true;
-        UpdatePreviewText();
-        ApplyArtworkTint(draft.CoverArtwork?.Preview);
-        _baselineState = CaptureEditorState();
-        UpdateDirtyState();
+        LoadDraftIntoEditor(draft);
     }
+
+    internal event EventHandler? PresentationChanged;
+
+    internal event EventHandler? TrackReplaced;
+
+    internal event EventHandler? CloseRequestCanceled;
+
+    internal string PresentationTitle => TitleBox.Text.Trim();
+
+    internal string PresentationArtist => ArtistBox.Text.Trim();
+
+    internal BitmapSource? PresentationCover => _draft.CoverArtwork?.Preview;
+
+    internal BitmapSource PresentationDisc => _draft.DiscArtwork?.Preview ?? _defaultDiscArtwork;
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
@@ -81,8 +85,14 @@ public partial class BurningWindow : Window
         }
 
         e.Cancel = true;
-        if (_isBusy || _isCloseRequestPending || _isCloseAnimationRunning)
+        if (_isCloseRequestPending || _isCloseAnimationRunning)
         {
+            return;
+        }
+
+        if (_isBusy)
+        {
+            CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -97,6 +107,7 @@ public partial class BurningWindow : Window
                     "Save your CD metadata before closing?");
                 if (result == MessageBoxResult.Cancel)
                 {
+                    CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
                     return;
                 }
 
@@ -106,8 +117,9 @@ public partial class BurningWindow : Window
                 }
                 else
                 {
-                    if (!await SaveBurnedFileAsync(showSuccess: false))
+                    if (!await SaveBurnedFileAsync())
                     {
+                        CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
                         return;
                     }
 
@@ -174,6 +186,30 @@ public partial class BurningWindow : Window
 
         UpdatePreviewText();
         UpdateDirtyState();
+        PresentationChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void NumericTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        e.Handled = e.Text.Any(character => character is < '0' or > '9');
+    }
+
+    private void NumericTextBox_Pasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (sender is not TextBox textBox
+            || !e.DataObject.GetDataPresent(DataFormats.UnicodeText)
+            || e.DataObject.GetData(DataFormats.UnicodeText) is not string pastedText
+            || pastedText.Any(character => character is < '0' or > '9'))
+        {
+            e.CancelCommand();
+            return;
+        }
+
+        var proposedLength = textBox.Text.Length - textBox.SelectionLength + pastedText.Length;
+        if (proposedLength > textBox.MaxLength)
+        {
+            e.CancelCommand();
+        }
     }
 
     private async void JewelPreview_UploadCoverRequested(object? sender, EventArgs e)
@@ -186,20 +222,59 @@ public partial class BurningWindow : Window
         await UploadArtworkAsync(isDiscArtwork: false);
     }
 
-    private async void DiscUploadButton_Click(object sender, RoutedEventArgs e)
+    private async void DiscArtworkPreview_UploadArtworkRequested(object? sender, EventArgs e)
     {
         await UploadArtworkAsync(isDiscArtwork: true);
     }
 
-    private void ArtworkButton_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    private void DiscUploadTile_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not Button { ContextMenu.Items.Count: > 0 } button
-            || button.ContextMenu.Items[0] is not MenuItem deleteItem)
+        if (e.Handled
+            || e.LeftButton != MouseButtonState.Pressed
+            || !Mouse.Capture(DiscUploadTile, CaptureMode.Element))
         {
             return;
         }
 
-        deleteItem.IsEnabled = string.Equals(button.Tag as string, "Disc", StringComparison.Ordinal)
+        _isDiscUploadTilePointerDown = true;
+        e.Handled = true;
+    }
+
+    private async void DiscUploadTile_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.Handled || !_isDiscUploadTilePointerDown)
+        {
+            return;
+        }
+
+        _isDiscUploadTilePointerDown = false;
+        var shouldUpload = DiscUploadTile.IsMouseOver;
+        if (DiscUploadTile.IsMouseCaptured)
+        {
+            Mouse.Capture(null);
+        }
+
+        e.Handled = true;
+        if (shouldUpload)
+        {
+            await UploadArtworkAsync(isDiscArtwork: true);
+        }
+    }
+
+    private void DiscUploadTile_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        _isDiscUploadTilePointerDown = false;
+    }
+
+    private void ArtworkButton_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement { ContextMenu.Items.Count: > 0 } element
+            || element.ContextMenu.Items[0] is not MenuItem deleteItem)
+        {
+            return;
+        }
+
+        deleteItem.IsEnabled = string.Equals(element.Tag as string, "Disc", StringComparison.Ordinal)
             ? _draft.DiscArtwork is not null
             : _draft.CoverArtwork is not null;
     }
@@ -286,6 +361,84 @@ public partial class BurningWindow : Window
                 SetBusy(false);
             }
         }
+    }
+
+    private async void ReplaceSongButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBusy)
+        {
+            return;
+        }
+
+        if (_hasUnsavedChanges)
+        {
+            var result = AppDialogWindow.ShowQuestion(
+                this,
+                "Unsaved changes",
+                "Save your CD metadata before replacing the song?");
+            if (result == MessageBoxResult.Cancel)
+            {
+                return;
+            }
+
+            if (result == MessageBoxResult.Yes && !await SaveBurnedFileAsync())
+            {
+                return;
+            }
+        }
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose an audio file to burn to a CD",
+            CheckFileExists = true,
+            Multiselect = false,
+            Filter = "Audio files|*.mp3;*.mp2;*.mp1;*.flac;*.m4a;*.m4b;*.aac;*.ogg;*.oga;*.opus;*.wav;*.aif;*.aiff;*.wma;*.asf;*.ape;*.wv;*.mpc;*.mpp;*.webm;*.dsf;*.aa;*.aax|All files|*.*"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        BeginOperation();
+        var cancellationToken = _operationCts!.Token;
+        SetBusy(true);
+        Mouse.OverrideCursor = Cursors.Wait;
+        BurnTrackDraft? replacement = null;
+        try
+        {
+            replacement = await _audioTagService.ReadAsync(dialog.FileName, cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidDataException
+                                   or IOException
+                                   or UnauthorizedAccessException
+                                   or NotSupportedException)
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "Unsupported audio file",
+                "The selected file is not a supported audio file.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+            EndOperation();
+            if (!_isClosed)
+            {
+                SetBusy(false);
+            }
+        }
+
+        if (replacement is null || _isClosed)
+        {
+            return;
+        }
+
+        LoadDraftIntoEditor(replacement);
+        await RefreshArtworkUiAsync();
+        TrackReplaced?.Invoke(this, EventArgs.Empty);
     }
 
     private async void FetchButton_Click(object sender, RoutedEventArgs e)
@@ -450,14 +603,13 @@ public partial class BurningWindow : Window
         }
 
         var sourceExtension = Path.GetExtension(_draft.SourcePath);
-        var baseName = Path.GetFileNameWithoutExtension(_draft.SourcePath);
         var dialog = new SaveFileDialog
         {
             Title = "Save burned audio file",
             AddExtension = true,
             OverwritePrompt = true,
             DefaultExt = sourceExtension,
-            FileName = $"{baseName}{sourceExtension}",
+            FileName = AudioTagService.CreateSuggestedOutputFileName(_draft),
             Filter = sourceExtension.Length == 0
                 ? "All files|*.*"
                 : $"Original audio format (*{sourceExtension})|*{sourceExtension}"
@@ -594,8 +746,37 @@ public partial class BurningWindow : Window
     {
         if (!string.IsNullOrWhiteSpace(value))
         {
-            textBox.Text = value;
+            textBox.Text = LimitForTextBox(textBox, value);
         }
+    }
+
+    private void LoadDraftIntoEditor(BurnTrackDraft draft)
+    {
+        _draft = draft;
+        _isInitialized = false;
+        TitleBox.Text = LimitForTextBox(TitleBox, draft.Title);
+        ArtistBox.Text = LimitForTextBox(ArtistBox, draft.Artist);
+        AlbumBox.Text = LimitForTextBox(AlbumBox, draft.Album);
+        GenreBox.Text = LimitForTextBox(GenreBox, draft.Genre);
+        YearBox.Text = LimitForTextBox(YearBox, draft.Year);
+        TrackNumberBox.Text = LimitForTextBox(TrackNumberBox, draft.TrackNumber);
+        TrackTotalBox.Text = LimitForTextBox(TrackTotalBox, draft.TrackTotal);
+        _coverArtworkHash = HashArtwork(draft.CoverArtwork);
+        _discArtworkHash = HashArtwork(draft.DiscArtwork);
+        _isInitialized = true;
+        SyncDraftFromForm();
+        UpdatePreviewText();
+        ApplyArtworkTint(draft.CoverArtwork?.Preview);
+        _baselineState = CaptureEditorState();
+        UpdateDirtyState();
+        PresentationChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static string LimitForTextBox(TextBox textBox, string value)
+    {
+        return textBox.MaxLength > 0 && value.Length > textBox.MaxLength
+            ? value[..textBox.MaxLength]
+            : value;
     }
 
     private void SyncDraftFromForm()
@@ -628,10 +809,13 @@ public partial class BurningWindow : Window
         var cover = _draft.CoverArtwork?.Preview;
         var coverPreview = cover ?? _placeholderArtwork;
         CoverUploadImage.Source = coverPreview;
-        DiscUploadImage.Source = _draft.DiscArtwork?.Preview;
         BlurredCoverImage.Source = cover;
         ApplyArtworkTint(cover);
-        await JewelPreview.SetArtworkAsync(coverPreview, _draft.DiscArtwork?.Preview);
+        await DiscArtworkPreview.SetArtworkAsync(_draft.DiscArtwork?.Preview);
+        await JewelPreview.SetArtworkAsync(
+            coverPreview,
+            _draft.DiscArtwork?.Preview ?? _defaultDiscArtwork);
+        PresentationChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void UpdateDirtyState()
@@ -671,6 +855,7 @@ public partial class BurningWindow : Window
     private void UpdateDirtyStatus()
     {
         DirtyStatusText.Text = _hasUnsavedChanges ? "Unsaved changes" : string.Empty;
+        SaveButton.IsEnabled = _hasUnsavedChanges && !_isBusy;
     }
 
     private static string? HashArtwork(ArtworkAsset? artwork)
@@ -813,11 +998,11 @@ public partial class BurningWindow : Window
     {
         _isBusy = isBusy;
         FetchButton.IsEnabled = !isBusy;
-        SaveButton.IsEnabled = !isBusy;
+        ReplaceSongButton.IsEnabled = !isBusy;
         EditorTabs.IsEnabled = !isBusy;
         JewelPreview.IsEnabled = !isBusy;
         CoverUploadButton.IsEnabled = !isBusy;
-        DiscUploadButton.IsEnabled = !isBusy;
+        DiscUploadTile.IsEnabled = !isBusy;
         CloseButton.IsEnabled = !isBusy;
         CancelButton.IsEnabled = !isBusy;
         UpdateDirtyStatus();
