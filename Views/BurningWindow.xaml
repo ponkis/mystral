@@ -293,11 +293,9 @@
 
                     <TabControl x:Name="EditorTabs"
                                 Grid.Row="2"
-                                Margin="14,12,14,8"
-                                Background="#FFFFFFFF">
+                                Margin="14,12,14,8">
                         <TabItem Header="Details">
-                            <Border Padding="20,16"
-                                    Background="#FFFFFFFF">
+                            <Border Padding="20,16">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="96" />
@@ -363,8 +361,7 @@
                         </TabItem>
 
                         <TabItem Header="Artwork">
-                            <Border Padding="18,16"
-                                    Background="#FFFFFFFF">
+                            <Border Padding="18,16">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
