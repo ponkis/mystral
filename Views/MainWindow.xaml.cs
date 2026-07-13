@@ -651,7 +651,7 @@ public partial class MainWindow : Window
     {
         if (_burningWindow is { } openBurningWindow)
         {
-            if (!openBurningWindow.IsVisible)
+            if (_isBurningWindowHiddenByDiscRemoval || !openBurningWindow.IsVisible)
             {
                 CancelBurnDiscReading();
                 _isBurnPresentationDetached = false;
@@ -822,8 +822,19 @@ public partial class MainWindow : Window
 
     private void BurningWindow_CloseRequestCanceled(object? sender, EventArgs e)
     {
-        if (!ReferenceEquals(_burningWindow, sender) || !_isWaitingForBurningWindowClose)
+        if (!ReferenceEquals(_burningWindow, sender))
         {
+            return;
+        }
+
+        if (!_isWaitingForBurningWindowClose)
+        {
+            if (_isBurningWindowHiddenByDiscRemoval && sender is BurningWindow hiddenBurningWindow)
+            {
+                Dispatcher.BeginInvoke(
+                    hiddenBurningWindow.HideForDiscRemoval,
+                    DispatcherPriority.Normal);
+            }
             return;
         }
 
@@ -1072,10 +1083,7 @@ public partial class MainWindow : Window
         CancelBurnDiscReading();
         _isBurnPresentationDetached = true;
         _isBurningWindowHiddenByDiscRemoval = true;
-        if (burningWindow.IsVisible)
-        {
-            burningWindow.Hide();
-        }
+        burningWindow.HideForDiscRemoval();
 
         RefreshCompactBurnPresentation();
     }
@@ -3144,24 +3152,14 @@ public partial class MainWindow : Window
         if (!ShouldCloseToTray() && _burningWindow is { } burningWindow)
         {
             _isWaitingForBurningWindowClose = true;
-            if (!burningWindow.IsVisible)
+            if (_isBurningWindowHiddenByDiscRemoval)
             {
-                if (_isBurningWindowHiddenByDiscRemoval)
-                {
-                    CancelBurnDiscReading();
-                    _isBurnPresentationDetached = false;
-                    _isBurningWindowHiddenByDiscRemoval = false;
-                    RefreshCompactBurnPresentation();
-                }
-
-                if (burningWindow.WindowState == WindowState.Minimized)
-                {
-                    burningWindow.WindowState = WindowState.Normal;
-                }
-
-                burningWindow.Show();
-                burningWindow.Activate();
+                CancelBurnDiscReading();
+                _isBurnPresentationDetached = false;
+                _isBurningWindowHiddenByDiscRemoval = false;
+                RefreshCompactBurnPresentation();
             }
+            burningWindow.PrepareForCloseRequest();
             burningWindow.Close();
             return;
         }

@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using Mystral.Models;
 using Mystral.Services;
@@ -16,6 +17,14 @@ namespace Mystral.Views;
 
 public partial class BurningWindow : Window
 {
+    private enum DiscVisibilityState
+    {
+        Visible,
+        Hiding,
+        Hidden,
+        Showing
+    }
+
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
     private BurnTrackDraft _draft;
     private readonly AudioTagService _audioTagService;
@@ -37,6 +46,9 @@ public partial class BurningWindow : Window
     private bool _isCloseCommitted;
     private bool _isClosed;
     private bool _isDiscUploadTilePointerDown;
+    private bool _hasPlayedInitialOpenAnimation;
+    private int _discVisibilityGeneration;
+    private DiscVisibilityState _discVisibilityState = DiscVisibilityState.Visible;
 
     public BurningWindow(
         BurnTrackDraft draft,
@@ -71,9 +83,62 @@ public partial class BurningWindow : Window
 
     internal BitmapSource PresentationDisc => _draft.DiscArtwork?.Preview ?? _defaultDiscArtwork;
 
+    internal void HideForDiscRemoval()
+    {
+        if (_isClosed
+            || _isCloseCommitted
+            || _isCloseRequestPending
+            || _isCloseAnimationRunning
+            || _discVisibilityState is DiscVisibilityState.Hidden or DiscVisibilityState.Hiding)
+        {
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            _discVisibilityState = DiscVisibilityState.Hidden;
+            return;
+        }
+
+        var fromOpacity = RootCard.Opacity;
+        var fromScaleX = WindowScale.ScaleX;
+        var fromScaleY = WindowScale.ScaleY;
+        StopPresentationAnimations(fromOpacity, fromScaleX, fromScaleY);
+
+        var generation = ++_discVisibilityGeneration;
+        _discVisibilityState = DiscVisibilityState.Hiding;
+        var duration = TimeSpan.FromMilliseconds(155);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(fromScaleX, 0.94, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+        WindowScale.BeginAnimation(
+            ScaleTransform.ScaleYProperty,
+            new DoubleAnimation(fromScaleY, 0.94, duration) { EasingFunction = easing },
+            HandoffBehavior.SnapshotAndReplace);
+
+        var fade = new DoubleAnimation(fromOpacity, 0, duration) { EasingFunction = easing };
+        fade.Completed += (_, _) =>
+        {
+            if (generation != _discVisibilityGeneration
+                || _discVisibilityState != DiscVisibilityState.Hiding
+                || _isClosed
+                || _isCloseAnimationRunning)
+            {
+                return;
+            }
+
+            Hide();
+            StopPresentationAnimations(0, 0.96, 0.96);
+            _discVisibilityState = DiscVisibilityState.Hidden;
+        };
+        RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+    }
+
     internal void ShowAfterDiscInsertion()
     {
-        if (_isClosed)
+        if (_isClosed || _isCloseCommitted || _isCloseAnimationRunning)
         {
             return;
         }
@@ -83,24 +148,79 @@ public partial class BurningWindow : Window
             WindowState = WindowState.Normal;
         }
 
-        RootCard.BeginAnimation(OpacityProperty, null);
-        WindowScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        WindowScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        RootCard.Opacity = 0;
-        WindowScale.ScaleX = 0.96;
-        WindowScale.ScaleY = 0.96;
+        if (_discVisibilityState == DiscVisibilityState.Visible && IsVisible)
+        {
+            Activate();
+            return;
+        }
+
+        var wasVisible = IsVisible;
+        var fromOpacity = wasVisible ? RootCard.Opacity : 0;
+        var fromScaleX = wasVisible ? WindowScale.ScaleX : 0.96;
+        var fromScaleY = wasVisible ? WindowScale.ScaleY : 0.96;
+        var generation = ++_discVisibilityGeneration;
+        _discVisibilityState = DiscVisibilityState.Showing;
+        StopPresentationAnimations(fromOpacity, fromScaleX, fromScaleY);
+        if (!wasVisible)
+        {
+            Show();
+        }
+
+        void BeginAnimation()
+        {
+            if (generation != _discVisibilityGeneration
+                || _discVisibilityState != DiscVisibilityState.Showing
+                || _isClosed
+                || _isCloseAnimationRunning)
+            {
+                return;
+            }
+
+            StartDiscShowAnimation(generation, fromOpacity, fromScaleX, fromScaleY);
+        }
+
+        if (wasVisible)
+        {
+            BeginAnimation();
+        }
+        else
+        {
+            Dispatcher.BeginInvoke(BeginAnimation, DispatcherPriority.Loaded);
+        }
+
+        Activate();
+    }
+
+    internal void PrepareForCloseRequest()
+    {
+        if (_isClosed || _isCloseCommitted || _isCloseAnimationRunning)
+        {
+            return;
+        }
+
+        _discVisibilityGeneration++;
+        _discVisibilityState = DiscVisibilityState.Visible;
+        StopPresentationAnimations(1, 1, 1);
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
         if (!IsVisible)
         {
             Show();
         }
 
-        PlayOpenAnimation();
         Activate();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        PlayOpenAnimation();
+        if (!_hasPlayedInitialOpenAnimation)
+        {
+            _hasPlayedInitialOpenAnimation = true;
+            PlayOpenAnimation();
+        }
         await RefreshArtworkUiAsync();
     }
 
@@ -116,6 +236,10 @@ public partial class BurningWindow : Window
         {
             return;
         }
+
+        _discVisibilityGeneration++;
+        _discVisibilityState = DiscVisibilityState.Visible;
+        StopPresentationAnimations(1, 1, 1);
 
         if (_isBusy)
         {
@@ -165,6 +289,8 @@ public partial class BurningWindow : Window
     private void Window_Closed(object? sender, EventArgs e)
     {
         _isClosed = true;
+        _discVisibilityGeneration++;
+        _discVisibilityState = DiscVisibilityState.Hidden;
         _operationCts?.Cancel();
         _operationCts?.Dispose();
         _operationCts = null;
@@ -894,24 +1020,54 @@ public partial class BurningWindow : Window
 
     private void PlayOpenAnimation()
     {
-        RootCard.Opacity = 0;
-        WindowScale.ScaleX = 0.96;
-        WindowScale.ScaleY = 0.96;
+        var generation = ++_discVisibilityGeneration;
+        _discVisibilityState = DiscVisibilityState.Showing;
+        StopPresentationAnimations(0, 0.96, 0.96);
+        StartDiscShowAnimation(generation, 0, 0.96, 0.96);
+    }
 
+    private void StartDiscShowAnimation(
+        int generation,
+        double fromOpacity,
+        double fromScaleX,
+        double fromScaleY)
+    {
         var duration = TimeSpan.FromMilliseconds(190);
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        RootCard.BeginAnimation(
-            OpacityProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing },
-            HandoffBehavior.SnapshotAndReplace);
         WindowScale.BeginAnimation(
             ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing },
+            new DoubleAnimation(fromScaleX, 1, duration) { EasingFunction = easing },
             HandoffBehavior.SnapshotAndReplace);
         WindowScale.BeginAnimation(
             ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing },
+            new DoubleAnimation(fromScaleY, 1, duration) { EasingFunction = easing },
             HandoffBehavior.SnapshotAndReplace);
+
+        var fade = new DoubleAnimation(fromOpacity, 1, duration) { EasingFunction = easing };
+        fade.Completed += (_, _) =>
+        {
+            if (generation != _discVisibilityGeneration
+                || _discVisibilityState != DiscVisibilityState.Showing
+                || _isClosed
+                || _isCloseAnimationRunning)
+            {
+                return;
+            }
+
+            StopPresentationAnimations(1, 1, 1);
+            _discVisibilityState = DiscVisibilityState.Visible;
+        };
+        RootCard.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void StopPresentationAnimations(double opacity, double scaleX, double scaleY)
+    {
+        RootCard.BeginAnimation(OpacityProperty, null);
+        WindowScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        WindowScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        RootCard.Opacity = opacity;
+        WindowScale.ScaleX = scaleX;
+        WindowScale.ScaleY = scaleY;
     }
 
     private void PlayCloseAnimation()
@@ -921,6 +1077,8 @@ public partial class BurningWindow : Window
             return;
         }
 
+        _discVisibilityGeneration++;
+        _discVisibilityState = DiscVisibilityState.Hiding;
         _isCloseAnimationRunning = true;
         var duration = TimeSpan.FromMilliseconds(155);
         var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
