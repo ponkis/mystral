@@ -40,6 +40,9 @@ internal static class Program
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
             ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
             ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
+            ("MusicBrainz retries transient artwork responses and gives up gracefully", MusicBrainzServiceTests.RetriesTransientArtworkResponses),
+            ("MusicBrainz reports artwork outcomes and records failure diagnostics", MusicBrainzServiceTests.ReportsArtworkOutcomesAndDiagnostics),
+            ("artwork diagnostics write a bounded, rotating, failure-tolerant log", ArtworkDiagnosticsTests.WritesAndRotatesBoundedLog),
             ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
             ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
@@ -1709,7 +1712,9 @@ static class MusicBrainzServiceTests
 
             if (uri.Equals(new Uri("https://assets.test/failing-cover")))
             {
-                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                // A non-transient failure so this stays a fallback test (503/429 are
+                // retried; that path is covered by RetriesTransientArtworkResponses).
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
             }
 
             // When the indexed front thumbnail fails, the release/front-500 endpoint
@@ -1752,6 +1757,232 @@ static class MusicBrainzServiceTests
                     TimeSpan.Zero)
                 .GetAwaiter()
                 .GetResult());
+    }
+
+    public static void RetriesTransientArtworkResponses()
+    {
+        var coverBytes = new byte[] { 4, 4, 2, 2 };
+        var coverHits = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Retry title",
+                        "artist-credit": [{ "name": "Retry artist" }],
+                        "releases": [{ "id": "retry-release", "title": "Retry album", "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.AbsolutePath.Equals("/release/retry-release/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        { "approved": true, "front": true, "types": ["Front"], "image": "https://assets.test/retry-cover", "thumbnails": {} }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/retry-cover")))
+            {
+                coverHits++;
+                // Transient 503 on the first hit, then the image; the service retries.
+                return coverHits == 1
+                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    : Bytes(coverBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchTrackDataAsync("Retry title", "Retry artist", "Retry album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Sequence(coverBytes, result!.CoverArtwork!);
+        Check.Equal(2, coverHits);
+
+        // A cover URL that is always 503 is retried up to the cap, then gives up
+        // gracefully (null cover) without throwing.
+        var exhaustedHits = 0;
+        var exhaustedHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Exhausted title",
+                        "artist-credit": [{ "name": "Exhausted artist" }],
+                        "releases": [{ "id": "exhausted-release", "title": "Exhausted album", "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.AbsolutePath.Equals("/release/exhausted-release/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        { "approved": true, "front": true, "types": ["Front"], "image": "https://assets.test/exhausted-cover", "thumbnails": {} }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/exhausted-cover")))
+            {
+                exhaustedHits++;
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            // release/front-500 and release-group fallbacks are also unavailable.
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var exhaustedClient = new HttpClient(exhaustedHandler);
+        using var exhaustedService = new MusicBrainzService(exhaustedClient);
+        var exhaustedResult = exhaustedService.FetchTrackDataAsync(
+                "Exhausted title", "Exhausted artist", "Exhausted album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(exhaustedResult);
+        Check.Null(exhaustedResult!.CoverArtwork);
+        // The indexed cover URL was attempted the full number of times before falling back.
+        Check.Equal(3, exhaustedHits);
+    }
+
+    public static void ReportsArtworkOutcomesAndDiagnostics()
+    {
+        // A release is found, but every cover endpoint errors -> Failed + diagnostics.
+        var diagnostics = new CapturingArtworkDiagnostics();
+        var failingHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Outcome title",
+                        "artist-credit": [{ "name": "Outcome artist" }],
+                        "releases": [{ "id": "outcome-release", "title": "Outcome album", "release-group": { "id": "outcome-group" }, "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.AbsolutePath.Equals("/release/outcome-release/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    { "images": [ { "approved": true, "front": true, "types": ["Front"], "image": "https://assets.test/broken-cover", "thumbnails": {} } ] }
+                    """);
+            }
+
+            // The indexed cover and every front-500 fallback fail with a server error.
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+
+        using var failingClient = new HttpClient(failingHandler);
+        using var failingService = new MusicBrainzService(failingClient, diagnostics: diagnostics);
+        var failed = failingService.FetchTrackDataAsync(
+                "Outcome title", "Outcome artist", "Outcome album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(failed);
+        Check.Null(failed!.CoverArtwork);
+        Check.Equal(ArtworkFetchOutcome.Failed, failed.CoverOutcome);
+        Check.True(diagnostics.Entries.Count > 0);
+        Check.True(diagnostics.Entries.Any(entry =>
+            entry.Contains("cover-indexed", StringComparison.Ordinal)
+            && entry.Contains("500", StringComparison.Ordinal)
+            && entry.Contains("outcome-release", StringComparison.Ordinal)));
+
+        // Cover Art Archive genuinely has no artwork -> NotAvailable, no failure logged.
+        var absentDiagnostics = new CapturingArtworkDiagnostics();
+        var absentHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Absent title",
+                        "artist-credit": [{ "name": "Absent artist" }],
+                        "releases": [{ "id": "absent-release", "title": "Absent album", "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            // Release index and every front-500 endpoint report a genuine 404.
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        using var absentClient = new HttpClient(absentHandler);
+        using var absentService = new MusicBrainzService(absentClient, diagnostics: absentDiagnostics);
+        var absent = absentService.FetchTrackDataAsync(
+                "Absent title", "Absent artist", "Absent album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(absent);
+        Check.Null(absent!.CoverArtwork);
+        Check.Equal(ArtworkFetchOutcome.NotAvailable, absent.CoverOutcome);
+        Check.Equal(0, absentDiagnostics.Entries.Count);
+    }
+}
+
+static class ArtworkDiagnosticsTests
+{
+    public static void WritesAndRotatesBoundedLog()
+    {
+        using var temp = TempDir.Create();
+        var logPath = Path.Combine(temp.Path, "logs", "artwork.log");
+        var diagnostics = new Mystral.Services.FileArtworkDiagnostics(logPath);
+
+        diagnostics.RecordArtworkFailure(
+            "cover-indexed", "rel-1", "coverartarchive.org", System.Net.HttpStatusCode.ServiceUnavailable, "HttpRequestException");
+        Check.True(File.Exists(logPath));
+        var contents = File.ReadAllText(logPath);
+        Check.Contains("stage=cover-indexed", contents);
+        Check.Contains("release=rel-1", contents);
+        Check.Contains("host=coverartarchive.org", contents);
+        Check.Contains("status=503", contents);
+        Check.Contains("error=HttpRequestException", contents);
+
+        // Pre-fill beyond the 1 MB cap so the next write rotates into artwork.log.1.
+        File.WriteAllText(logPath, new string('x', (1024 * 1024) + 16));
+        diagnostics.RecordArtworkFailure("disc", null, null, null, "IOException");
+        Check.True(File.Exists(logPath + ".1"));
+        Check.True(new FileInfo(logPath).Length < 1024 * 1024);
+        Check.Contains("stage=disc", File.ReadAllText(logPath));
+
+        // A directory that cannot be created (a file sits where the folder should be)
+        // must be swallowed, never thrown into the fetch path.
+        var blocker = Path.Combine(temp.Path, "blocker");
+        File.WriteAllText(blocker, "x");
+        var badDiagnostics = new Mystral.Services.FileArtworkDiagnostics(Path.Combine(blocker, "artwork.log"));
+        badDiagnostics.RecordArtworkFailure("cover-indexed", null, null, null, "Exception");
     }
 }
 
@@ -2121,6 +2352,27 @@ sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage
     {
         Count++;
         return Task.FromResult(respond(request));
+    }
+}
+
+sealed class CapturingArtworkDiagnostics : Mystral.Services.IArtworkDiagnostics
+{
+    public List<string> Entries { get; } = [];
+
+    public void RecordArtworkFailure(
+        string stage,
+        string? releaseId,
+        string? host,
+        System.Net.HttpStatusCode? statusCode,
+        string exceptionType)
+    {
+        Entries.Add(string.Join(
+            '|',
+            stage,
+            releaseId ?? "-",
+            host ?? "-",
+            statusCode is { } code ? ((int)code).ToString() : "-",
+            exceptionType));
     }
 }
 

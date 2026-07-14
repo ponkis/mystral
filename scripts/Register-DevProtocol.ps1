@@ -12,7 +12,15 @@ if ($env:OS -ne "Windows_NT") {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
-    $ExecutablePath = Join-Path $repoRoot "bin\Debug\Development\net8.0-windows10.0.19041.0\Mystral.exe"
+    # Default to the most recent isolated development publish. The old bin\Debug path
+    # could register a stale build, so require a real dev build (or an explicit path).
+    $devRoot = Join-Path $repoRoot "artifacts\dev"
+    $ExecutablePath = Get-ChildItem -Path $devRoot -Recurse -Filter "Mystral.exe" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+        throw "No development build found under $devRoot. Run .\scripts\Build-Dev.ps1 first, or pass -ExecutablePath."
+    }
 }
 
 $resolvedExecutable = (Resolve-Path -LiteralPath $ExecutablePath -ErrorAction Stop).Path

@@ -718,12 +718,44 @@ public partial class BurningWindow : Window
                 this,
                 "Song data fetched",
                 "Song data was fetched from MusicBrainz.");
+
+            // Warn when no cover ended up on the draft, distinguishing a temporary
+            // download failure from artwork that genuinely does not exist — mirroring
+            // the CD-artwork messaging below.
+            if (_draft.CoverArtwork is null)
+            {
+                if (result.CoverOutcome == ArtworkFetchOutcome.Failed)
+                {
+                    AppDialogWindow.ShowWarning(
+                        this,
+                        "Cover art not downloaded",
+                        "The cover art couldn't be downloaded right now (a temporary Cover Art Archive issue). Try fetching again, or add cover art yourself from the Artwork tab.");
+                }
+                else
+                {
+                    AppDialogWindow.ShowWarning(
+                        this,
+                        "Cover art not found",
+                        "Cover Art Archive has no cover art for this release. You can add cover art yourself from the Artwork tab.");
+                }
+            }
+
             if (fetchedDisc is null && _draft.DiscArtwork is null)
             {
-                AppDialogWindow.ShowWarning(
-                    this,
-                    "CD artwork not found",
-                    "MusicBrainz has no disc or medium artwork for this release. You can upload CD artwork yourself from the Artwork tab; it is optional.");
+                if (result.DiscOutcome == ArtworkFetchOutcome.Failed)
+                {
+                    AppDialogWindow.ShowWarning(
+                        this,
+                        "CD artwork not downloaded",
+                        "The disc artwork couldn't be downloaded right now (a temporary Cover Art Archive issue). Try fetching again; it is optional.");
+                }
+                else
+                {
+                    AppDialogWindow.ShowWarning(
+                        this,
+                        "CD artwork not found",
+                        "MusicBrainz has no disc or medium artwork for this release. You can upload CD artwork yourself from the Artwork tab; it is optional.");
+                }
             }
         }
         finally
@@ -970,6 +1002,13 @@ public partial class BurningWindow : Window
                 shareRequest,
                 cancellationToken));
         statusWindow.ShowDialog();
+        if (statusWindow.WasSuccessful)
+        {
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Shared to globe",
+                "Your burned CD was shared to your globe profile.");
+        }
     }
 
     private async Task<ArtworkAsset?> TryLoadFetchedArtworkAsync(byte[] data, CancellationToken cancellationToken)

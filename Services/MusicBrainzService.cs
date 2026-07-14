@@ -13,29 +13,44 @@ namespace Mystral.Services;
 public sealed class MusicBrainzService : IDisposable
 {
     private const int MaxArtworkRedirects = 8;
+    private const int MaxArtworkAttempts = 3;
     private const int MaxArtworkBytes = 20 * 1024 * 1024;
+    private static readonly TimeSpan MaxArtworkRetryDelay = TimeSpan.FromSeconds(5);
     private static readonly SemaphoreSlim MusicBrainzRateGate = new(1, 1);
     private static DateTimeOffset _nextMusicBrainzRequestAt = DateTimeOffset.MinValue;
+    private const string ArtworkOriginHost = "coverartarchive.org";
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly bool _enforceTrustedArtworkHosts;
+    private readonly IArtworkDiagnostics _diagnostics;
 
     public MusicBrainzService()
-        : this(CreateHttpClient(), ownsHttpClient: true)
+        : this(CreateHttpClient(), ownsHttpClient: true, diagnostics: new FileArtworkDiagnostics())
     {
     }
 
-    internal MusicBrainzService(HttpClient httpClient, bool ownsHttpClient = false)
+    internal MusicBrainzService(
+        HttpClient httpClient,
+        bool ownsHttpClient = false,
+        IArtworkDiagnostics? diagnostics = null)
     {
         _httpClient = httpClient;
         _ownsHttpClient = ownsHttpClient;
         // The injected client is used by the isolated service tests. The app-created
         // client only follows artwork redirects to Cover Art Archive/Internet Archive.
         _enforceTrustedArtworkHosts = ownsHttpClient;
+        _diagnostics = diagnostics ?? NullArtworkDiagnostics.Instance;
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
         }
+    }
+
+    private readonly record struct ArtworkFetch(byte[]? Data, ArtworkFetchOutcome Outcome)
+    {
+        public static ArtworkFetch Retrieved(byte[] data) => new(data, ArtworkFetchOutcome.Retrieved);
+        public static readonly ArtworkFetch NotAvailable = new(null, ArtworkFetchOutcome.NotAvailable);
+        public static readonly ArtworkFetch Failed = new(null, ArtworkFetchOutcome.Failed);
     }
 
     private static HttpClient CreateHttpClient()
@@ -119,11 +134,15 @@ public sealed class MusicBrainzService : IDisposable
 
         byte[]? coverArtwork = null;
         byte[]? discArtwork = null;
+        var coverOutcome = ArtworkFetchOutcome.NotAvailable;
+        var discOutcome = ArtworkFetchOutcome.NotAvailable;
         if (release is not null)
         {
             var art = await FetchReleaseArtworkAsync(release, cancellationToken);
-            coverArtwork = art.Cover;
-            discArtwork = art.Disc;
+            coverArtwork = art.Cover.Data;
+            discArtwork = art.Disc.Data;
+            coverOutcome = art.Cover.Outcome;
+            discOutcome = art.Disc.Outcome;
         }
 
         return new MusicBrainzTrackData(
@@ -135,14 +154,17 @@ public sealed class MusicBrainzService : IDisposable
             trackNumber,
             trackTotal,
             coverArtwork,
-            discArtwork);
+            discArtwork,
+            coverOutcome,
+            discOutcome);
     }
 
-    private async Task<(byte[]? Cover, byte[]? Disc)> FetchReleaseArtworkAsync(
+    private async Task<(ArtworkFetch Cover, ArtworkFetch Disc)> FetchReleaseArtworkAsync(
         ReleaseResult release,
         CancellationToken cancellationToken)
     {
         CoverArtResponse? payload = null;
+        var metadataFailed = false;
         try
         {
             using var response = await SendArtworkRequestAsync(
@@ -161,38 +183,28 @@ public sealed class MusicBrainzService : IDisposable
         }
         catch (Exception ex) when (IsOptionalArtworkFailure(ex))
         {
+            // The release index could not be read, so we cannot tell whether art exists;
+            // treat downstream absence as a failure rather than "no artwork".
+            metadataFailed = true;
+            _diagnostics.RecordArtworkFailure(
+                "metadata", release.Id, ArtworkOriginHost, ExtractStatusCode(ex), ex.GetType().Name);
         }
 
         var front = payload?.Images.FirstOrDefault(image => image.Approved && image.Front)
             ?? payload?.Images.FirstOrDefault(image => image.Approved && image.Types.Contains("Front", StringComparer.OrdinalIgnoreCase));
         var medium = payload?.Images.FirstOrDefault(image => image.Approved && image.Types.Contains("Medium", StringComparer.OrdinalIgnoreCase));
 
-        var coverTask = FetchCoverArtworkAsync(release, front, cancellationToken);
+        var coverTask = FetchCoverArtworkAsync(release, front, metadataFailed, cancellationToken);
         var discTask = medium is null
-            ? Task.FromResult<byte[]?>(null)
-            : TryOptionalArtworkRequestAsync(
-                () => DownloadArtworkAsync(medium, cancellationToken),
-                cancellationToken);
+            ? Task.FromResult(metadataFailed ? ArtworkFetch.Failed : ArtworkFetch.NotAvailable)
+            : DownloadArtworkAsync(medium, "disc", release.Id, cancellationToken);
         await Task.WhenAll(coverTask, discTask);
         return (await coverTask, await discTask);
     }
 
-    private static async Task<byte[]?> TryOptionalArtworkRequestAsync(
-        Func<Task<byte[]?>> request,
-        CancellationToken cancellationToken)
+    private static HttpStatusCode? ExtractStatusCode(Exception exception)
     {
-        try
-        {
-            return await request();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsOptionalArtworkFailure(ex))
-        {
-            return null;
-        }
+        return (exception as HttpRequestException)?.StatusCode;
     }
 
     private static bool IsOptionalArtworkFailure(Exception exception)
@@ -206,66 +218,97 @@ public sealed class MusicBrainzService : IDisposable
             or TimeoutException;
     }
 
-    private async Task<byte[]?> FetchCoverArtworkAsync(
+    private async Task<ArtworkFetch> FetchCoverArtworkAsync(
         ReleaseResult release,
         CoverArtImage? front,
+        bool metadataFailed,
         CancellationToken cancellationToken)
     {
+        // Once we could not determine what exists (or a download errored), a later
+        // absence is a failure to fetch, not proof that the artwork is missing.
+        var failed = metadataFailed;
+
         if (front is not null)
         {
-            var indexedArtwork = await TryOptionalArtworkRequestAsync(
-                () => DownloadArtworkAsync(front, cancellationToken),
-                cancellationToken);
-            if (indexedArtwork is not null)
+            var indexed = await DownloadArtworkAsync(front, "cover-indexed", release.Id, cancellationToken);
+            if (indexed.Outcome == ArtworkFetchOutcome.Retrieved)
             {
-                return indexedArtwork;
+                return indexed;
             }
+
+            failed |= indexed.Outcome == ArtworkFetchOutcome.Failed;
         }
 
-        var releaseArtwork = await TryOptionalArtworkRequestAsync(
-            () => TryDownloadFrontAsync("release", release.Id, cancellationToken),
-            cancellationToken);
-        if (releaseArtwork is not null)
+        var releaseFront = await TryDownloadFrontAsync(
+            "release", release.Id, "cover-release-front", release.Id, cancellationToken);
+        if (releaseFront.Outcome == ArtworkFetchOutcome.Retrieved)
         {
-            return releaseArtwork;
+            return releaseFront;
         }
 
-        return await TryOptionalArtworkRequestAsync(
-            () => TryDownloadReleaseGroupFrontAsync(release.ReleaseGroup?.Id, cancellationToken),
-            cancellationToken);
+        failed |= releaseFront.Outcome == ArtworkFetchOutcome.Failed;
+
+        var groupFront = await TryDownloadReleaseGroupFrontAsync(
+            release.ReleaseGroup?.Id, release.Id, cancellationToken);
+        if (groupFront.Outcome == ArtworkFetchOutcome.Retrieved)
+        {
+            return groupFront;
+        }
+
+        failed |= groupFront.Outcome == ArtworkFetchOutcome.Failed;
+
+        return failed ? ArtworkFetch.Failed : ArtworkFetch.NotAvailable;
     }
 
-    private async Task<byte[]?> TryDownloadReleaseGroupFrontAsync(
+    private async Task<ArtworkFetch> TryDownloadReleaseGroupFrontAsync(
         string? releaseGroupId,
+        string? releaseId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(releaseGroupId))
         {
-            return null;
+            return ArtworkFetch.NotAvailable;
         }
 
-        return await TryDownloadFrontAsync("release-group", releaseGroupId, cancellationToken);
+        return await TryDownloadFrontAsync(
+            "release-group", releaseGroupId, "cover-release-group-front", releaseId, cancellationToken);
     }
 
-    private async Task<byte[]?> TryDownloadFrontAsync(
+    private async Task<ArtworkFetch> TryDownloadFrontAsync(
         string entity,
         string id,
+        string stage,
+        string? releaseId,
         CancellationToken cancellationToken)
     {
-        using var response = await SendArtworkRequestAsync(
-            new Uri($"https://coverartarchive.org/{entity}/{id}/front-500"),
-            "image/*",
-            cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        var uri = new Uri($"https://coverartarchive.org/{entity}/{id}/front-500");
+        try
         {
-            return null;
-        }
+            using var response = await SendArtworkRequestAsync(uri, "image/*", cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return ArtworkFetch.NotAvailable;
+            }
 
-        response.EnsureSuccessStatusCode();
-        return await ReadArtworkBytesAsync(response, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            return ArtworkFetch.Retrieved(await ReadArtworkBytesAsync(response, cancellationToken));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsOptionalArtworkFailure(ex))
+        {
+            _diagnostics.RecordArtworkFailure(stage, releaseId, uri.Host, ExtractStatusCode(ex), ex.GetType().Name);
+            return ArtworkFetch.Failed;
+        }
     }
 
-    private async Task<byte[]?> DownloadArtworkAsync(CoverArtImage image, CancellationToken cancellationToken)
+    private async Task<ArtworkFetch> DownloadArtworkAsync(
+        CoverArtImage image,
+        string stage,
+        string? releaseId,
+        CancellationToken cancellationToken)
     {
         var candidates = new[]
         {
@@ -274,6 +317,7 @@ public sealed class MusicBrainzService : IDisposable
             image.Image
         };
         var attempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var failed = false;
         foreach (var candidate in candidates)
         {
             if (string.IsNullOrWhiteSpace(candidate)
@@ -292,7 +336,7 @@ public sealed class MusicBrainzService : IDisposable
                 }
 
                 response.EnsureSuccessStatusCode();
-                return await ReadArtworkBytesAsync(response, cancellationToken);
+                return ArtworkFetch.Retrieved(await ReadArtworkBytesAsync(response, cancellationToken));
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -301,10 +345,12 @@ public sealed class MusicBrainzService : IDisposable
             catch (Exception ex) when (IsOptionalArtworkFailure(ex))
             {
                 // Try the next thumbnail/original URL before giving up on this image.
+                failed = true;
+                _diagnostics.RecordArtworkFailure(stage, releaseId, uri.Host, ExtractStatusCode(ex), ex.GetType().Name);
             }
         }
 
-        return null;
+        return failed ? ArtworkFetch.Failed : ArtworkFetch.NotAvailable;
     }
 
     private async Task<HttpResponseMessage> SendArtworkRequestAsync(
@@ -312,7 +358,32 @@ public sealed class MusicBrainzService : IDisposable
         string accept,
         CancellationToken cancellationToken)
     {
-        var current = NormalizeArtworkUri(uri);
+        var target = NormalizeArtworkUri(uri);
+        for (var attempt = 1; ; attempt++)
+        {
+            var response = await SendArtworkRequestOnceAsync(target, accept, cancellationToken);
+            if (attempt >= MaxArtworkAttempts || !IsTransientArtworkStatus(response.StatusCode))
+            {
+                return response;
+            }
+
+            // Cover Art Archive / Internet Archive can answer with a transient 429/503;
+            // retry a couple of times, honoring Retry-After when the service supplies it.
+            var delay = GetArtworkRetryDelay(response, attempt);
+            response.Dispose();
+            if (delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendArtworkRequestOnceAsync(
+        Uri target,
+        string accept,
+        CancellationToken cancellationToken)
+    {
+        var current = target;
         for (var redirectCount = 0; redirectCount <= MaxArtworkRedirects; redirectCount++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, current);
@@ -338,6 +409,33 @@ public sealed class MusicBrainzService : IDisposable
         }
 
         throw new HttpRequestException("The artwork service returned too many redirects.");
+    }
+
+    private static bool IsTransientArtworkStatus(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable;
+    }
+
+    private static TimeSpan GetArtworkRetryDelay(HttpResponseMessage response, int attempt)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        TimeSpan? hint = null;
+        if (retryAfter?.Delta is { } delta)
+        {
+            hint = delta;
+        }
+        else if (retryAfter?.Date is { } date)
+        {
+            hint = date - DateTimeOffset.UtcNow;
+        }
+
+        var delay = hint ?? TimeSpan.FromMilliseconds(250 * attempt);
+        if (delay < TimeSpan.Zero)
+        {
+            delay = TimeSpan.Zero;
+        }
+
+        return delay > MaxArtworkRetryDelay ? MaxArtworkRetryDelay : delay;
     }
 
     private Uri NormalizeArtworkUri(Uri uri)
