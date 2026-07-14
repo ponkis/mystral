@@ -8,6 +8,8 @@ public static class AppMetadata
     public const string Name = "Mystral";
     public const string GlobeProductionBaseUrl = "https://chat.ponkis.xyz/";
     public const string GlobeDevelopmentBaseUrl = "http://localhost:3000/";
+    public const string GlobeDefaultAvatarCdnBaseUrl =
+        "https://pub-1b00f16de14f4f76b980cb2115a8f12a.r2.dev/";
     public static string Version { get; } = GetInformationalVersion();
     public static string UserAgent { get; } = Name + "/" + Version + " (https://ponkis.xyz/)";
 
@@ -91,6 +93,7 @@ public static class AppMetadata
         configured = Environment.GetEnvironmentVariable("MYSTRAL_GLOBE_AVATAR_CDN_URL")
                      ?? configured;
 #endif
+        configured ??= GlobeDefaultAvatarCdnBaseUrl;
         if (!Uri.TryCreate(configured, UriKind.Absolute, out var uri)
             || !string.IsNullOrEmpty(uri.UserInfo)
             || !string.IsNullOrEmpty(uri.Query)

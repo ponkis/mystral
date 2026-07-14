@@ -20,7 +20,7 @@ internal sealed class ShareStatusWindow : Window
     internal ShareStatusWindow(Window owner, Func<CancellationToken, Task> shareAsync)
     {
         _shareAsync = shareAsync;
-        Title = "share to globe";
+        Title = "Share to globe";
         Icon = IconImageSource.LoadBestFitFrame("Resources/globe.ico", 16);
         Width = 450;
         SizeToContent = SizeToContent.Height;
@@ -148,13 +148,13 @@ internal sealed class ShareStatusWindow : Window
         {
             await _shareAsync(CancellationToken.None);
             WasSuccessful = true;
-            _headingText.Text = "shared to globe";
+            _headingText.Text = "Shared to globe";
             _detailText.Text = "Your burned CD was shared to your globe profile.";
             _progressBar.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
         {
-            _headingText.Text = "couldn't share to globe";
+            _headingText.Text = "Couldn't share to globe";
             _detailText.Text = string.IsNullOrWhiteSpace(ex.Message)
                 ? "globe did not accept the share. Please try again."
                 : ex.Message;

@@ -21,6 +21,9 @@ public sealed class GlobeApiClient : IDisposable
     private const int MaximumUsernameLength = 80;
     private const int MaximumDisplayNameLength = 160;
     private const int MaximumAvatarUrlLength = 2048;
+    private const string LinkCancelledMessage = "The globe account link was canceled.";
+    private const string LinkExpiredMessage =
+        "The globe link request expired. Start again from Mystral.";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -127,12 +130,12 @@ public sealed class GlobeApiClient : IDisposable
             {
                 return new GlobeLinkClaimResult(
                     GlobeLinkClaimStatus.Cancelled,
-                    Message: ReadError(body, "the globe account link was canceled."));
+                    Message: LinkCancelledMessage);
             }
 
             return new GlobeLinkClaimResult(
                 GlobeLinkClaimStatus.Expired,
-                Message: ReadError(body, "the globe link request expired. start again from Mystral."));
+                Message: LinkExpiredMessage);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -152,7 +155,7 @@ public sealed class GlobeApiClient : IDisposable
         {
             return new GlobeLinkClaimResult(
                 GlobeLinkClaimStatus.Expired,
-                Message: ReadString(root, "message"));
+                Message: LinkExpiredMessage);
         }
 
         if (ReadBoolean(root, "cancelled")
@@ -162,9 +165,7 @@ public sealed class GlobeApiClient : IDisposable
         {
             return new GlobeLinkClaimResult(
                 GlobeLinkClaimStatus.Cancelled,
-                Message: FirstNonEmpty(
-                    ReadString(root, "message"),
-                    "the globe account link was canceled."));
+                Message: LinkCancelledMessage);
         }
 
         var token = ReadString(root, "token");
@@ -186,7 +187,7 @@ public sealed class GlobeApiClient : IDisposable
         using var request = CreateAuthorizedRequest(HttpMethod.Post, "api/mystral/link/ack", token);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfAuthenticationRejected(response, body);
+        ThrowIfAuthenticationRejected(response);
         if (!response.IsSuccessStatusCode)
         {
             throw CreateApiException(response, body, "globe could not finish the account link.");
@@ -210,9 +211,15 @@ public sealed class GlobeApiClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         using var request = CreateAuthorizedRequest(HttpMethod.Get, "api/mystral/link/status", token);
+        request.Headers.CacheControl = new CacheControlHeaderValue
+        {
+            NoCache = true,
+            NoStore = true
+        };
+        request.Headers.Pragma.ParseAdd("no-cache");
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfAuthenticationRejected(response, body);
+        ThrowIfAuthenticationRejected(response);
         if (!response.IsSuccessStatusCode)
         {
             throw CreateApiException(response, body, "globe could not validate the account link.");
@@ -222,7 +229,7 @@ public sealed class GlobeApiClient : IDisposable
         var root = UnwrapData(document.RootElement);
         if (TryReadBoolean(root, "linked", out var linked) && !linked)
         {
-            throw new GlobeAuthenticationException("your globe account is no longer linked.");
+            throw new GlobeAuthenticationException("Your globe account is no longer linked.");
         }
 
         return ReadProfile(root);
@@ -274,7 +281,7 @@ public sealed class GlobeApiClient : IDisposable
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfAuthenticationRejected(response, body);
+        ThrowIfAuthenticationRejected(response);
         if (!response.IsSuccessStatusCode)
         {
             throw CreateApiException(response, body, "globe could not share the burned CD.");
@@ -315,7 +322,7 @@ public sealed class GlobeApiClient : IDisposable
         return new GlobeBurnShareResult(
             postId,
             collectionEntryId,
-            FirstNonEmpty(ReadString(root, "message"), "The burned CD was shared to globe."),
+            "The burned CD was shared to globe.",
             TryReadBoolean(root, "created", out var created) && created);
     }
 
@@ -410,12 +417,12 @@ public sealed class GlobeApiClient : IDisposable
         }
     }
 
-    private static void ThrowIfAuthenticationRejected(HttpResponseMessage response, string body)
+    private static void ThrowIfAuthenticationRejected(HttpResponseMessage response)
     {
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             throw new GlobeAuthenticationException(
-                ReadError(body, "your globe account is no longer linked."),
+                "Your globe account is no longer linked.",
                 response.StatusCode);
         }
     }
@@ -435,11 +442,70 @@ public sealed class GlobeApiClient : IDisposable
             }
         }
 
+        var errorCode = ReadErrorCode(body);
         return new GlobeApiException(
-            ReadError(body, fallback),
+            FriendlyErrorMessage(response.StatusCode, errorCode, fallback),
             response.StatusCode,
-            ReadErrorCode(body),
+            errorCode,
             retryAfter);
+    }
+
+    private static string FriendlyErrorMessage(
+        HttpStatusCode statusCode,
+        string errorCode,
+        string fallback)
+    {
+        var code = errorCode.Trim().ToLowerInvariant();
+        if (statusCode == HttpStatusCode.TooManyRequests || code == "too_many_requests")
+        {
+            return "globe is receiving too many requests. Please wait a moment and try again.";
+        }
+
+        if (code == "invalid_cover")
+        {
+            return "globe couldn't use the cover image. Choose another image and try again.";
+        }
+
+        if (code is "cover_validation_busy" or "cover_storage_unavailable")
+        {
+            return "globe couldn't process the cover right now. Please try again.";
+        }
+
+        if (code is "invalid_burn" or "invalid_idempotency_key")
+        {
+            return "globe couldn't share this CD. Check the album details and try again.";
+        }
+
+        if (code is "invalid_link_code"
+            or "invalid_code_challenge"
+            or "invalid_code_verifier"
+            or "link_code_used"
+            or "link_code_already_approved"
+            or "link_already_completed"
+            or "link_not_approved"
+            or "desktop_not_waiting"
+            or "link_claim_failed"
+            or "acknowledgement_failed")
+        {
+            return "Mystral couldn't complete the account link. Please try again.";
+        }
+
+        if (statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout)
+        {
+            return "globe is unavailable right now. Please try again.";
+        }
+
+        if ((int)statusCode >= 500)
+        {
+            return "globe couldn't complete the request right now. Please try again.";
+        }
+
+        // Every fallback is authored locally for its operation. Server prose is
+        // deliberately ignored so internal validation details never reach WPF.
+        return fallback;
     }
 
     private static JsonDocument ParseJson(string json, string message)
@@ -459,47 +525,6 @@ public sealed class GlobeApiClient : IDisposable
         return root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object
             ? data
             : root;
-    }
-
-    private static string ReadError(string body, string fallback)
-    {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            return fallback;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(body);
-            var root = document.RootElement;
-            var message = ReadString(root, "message", "reason", "detail");
-            if (!string.IsNullOrWhiteSpace(message))
-            {
-                return message;
-            }
-
-            if (root.TryGetProperty("error", out var error))
-            {
-                if (error.ValueKind == JsonValueKind.String)
-                {
-                    var errorText = error.GetString();
-                    return string.IsNullOrWhiteSpace(errorText)
-                           || IsMachineReadableErrorCode(errorText)
-                        ? fallback
-                        : errorText;
-                }
-
-                if (error.ValueKind == JsonValueKind.Object)
-                {
-                    return FirstNonEmpty(ReadString(error, "message", "reason"), fallback);
-                }
-            }
-        }
-        catch (JsonException)
-        {
-        }
-
-        return fallback;
     }
 
     private static string ReadErrorCode(string body)
@@ -601,14 +626,6 @@ public sealed class GlobeApiClient : IDisposable
     private static string FirstNonEmpty(string? first, string fallback)
     {
         return string.IsNullOrWhiteSpace(first) ? fallback : first;
-    }
-
-    private static bool IsMachineReadableErrorCode(string value)
-    {
-        return value.All(character =>
-            char.IsLower(character)
-            || char.IsDigit(character)
-            || character is '_' or '-');
     }
 
     private static string? CreateCoverDataUrl(byte[] cover)

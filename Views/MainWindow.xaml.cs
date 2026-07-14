@@ -243,7 +243,7 @@ public partial class MainWindow : Window
             {
                 AppDialogWindow.ShowWarning(
                     this,
-                    "could not check globe link",
+                    "Could not check globe link",
                     ex.Message);
             }
         }
@@ -4062,7 +4062,7 @@ public partial class MainWindow : Window
             AppDialogWindow.ShowWarning(
                 owner,
                 "globe account unlinked",
-                "your globe account is no longer linked.");
+                "Your globe account is no longer linked.");
         }, DispatcherPriority.Normal);
     }
 

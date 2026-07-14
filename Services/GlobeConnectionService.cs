@@ -20,7 +20,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
     internal const string LinkAckPendingCredentialKey = "globe.link-ack-pending.v1";
     internal const int MaximumCachedAvatarBytes = 2 * 1024 * 1024;
     internal const string OfflineMessage =
-        "globe might be offline. Mystral kept your account and will check again automatically. sharing is disabled until the connection returns.";
+        "globe might be offline. Mystral kept your account and will check again automatically. Sharing is disabled until the connection returns.";
 
     private readonly GlobeApiClient _apiClient;
     private readonly ISecureCredentialStore _credentialStore;
@@ -338,7 +338,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                     catch (Exception ex)
                     {
                         throw new GlobeApiException(
-                            "Mystral couldn't safely store the new account link. please try again.",
+                            "Mystral couldn't safely store the new account link. Please try again.",
                             innerException: ex);
                     }
 
@@ -357,7 +357,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                     {
                         MarkAcknowledgementPending(claim.Profile);
                         throw new GlobeUnavailableException(
-                            "Mystral couldn't finish linking right now. it will keep trying automatically.",
+                            "Mystral couldn't finish linking right now. It will keep trying automatically.",
                             ex);
                     }
 
@@ -375,7 +375,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                             string.Empty,
                             notifyRevoked: false);
                         throw new GlobeApiException(
-                            "Mystral couldn't finish linking your account. please try again.",
+                            "Mystral couldn't finish linking your account. Please try again.",
                             innerException: ex);
                     }
                     catch (Exception ex) when (!IsServerUnavailable(ex)
@@ -386,7 +386,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                             string.Empty,
                             notifyRevoked: false);
                         throw new GlobeApiException(
-                            "Mystral couldn't finish linking your account. please try again.",
+                            "Mystral couldn't finish linking your account. Please try again.",
                             innerException: ex);
                     }
 
@@ -405,7 +405,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
 
                         MarkAcknowledgementPending(claim.Profile);
                         throw new GlobeUnavailableException(
-                            "Mystral couldn't finish linking right now. it will keep trying automatically.");
+                            "Mystral couldn't finish linking right now. It will keep trying automatically.");
                     }
 
                     CompleteLinkAcknowledgement();
@@ -419,7 +419,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                 {
                     throw new GlobeLinkCancelledException(
                         string.IsNullOrWhiteSpace(claim.Message)
-                            ? "the globe account link was canceled."
+                            ? "The globe account link was canceled."
                             : claim.Message);
                 }
 
@@ -427,7 +427,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                 {
                     throw new GlobeLinkExpiredException(
                         string.IsNullOrWhiteSpace(claim.Message)
-                            ? "the globe link request expired. start again from Mystral."
+                            ? "The globe link request expired. Start again from Mystral."
                             : claim.Message);
                 }
 
@@ -442,7 +442,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                     cancellationToken);
             }
 
-            throw new GlobeLinkExpiredException("the globe link request expired. start again from Mystral.");
+            throw new GlobeLinkExpiredException("The globe link request expired. Start again from Mystral.");
         }
         catch (OperationCanceledException)
         {
@@ -473,7 +473,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
             }
 
             throw new GlobeApiException(
-                "Mystral couldn't finish linking your account. please try again.",
+                "Mystral couldn't finish linking your account. Please try again.",
                 innerException: ex);
         }
         catch (GlobeApiException ex) when (HasStoredToken && !IsServerUnavailable(ex))
@@ -483,7 +483,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                 string.Empty,
                 notifyRevoked: false);
             throw new GlobeApiException(
-                "Mystral couldn't finish linking your account. please try again.",
+                "Mystral couldn't finish linking your account. Please try again.",
                 innerException: ex);
         }
         catch (Exception ex)
@@ -868,7 +868,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
             RaiseLinkRevoked(new GlobeLinkRevokedEventArgs(
                 source,
                 string.IsNullOrWhiteSpace(message)
-                    ? "your globe account is no longer linked."
+                    ? "Your globe account is no longer linked."
                     : message));
         }
 
@@ -1300,7 +1300,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         if (error is not null)
         {
             throw new GlobeApiException(
-                "Mystral couldn't finish unlinking your account. please try again.",
+                "Mystral couldn't finish unlinking your account. Please try again.",
                 innerException: error);
         }
     }

@@ -16,8 +16,6 @@ namespace Mystral.Views;
 
 public partial class AppDialogWindow : Window
 {
-    private static readonly Brush WarningTitleBrush = new SolidColorBrush(Color.FromRgb(184, 134, 11));
-
     private AppDialogWindow(string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
         : this(title, icon, buttons)
     {
@@ -54,8 +52,7 @@ public partial class AppDialogWindow : Window
             message,
             FromSystemIcon(System.Drawing.SystemIcons.Warning),
             ContinueButtons(),
-            "warning.wav",
-            WarningTitleBrush);
+            "warning.wav");
     }
 
     public static MessageBoxResult ShowError(Window owner, string title, string message)
@@ -98,10 +95,6 @@ public partial class AppDialogWindow : Window
                         ? System.Drawing.SystemIcons.Error
                         : System.Drawing.SystemIcons.Information),
             ContinueButtons());
-        if (isWarning)
-        {
-            dialog.DialogTitleText.Foreground = WarningTitleBrush;
-        }
         dialog.DialogDescriptionText.Inlines.Add(new Run(message));
         dialog.DialogDescriptionText.Inlines.Add(
             placeActionOnNewLine ? new LineBreak() : new Run(" "));
@@ -169,14 +162,9 @@ public partial class AppDialogWindow : Window
         string message,
         ImageSource icon,
         IReadOnlyList<DialogButtonSpec> buttons,
-        string? soundFile = null,
-        Brush? titleBrush = null)
+        string? soundFile = null)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
-        if (titleBrush is not null)
-        {
-            dialog.DialogTitleText.Foreground = titleBrush;
-        }
         return ShowDialog(owner, dialog, soundFile);
     }
 

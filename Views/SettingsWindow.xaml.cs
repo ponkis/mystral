@@ -82,6 +82,7 @@ public partial class SettingsWindow : Window
         }
 
         Activate();
+        _ = Dispatcher.BeginInvoke(() => _ = RefreshSocialProfileAsync());
         if (startLinking)
         {
             _startSocialLinkRequested = true;
@@ -144,6 +145,10 @@ public partial class SettingsWindow : Window
         {
             SettingsTitleText.Text = "Social";
             SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/globe.ico", 16);
+            if (IsLoaded)
+            {
+                _ = RefreshSocialProfileAsync();
+            }
         }
         else if (selectedItem == HistoryCategoryItem)
         {
@@ -281,7 +286,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            AppDialogWindow.ShowWarning(this, "could not open globe", ex.Message);
+            AppDialogWindow.ShowWarning(this, "Could not open globe", ex.Message);
         }
     }
 
@@ -296,8 +301,8 @@ public partial class SettingsWindow : Window
         {
             AppDialogWindow.ShowWarning(
                 this,
-                "checking globe link",
-                "Mystral is still checking the saved globe link. wait a moment and try again.");
+                "Checking globe link",
+                "Mystral is still checking the saved globe link. Wait a moment and try again.");
             return;
         }
 
@@ -305,7 +310,7 @@ public partial class SettingsWindow : Window
         var transitionId = ++_socialSignInTransitionId;
         using var cancellation = new CancellationTokenSource();
         _socialSignInCancellation = cancellation;
-        SocialSigningInText.Text = "waiting for globe approval...";
+        SocialSigningInText.Text = "Waiting for globe approval...";
         SetSocialSigningInState(true);
 
         try
@@ -335,7 +340,7 @@ public partial class SettingsWindow : Window
             AppDialogWindow.ShowConfirmationWithBadge(
                 this,
                 "globe account linked",
-                "your account is now linked to globe.",
+                "Your globe account is now linked to Mystral",
                 "Resources/user.ico",
                 "Resources/checkmark.ico");
         }
@@ -347,10 +352,10 @@ public partial class SettingsWindow : Window
             if (IsLoaded && transitionId == _socialSignInTransitionId)
             {
                 SetSocialSigningInState(false);
-                AppDialogWindow.ShowWarning(
+                AppDialogWindow.ShowError(
                     this,
-                    "link canceled",
-                    "the globe account link was canceled.");
+                    "Link canceled",
+                    "The globe account link was canceled.");
             }
         }
         catch (Exception ex)
@@ -358,7 +363,7 @@ public partial class SettingsWindow : Window
             if (IsLoaded)
             {
                 SetSocialSigningInState(false);
-                AppDialogWindow.ShowError(this, "could not link globe", ex.Message);
+                AppDialogWindow.ShowError(this, "Could not link globe", ex.Message);
             }
         }
         finally
@@ -417,13 +422,13 @@ public partial class SettingsWindow : Window
 
         if (AppDialogWindow.ShowQuestion(
                 this,
-                "unlink globe account",
+                "Unlink globe account",
                 "Are you sure you want to unlink your account?") != MessageBoxResult.Yes)
         {
             return;
         }
 
-        SocialSigningInText.Text = "unlinking from globe...";
+        SocialSigningInText.Text = "Unlinking from globe...";
         SetSocialSigningInState(true);
         try
         {
@@ -438,15 +443,15 @@ public partial class SettingsWindow : Window
             SetSocialSigningInState(false);
             AppDialogWindow.ShowConfirmationWithBadge(
                 this,
-                "account unlinked",
-                "your account was unlinked successfully.",
+                "Account unlinked",
+                "Your account was unlinked successfully.",
                 "Resources/user.ico",
                 "Resources/cross.ico");
         }
         catch (Exception ex)
         {
             SetSocialSigningInState(false);
-            AppDialogWindow.ShowError(this, "could not unlink globe", ex.Message);
+            AppDialogWindow.ShowError(this, "Could not unlink globe", ex.Message);
         }
         finally
         {
@@ -572,6 +577,29 @@ public partial class SettingsWindow : Window
         TryStartRequestedSocialLink();
     }
 
+    private async Task RefreshSocialProfileAsync()
+    {
+        if (!_globeConnectionService.HasStoredToken
+            || _globeConnectionService.State.IsChecking)
+        {
+            return;
+        }
+
+        try
+        {
+            await _globeConnectionService.ValidateAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // Validation publishes its linked/offline state and the main
+            // window owns the once-per-outage warning. Opening Settings must
+            // not add a second error dialog for the same background check.
+        }
+    }
+
     private async Task RefreshSocialAvatarAsync(GlobeProfile profile, bool animate)
     {
         var generation = ++_socialAvatarGeneration;
@@ -592,7 +620,9 @@ public partial class SettingsWindow : Window
             };
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
-            using var request = new HttpRequestMessage(HttpMethod.Get, avatarUri);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                CreateFreshAvatarRequestUri(avatarUri));
             request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
             {
                 NoCache = true
@@ -631,6 +661,27 @@ public partial class SettingsWindow : Window
                 UpdateSocialPanel(animate);
             }
         }
+    }
+
+    internal static Uri CreateFreshAvatarRequestUri(Uri avatarUri)
+    {
+        ArgumentNullException.ThrowIfNull(avatarUri);
+        var cdnBase = AppMetadata.GlobeAvatarCdnBaseUri;
+        if (!avatarUri.IsAbsoluteUri
+            || cdnBase is null
+            || !string.IsNullOrEmpty(avatarUri.Query)
+            || !string.Equals(avatarUri.Scheme, cdnBase.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(avatarUri.IdnHost, cdnBase.IdnHost, StringComparison.OrdinalIgnoreCase)
+            || avatarUri.Port != cdnBase.Port)
+        {
+            return avatarUri;
+        }
+
+        var builder = new UriBuilder(avatarUri)
+        {
+            Query = "mystral_refresh=" + Guid.NewGuid().ToString("N")
+        };
+        return builder.Uri;
     }
 
     private ImageSource? TryLoadCachedSocialAvatar(GlobeProfile? profile)
@@ -754,16 +805,16 @@ public partial class SettingsWindow : Window
             && _isSocialSharingAvailable
             && !_isSocialSigningIn;
         AutomaticallyShareBurnsCheckBox.ToolTip = _isSocialAccountLinked && !_isSocialSharingAvailable
-            ? "sharing will be available when globe reconnects"
+            ? "Sharing will be available when globe reconnects"
             : null;
         var profile = _socialProfile;
         SocialUsernameText.Text = profile?.DisplayUsername
             ?? (_isSocialAccountLinked ? "globe unavailable" : string.Empty);
         SocialDisplayNameText.Text = profile?.DisplayName
-            ?? (_isSocialAccountLinked ? "account linked" : string.Empty);
+            ?? (_isSocialAccountLinked ? "Account linked" : string.Empty);
         var cdCount = profile?.CdCount ?? 0;
         SocialCdCountText.Text = profile is null && _isSocialAccountLinked
-            ? "account details will refresh when globe reconnects"
+            ? "Account details will refresh when globe reconnects"
             : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
         SocialProfileFrame.SetProfile(
             _isSocialAccountLinked,

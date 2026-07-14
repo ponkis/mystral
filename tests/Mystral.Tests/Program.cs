@@ -123,6 +123,20 @@ static class DesktopActivationServiceTests
             new Uri("http://user:password@localhost:3000/avatar.png"),
             localGlobe));
 
+        var avatarCdn = Mystral.Configuration.AppMetadata.GlobeAvatarCdnBaseUri;
+        Check.NotNull(avatarCdn);
+        var cdnAvatar = new Uri(avatarCdn!, "profiles/342_avatar.jpg");
+        Check.True(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            cdnAvatar,
+            localGlobe));
+        var freshAvatar = Mystral.Views.SettingsWindow.CreateFreshAvatarRequestUri(cdnAvatar);
+        Check.Equal(cdnAvatar.GetLeftPart(UriPartial.Path), freshAvatar.GetLeftPart(UriPartial.Path));
+        Check.Contains("mystral_refresh=", freshAvatar.Query);
+        var signedAvatar = new Uri(cdnAvatar.AbsoluteUri + "?signature=keep-me");
+        Check.Equal(
+            signedAvatar,
+            Mystral.Views.SettingsWindow.CreateFreshAvatarRequestUri(signedAvatar));
+
         var socialActivation = $"{scheme}://settings/social";
         Check.Equal(
             socialActivation,
@@ -440,6 +454,10 @@ static class GlobeConnectionServiceTests
             if (path == "/api/mystral/link/status")
             {
                 Check.Equal(HttpMethod.Get, request.Method);
+                Check.True(request.Headers.CacheControl?.NoCache == true);
+                Check.True(request.Headers.CacheControl?.NoStore == true);
+                Check.True(request.Headers.Pragma.Any(value =>
+                    string.Equals(value.Name, "no-cache", StringComparison.OrdinalIgnoreCase)));
                 return Json(new
                 {
                     linked = true,
@@ -475,7 +493,10 @@ static class GlobeConnectionServiceTests
                 {
                     var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
                     {
-                        Content = new StringContent("{\"message\":\"Slow down and retry.\"}", Encoding.UTF8, "application/json")
+                        Content = new StringContent(
+                            "{\"error\":\"too_many_requests\",\"message\":\"internal limiter bucket 7 overflowed\"}",
+                            Encoding.UTF8,
+                            "application/json")
                     };
                     limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
                     return limited;
@@ -494,7 +515,7 @@ static class GlobeConnectionServiceTests
                             ? "{\"shared\":true,\"created\":false,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
                             : burnCalls == 7
                                 ? "{\"shared\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
-                                : "{\"shared\":true,\"created\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
+                                : "{\"shared\":true,\"created\":true,\"message\":\"inserted database row 42\",\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
                         Encoding.UTF8,
                         "application/json")
                 };
@@ -574,13 +595,17 @@ static class GlobeConnectionServiceTests
 
         Check.NotNull(rateLimit);
         Check.Equal(HttpStatusCode.TooManyRequests, rateLimit!.StatusCode);
-        Check.Equal("Slow down and retry.", rateLimit.Message);
+        Check.Equal("too_many_requests", rateLimit.ErrorCode);
+        Check.Equal(
+            "globe is receiving too many requests. Please wait a moment and try again.",
+            rateLimit.Message);
         Check.Equal(TimeSpan.FromSeconds(7), rateLimit.RetryAfter!.Value);
         Check.True(connection.State.IsLinked);
 
         var shared = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
         Check.Equal("82", shared.PostId);
         Check.Equal("41", shared.CollectionEntryId);
+        Check.Equal("The burned CD was shared to globe.", shared.Message);
         Check.Equal(2, burnIds.Count);
         Check.Equal(burnIds[0], burnIds[1]);
         Check.Equal(1, connection.State.Profile!.CdCount);
@@ -663,7 +688,7 @@ static class GlobeConnectionServiceTests
             return new HttpResponseMessage(HttpStatusCode.Unauthorized)
             {
                 Content = new StringContent(
-                    "{\"linked\":false,\"error\":\"mystral_link_invalid\"}",
+                    "{\"linked\":false,\"error\":\"mystral_link_invalid\",\"message\":\"token hash 123 was deleted from mystral_connections\"}",
                     Encoding.UTF8,
                     "application/json")
             };
@@ -685,7 +710,7 @@ static class GlobeConnectionServiceTests
         Check.Equal(1, statusCalls);
         Check.Equal(1, revocations);
         Check.Equal(GlobeLinkRevocationSource.StatusCheck, revocation!.Source);
-        Check.Equal("your globe account is no longer linked.", revocation.Message);
+        Check.Equal("Your globe account is no longer linked.", revocation.Message);
         Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
         Check.False(settings.Settings.Social.AutomaticallyShareBurns);
         Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
@@ -849,8 +874,17 @@ static class GlobeConnectionServiceTests
                 LinkTimeout = TimeSpan.FromSeconds(1)
             });
         Uri? opened = null;
-        Check.Throws<GlobeLinkCancelledException>(() =>
-            connection.LinkAsync(uri => opened = uri).GetAwaiter().GetResult());
+        GlobeLinkCancelledException? cancellation = null;
+        try
+        {
+            connection.LinkAsync(uri => opened = uri).GetAwaiter().GetResult();
+        }
+        catch (GlobeLinkCancelledException ex)
+        {
+            cancellation = ex;
+        }
+        Check.NotNull(cancellation);
+        Check.Equal("The globe account link was canceled.", cancellation!.Message);
         Check.NotNull(opened);
         Check.Equal(2, claimCalls);
         Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
