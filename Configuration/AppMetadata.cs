@@ -60,7 +60,7 @@ public static class AppMetadata
     {
         var version = typeof(AppMetadata).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "1.0.0";
+            ?.InformationalVersion ?? "2.0.0";
 
         var plusIndex = version.IndexOf('+');
         return plusIndex >= 0 ? version[..plusIndex] : version;
