@@ -293,7 +293,8 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         {
             if (HasStoredToken)
             {
-                throw new InvalidOperationException("A globe token is already stored. Unlink it before linking another account.");
+                throw new InvalidOperationException(
+                    "Unlink your current globe account before linking another one.");
             }
 
             PublishState(new GlobeConnectionState(GlobeConnectionStatus.Linking));

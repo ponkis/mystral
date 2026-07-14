@@ -33,6 +33,8 @@ public partial class SettingsWindow : Window
     private bool _isSocialAccountLinked;
     private bool _isSocialSharingAvailable;
     private bool _isSocialSigningIn;
+    private bool _isGlobeApprovalPending;
+    private bool _isGlobeApprovalCloseWarningOpen;
     private bool _startSocialLinkRequested;
     private long _socialProfileTransitionId;
     private long _socialSignInTransitionId;
@@ -292,8 +294,14 @@ public partial class SettingsWindow : Window
 
     private async void LinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
-        if (_isSocialAccountLinked || _isSocialSigningIn)
+        if (_isSocialSigningIn)
         {
+            return;
+        }
+
+        if (_isSocialAccountLinked)
+        {
+            ShowGlobeAccountAlreadyLinkedWarning();
             return;
         }
 
@@ -312,6 +320,7 @@ public partial class SettingsWindow : Window
         _socialSignInCancellation = cancellation;
         SocialSigningInText.Text = "Waiting for globe approval...";
         SetSocialSigningInState(true);
+        SetGlobeApprovalPending(true);
 
         try
         {
@@ -322,6 +331,7 @@ public partial class SettingsWindow : Window
                     UseShellExecute = true
                 }),
                 cancellation.Token);
+            SetGlobeApprovalPending(false);
             if (cancellation.IsCancellationRequested ||
                 transitionId != _socialSignInTransitionId ||
                 !IsLoaded)
@@ -340,15 +350,17 @@ public partial class SettingsWindow : Window
             AppDialogWindow.ShowConfirmationWithBadge(
                 this,
                 "globe account linked",
-                "Your globe account is now linked to Mystral",
+                "Your globe account is now linked to Mystral.",
                 "Resources/user.ico",
                 "Resources/checkmark.ico");
         }
         catch (OperationCanceledException)
         {
+            SetGlobeApprovalPending(false);
         }
         catch (GlobeLinkCancelledException)
         {
+            SetGlobeApprovalPending(false);
             if (IsLoaded && transitionId == _socialSignInTransitionId)
             {
                 SetSocialSigningInState(false);
@@ -360,6 +372,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
+            SetGlobeApprovalPending(false);
             if (IsLoaded)
             {
                 SetSocialSigningInState(false);
@@ -371,6 +384,7 @@ public partial class SettingsWindow : Window
             if (transitionId == _socialSignInTransitionId)
             {
                 _socialSignInCancellation = null;
+                SetGlobeApprovalPending(false);
                 SetSocialSigningInState(false);
             }
         }
@@ -386,6 +400,10 @@ public partial class SettingsWindow : Window
         if (_isSocialSigningIn)
         {
             _startSocialLinkRequested = false;
+            if (_isSocialAccountLinked && !_isGlobeApprovalPending)
+            {
+                ShowGlobeAccountAlreadyLinkedWarning();
+            }
             return;
         }
 
@@ -398,6 +416,7 @@ public partial class SettingsWindow : Window
             }
 
             _startSocialLinkRequested = false;
+            ShowGlobeAccountAlreadyLinkedWarning();
             return;
         }
 
@@ -415,7 +434,7 @@ public partial class SettingsWindow : Window
     private async void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
         CancelSocialSignIn(restoreProfile: true);
-        if (!_isSocialAccountLinked)
+        if (!_isSocialAccountLinked || _globeConnectionService.State.IsOffline)
         {
             return;
         }
@@ -485,6 +504,20 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void SetGlobeApprovalPending(bool isPending)
+    {
+        _isGlobeApprovalPending = isPending;
+        CloseButton.IsEnabled = !isPending;
+    }
+
+    private void ShowGlobeAccountAlreadyLinkedWarning()
+    {
+        AppDialogWindow.ShowWarning(
+            this,
+            "globe account already linked",
+            "Unlink your current globe account before linking another one.");
+    }
+
     private void StartSocialSignInAnimation()
     {
         const int frameCount = 32;
@@ -527,6 +560,7 @@ public partial class SettingsWindow : Window
         _socialSignInTransitionId++;
         _socialSignInCancellation?.Cancel();
         _socialSignInCancellation = null;
+        SetGlobeApprovalPending(false);
 
         if (restoreProfile)
         {
@@ -805,7 +839,12 @@ public partial class SettingsWindow : Window
             && _isSocialSharingAvailable
             && !_isSocialSigningIn;
         AutomaticallyShareBurnsCheckBox.ToolTip = _isSocialAccountLinked && !_isSocialSharingAvailable
-            ? "Sharing will be available when globe reconnects"
+            ? "Sharing will be available when globe reconnects."
+            : null;
+        var isGlobeOffline = _globeConnectionService.State.IsOffline;
+        UnlinkSocialAccountLink.IsEnabled = _isSocialAccountLinked && !isGlobeOffline;
+        UnlinkSocialAccountLink.ToolTip = isGlobeOffline
+            ? "Unlinking will be available when globe reconnects."
             : null;
         var profile = _socialProfile;
         SocialUsernameText.Text = profile?.DisplayUsername
@@ -814,7 +853,7 @@ public partial class SettingsWindow : Window
             ?? (_isSocialAccountLinked ? "Account linked" : string.Empty);
         var cdCount = profile?.CdCount ?? 0;
         SocialCdCountText.Text = profile is null && _isSocialAccountLinked
-            ? "Account details will refresh when globe reconnects"
+            ? "Account details will refresh when globe reconnects."
             : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
         SocialProfileFrame.SetProfile(
             _isSocialAccountLinked,
@@ -882,8 +921,43 @@ public partial class SettingsWindow : Window
         Activate();
     }
 
+    internal bool WarnIfGlobeApprovalPreventsClose()
+    {
+        if (!_isGlobeApprovalPending)
+        {
+            return false;
+        }
+
+        if (_isGlobeApprovalCloseWarningOpen)
+        {
+            return true;
+        }
+
+        _isGlobeApprovalCloseWarningOpen = true;
+        try
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "globe approval pending",
+                "Finish or cancel the globe approval before closing Mystral.");
+        }
+        finally
+        {
+            _isGlobeApprovalCloseWarningOpen = false;
+        }
+
+        return true;
+    }
+
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (WarnIfGlobeApprovalPreventsClose())
+        {
+            e.Cancel = true;
+            CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         if (_isCloseRequestPending)
         {
             e.Cancel = true;

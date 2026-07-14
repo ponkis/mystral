@@ -572,6 +572,24 @@ static class GlobeConnectionServiceTests
         Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
         Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
 
+        var secondApprovalOpened = false;
+        InvalidOperationException? alreadyLinked = null;
+        try
+        {
+            connection.LinkAsync(_ => secondApprovalOpened = true).GetAwaiter().GetResult();
+        }
+        catch (InvalidOperationException ex)
+        {
+            alreadyLinked = ex;
+        }
+        Check.NotNull(alreadyLinked);
+        Check.Equal(
+            "Unlink your current globe account before linking another one.",
+            alreadyLinked!.Message);
+        Check.False(secondApprovalOpened);
+        Check.Equal(2, claimCalls);
+        Check.True(connection.State.IsLinked);
+
         Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
         Check.Equal("Changed Name", connection.State.Profile!.DisplayName);
         Check.Equal("http://localhost:3000/avatars/updated.png", connection.State.Profile.AvatarUrl);

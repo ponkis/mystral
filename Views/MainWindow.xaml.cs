@@ -3201,6 +3201,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_settingsWindow?.WarnIfGlobeApprovalPreventsClose() == true)
+        {
+            _isExitingFromTray = false;
+            return;
+        }
+
         if (!ShouldCloseToTray())
         {
             _isExitingFromTray = true;
