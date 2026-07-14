@@ -1002,6 +1002,13 @@ public partial class BurningWindow : Window
                 shareRequest,
                 cancellationToken));
         statusWindow.ShowDialog();
+        if (statusWindow.WasSuccessful)
+        {
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Shared to globe",
+                "Your burned CD was shared to your globe profile.");
+        }
     }
 
     private async Task<ArtworkAsset?> TryLoadFetchedArtworkAsync(byte[] data, CancellationToken cancellationToken)

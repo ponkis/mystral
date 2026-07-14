@@ -148,9 +148,6 @@ internal sealed class ShareStatusWindow : Window
         {
             await _shareAsync(CancellationToken.None);
             WasSuccessful = true;
-            _headingText.Text = "Shared to globe";
-            _detailText.Text = "Your burned CD was shared to your globe profile.";
-            _progressBar.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
         {
@@ -165,6 +162,13 @@ internal sealed class ShareStatusWindow : Window
         {
             _isRunning = false;
             _closeButton.IsEnabled = true;
+        }
+
+        if (WasSuccessful)
+        {
+            // The success result is shown as its own separate dialog by the caller, so
+            // close this progress window instead of morphing it into the confirmation.
+            Close();
         }
     }
 
