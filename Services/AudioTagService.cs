@@ -10,6 +10,13 @@ public sealed class AudioTagService
     private const int CopyBufferSize = 1024 * 1024;
     private const int MaxSuggestedFileNameLength = 255;
 
+    // Disc/CD art is stored in a private tag field instead of an embedded picture.
+    // An embedded picture is always eligible to be shown as the album cover by
+    // players (they fall back to any picture when no front cover exists), so the
+    // disc art would leak as the cover. A custom field is never rendered, yet
+    // Mystral can still read it back for its jewel-case/disc view.
+    private const string DiscArtworkField = "MYSTRAL_DISC_ART";
+
     static AudioTagService()
     {
         ATL.Settings.UseFileNameWhenNoTitle = false;
@@ -159,12 +166,7 @@ public sealed class AudioTagService
                 fallbackToAnyPicture: true,
                 cancellationToken,
                 out var coverPictureType);
-            var disc = LoadEmbeddedArtwork(
-                track,
-                ATL.PictureInfo.PIC_TYPE.CD,
-                fallbackToAnyPicture: false,
-                cancellationToken,
-                out _);
+            var disc = LoadDiscArtwork(track, cancellationToken);
             return new BurnTrackDraft
             {
                 SourcePath = path,
@@ -303,8 +305,85 @@ public sealed class AudioTagService
 
         if (draft.DiscArtworkChanged)
         {
-            ReplacePicture(track, draft.DiscArtwork?.Data, ATL.PictureInfo.PIC_TYPE.CD);
+            WriteDiscArtwork(track, draft.DiscArtwork?.Data);
         }
+    }
+
+    private static void WriteDiscArtwork(ATL.Track track, byte[]? data)
+    {
+        // Drop any legacy embedded CD picture so previously-burned files stop
+        // exposing the disc art as a cover the moment they are saved again.
+        foreach (var existing in track.EmbeddedPictures
+            .Where(item => item.PicType == ATL.PictureInfo.PIC_TYPE.CD)
+            .ToArray())
+        {
+            track.EmbeddedPictures.Remove(existing);
+        }
+
+        if (data is { Length: > 0 })
+        {
+            track.AdditionalFields[DiscArtworkField] = Convert.ToBase64String(data);
+        }
+        else
+        {
+            track.AdditionalFields.Remove(DiscArtworkField);
+        }
+    }
+
+    private static ArtworkAsset? LoadDiscArtwork(ATL.Track track, CancellationToken cancellationToken)
+    {
+        // Preferred storage: the private Mystral field written by WriteDiscArtwork.
+        if (TryGetDiscArtworkField(track, out var encoded))
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(encoded);
+                if (bytes.Length > 0)
+                {
+                    return ImageArtworkLoader.Load(bytes, cancellationToken);
+                }
+            }
+            catch (FormatException)
+            {
+            }
+            catch (InvalidDataException)
+            {
+            }
+        }
+
+        // Legacy files store the disc art as an embedded CD picture; keep reading it
+        // so nothing is lost until the file is saved again in the new layout.
+        return LoadEmbeddedArtwork(
+            track,
+            ATL.PictureInfo.PIC_TYPE.CD,
+            fallbackToAnyPicture: false,
+            cancellationToken,
+            out _);
+    }
+
+    private static bool TryGetDiscArtworkField(ATL.Track track, out string value)
+    {
+        if (track.AdditionalFields.TryGetValue(DiscArtworkField, out var direct)
+            && !string.IsNullOrEmpty(direct))
+        {
+            value = direct;
+            return true;
+        }
+
+        // Some containers namespace or case-fold custom keys (e.g. MP4 freeform
+        // atoms), so fall back to a tolerant match on the field name.
+        foreach (var field in track.AdditionalFields)
+        {
+            if (!string.IsNullOrEmpty(field.Value)
+                && field.Key.Contains(DiscArtworkField, StringComparison.OrdinalIgnoreCase))
+            {
+                value = field.Value;
+                return true;
+            }
+        }
+
+        value = string.Empty;
+        return false;
     }
 
     private static void ApplyYear(ATL.Track track, string value)
@@ -447,7 +526,21 @@ public sealed class AudioTagService
 
         if (data is { Length: > 0 })
         {
-            track.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(data, type));
+            var picture = ATL.PictureInfo.fromBinaryData(data, type);
+            if (type == ATL.PictureInfo.PIC_TYPE.Front)
+            {
+                // The front cover must stay the first embedded picture. Players and
+                // shells that pick album art by frame order (Windows Explorer, many
+                // phones and car head units) show the first picture, so appending a
+                // replaced cover after an existing CD/disc picture made the disc art
+                // display as the cover. Inserting keeps the cover first regardless of
+                // which artwork changed.
+                track.EmbeddedPictures.Insert(0, picture);
+            }
+            else
+            {
+                track.EmbeddedPictures.Add(picture);
+            }
         }
     }
 }

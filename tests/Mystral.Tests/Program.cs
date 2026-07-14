@@ -1843,8 +1843,10 @@ static class AudioTagServiceTests
         draft.TrackNumber = "7";
         draft.TrackTotal = "12";
         var artworkLoader = new ImageArtworkLoader();
-        draft.CoverArtwork = artworkLoader.LoadAsync(Png(1, 1, [10, 20, 30, 255])).GetAwaiter().GetResult();
-        draft.DiscArtwork = artworkLoader.LoadAsync(Png(1, 1, [40, 50, 60, 255])).GetAwaiter().GetResult();
+        var coverPng = Png(1, 1, [10, 20, 30, 255]);
+        var discPng = Png(1, 1, [40, 50, 60, 255]);
+        draft.CoverArtwork = artworkLoader.LoadAsync(coverPng).GetAwaiter().GetResult();
+        draft.DiscArtwork = artworkLoader.LoadAsync(discPng).GetAwaiter().GetResult();
         draft.CoverArtworkChanged = true;
         draft.DiscArtworkChanged = true;
         var destinationPath = Path.Combine(temp.Path, "burned.wav");
@@ -1863,6 +1865,60 @@ static class AudioTagServiceTests
         Check.Equal("12", saved.TrackTotal);
         Check.NotNull(saved.CoverArtwork);
         Check.NotNull(saved.DiscArtwork);
+
+        // The cover is the only embedded picture and it is a front cover. The disc art
+        // must NOT be an embedded picture (players would render it as the cover);
+        // it lives in a private tag field instead.
+        var savedTrack = new ATL.Track(destinationPath);
+        Check.Equal(1, savedTrack.EmbeddedPictures.Count);
+        Check.Equal(ATL.PictureInfo.PIC_TYPE.Front, savedTrack.EmbeddedPictures[0].PicType);
+        Check.False(savedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+        var discField = savedTrack.AdditionalFields
+            .FirstOrDefault(field => field.Key.Contains("MYSTRAL_DISC_ART", StringComparison.OrdinalIgnoreCase))
+            .Value;
+        Check.NotNull(discField);
+        Check.Sequence(discPng, Convert.FromBase64String(discField!));
+
+        // Replacing only the cover must keep exactly one front-cover picture and leave
+        // the disc art field untouched (no CD picture is ever introduced).
+        var replacedCoverBytes = Png(1, 1, [11, 22, 33, 255]);
+        saved.CoverArtwork = artworkLoader.LoadAsync(replacedCoverBytes).GetAwaiter().GetResult();
+        saved.CoverArtworkChanged = true;
+        saved.DiscArtworkChanged = false;
+        var coverReplacedPath = Path.Combine(temp.Path, "cover-replaced.wav");
+        service.SaveCopyAsync(saved, coverReplacedPath).GetAwaiter().GetResult();
+        var coverReplacedTrack = new ATL.Track(coverReplacedPath);
+        Check.Equal(1, coverReplacedTrack.EmbeddedPictures.Count);
+        Check.Equal(ATL.PictureInfo.PIC_TYPE.Front, coverReplacedTrack.EmbeddedPictures[0].PicType);
+        Check.True(coverReplacedTrack.EmbeddedPictures[0].PictureData.AsSpan().SequenceEqual(replacedCoverBytes));
+        Check.False(coverReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+        var coverReplacedReadback = service.ReadAsync(coverReplacedPath).GetAwaiter().GetResult();
+        Check.NotNull(coverReplacedReadback.DiscArtwork);
+
+        // Backward compatibility: a legacy file that stored the disc art as a CD
+        // picture must still be read as disc art (not as the cover).
+        var legacyPath = Path.Combine(temp.Path, "legacy-disc.wav");
+        File.WriteAllBytes(legacyPath, PcmWave(duration: TimeSpan.FromSeconds(1)));
+        var legacyCoverPng = Png(1, 1, [1, 2, 3, 255]);
+        var legacyDiscPng = Png(1, 1, [4, 5, 6, 255]);
+        var legacyTrack = new ATL.Track(legacyPath);
+        legacyTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(legacyCoverPng, ATL.PictureInfo.PIC_TYPE.Front));
+        legacyTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(legacyDiscPng, ATL.PictureInfo.PIC_TYPE.CD));
+        Check.True(legacyTrack.Save());
+        var legacyRead = service.ReadAsync(legacyPath).GetAwaiter().GetResult();
+        Check.NotNull(legacyRead.CoverArtwork);
+        Check.Sequence(legacyCoverPng, legacyRead.CoverArtwork!.Data);
+        Check.NotNull(legacyRead.DiscArtwork);
+        Check.Sequence(legacyDiscPng, legacyRead.DiscArtwork!.Data);
+        // Re-saving a legacy file migrates the disc art out of the CD picture.
+        legacyRead.DiscArtworkChanged = true;
+        var legacyMigratedPath = Path.Combine(temp.Path, "legacy-migrated.wav");
+        service.SaveCopyAsync(legacyRead, legacyMigratedPath).GetAwaiter().GetResult();
+        var legacyMigratedTrack = new ATL.Track(legacyMigratedPath);
+        Check.False(legacyMigratedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
 
         saved.CoverArtwork = null;
         saved.DiscArtwork = null;
