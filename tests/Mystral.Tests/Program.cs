@@ -21,12 +21,27 @@ internal static class Program
         {
             ("LRC parser handles empty, invalid, repeated, and ordered lines", LrcParserTests.ParseCoversImportantCases),
             ("metadata cleaner normalizes media snapshots and rejects non-songs", LastFmMetadataCleanerTests.CleansAndClassifiesTracks),
-            ("settings service persists normalized settings and recovers from bad files", AppSettingsServiceTests.PersistsNormalizesAndFallsBack),
+            ("settings service protects and migrates Last.fm credentials", AppSettingsServiceTests.ProtectsMigratesNormalizesAndFallsBack),
+            ("DPAPI store protects current-user credentials at rest", DpapiCredentialStoreTests.ProtectsRoundTripsAndDeletes),
+            ("desktop activation accepts only the environment-specific Social route", DesktopActivationServiceTests.ValidatesProtocolRoute),
+            ("Globe service links, refreshes profiles, shares idempotently, and unlinks", GlobeConnectionServiceTests.LinksSharesAndUnlinks),
+            ("Globe service detects revoked tokens once and disables sharing", GlobeConnectionServiceTests.DetectsRevocationOnce),
+            ("Globe service caches profiles, survives outages, and recovers", GlobeConnectionServiceTests.CachesProfileAndSurvivesOutages),
+            ("Globe duplicate burn retries reconcile the live CD total", GlobeConnectionServiceTests.ReconcilesDuplicateBurnCount),
+            ("Globe linking distinguishes browser cancellation", GlobeConnectionServiceTests.DetectsBrowserCancellation),
+            ("Globe linking retains protected tokens until acknowledgement recovers", GlobeConnectionServiceTests.RecoversPendingAcknowledgement),
+            ("Globe missing claim and revoke endpoints fail safely", GlobeConnectionServiceTests.TreatsMissingEndpointsAsFailures),
+            ("Globe avatar dimensions reject oversized and extreme inputs", GlobeConnectionServiceTests.ValidatesAvatarDimensions),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
             ("lyrics service keys, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
-            ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable)
+            ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
+            ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
+            ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
+            ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
+            ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
+            ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
 
         var failures = new List<string>();
@@ -52,6 +67,86 @@ internal static class Program
 
         Console.Error.WriteLine(string.Join(Environment.NewLine + Environment.NewLine, failures));
         return 1;
+    }
+}
+
+static class DesktopActivationServiceTests
+{
+    public static void ValidatesProtocolRoute()
+    {
+        var scheme = DesktopActivationService.ProtocolScheme;
+#if APP_ENVIRONMENT_DEVELOPMENT
+        Check.Equal("Development", Mystral.Configuration.AppMetadata.EnvironmentName);
+        Check.Equal("mystral-dev", scheme);
+        Check.True(DesktopActivationService.CanSelfRegisterProtocol);
+#else
+        Check.Equal("Production", Mystral.Configuration.AppMetadata.EnvironmentName);
+        Check.Equal("mystral", scheme);
+        Check.False(DesktopActivationService.CanSelfRegisterProtocol);
+#endif
+        Check.Equal(
+            "\"C:\\Program Files\\Mystral\\Mystral.exe\" \"%1\"",
+            DesktopActivationService.BuildProtocolOpenCommand(
+                "C:\\Program Files\\Mystral\\Mystral.exe",
+                null));
+        Check.Equal(
+            "\"C:\\Program Files\\dotnet\\dotnet.exe\" exec \"C:\\Dev Builds\\Mystral.dll\" \"%1\"",
+            DesktopActivationService.BuildProtocolOpenCommand(
+                "C:\\Program Files\\dotnet\\dotnet.exe",
+                "C:\\Dev Builds\\Mystral.dll"));
+        Check.Null(DesktopActivationService.BuildProtocolOpenCommand(
+            "C:\\Program Files\\dotnet\\dotnet.exe",
+            null));
+        Check.True(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { DesktopActivationService.RegisterProtocolArgument }));
+        Check.True(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { "--REGISTER-PROTOCOL" }));
+        Check.False(DesktopActivationService.IsProtocolRegistrationRequest(Array.Empty<string>()));
+        Check.False(DesktopActivationService.IsProtocolRegistrationRequest(
+            new[] { DesktopActivationService.RegisterProtocolArgument, "unexpected" }));
+        Check.True(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social"));
+        Check.True(DesktopActivationService.IsSocialSettingsActivation($"{scheme}:///settings/social"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation("activate"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation("https://chat.ponkis.xyz/settings/social"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social?token=never-accept-secrets"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social/extra"));
+        Check.False(DesktopActivationService.IsSocialSettingsActivation(
+            scheme == "mystral" ? "mystral-dev://settings/social" : "mystral://settings/social"));
+        var localGlobe = new Uri("http://localhost:3000/");
+        Check.True(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("http://localhost:3000/avatars/user.png"),
+            localGlobe));
+        Check.False(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("https://untrusted.example/avatar.png"),
+            localGlobe));
+        Check.False(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("http://user:password@localhost:3000/avatar.png"),
+            localGlobe));
+
+        var avatarCdn = Mystral.Configuration.AppMetadata.GlobeAvatarCdnBaseUri;
+        Check.NotNull(avatarCdn);
+        var cdnAvatar = new Uri(avatarCdn!, "profiles/342_avatar.jpg");
+        Check.True(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            cdnAvatar,
+            localGlobe));
+        var freshAvatar = Mystral.Views.SettingsWindow.CreateFreshAvatarRequestUri(cdnAvatar);
+        Check.Equal(cdnAvatar.GetLeftPart(UriPartial.Path), freshAvatar.GetLeftPart(UriPartial.Path));
+        Check.Contains("mystral_refresh=", freshAvatar.Query);
+        var signedAvatar = new Uri(cdnAvatar.AbsoluteUri + "?signature=keep-me");
+        Check.Equal(
+            signedAvatar,
+            Mystral.Views.SettingsWindow.CreateFreshAvatarRequestUri(signedAvatar));
+
+        var socialActivation = $"{scheme}://settings/social";
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(null, socialActivation));
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(socialActivation, DesktopActivationService.ActivateMessage));
+        Check.Equal(
+            socialActivation,
+            DesktopActivationService.PreferActivation(DesktopActivationService.ActivateMessage, socialActivation));
     }
 }
 
@@ -117,11 +212,12 @@ static class LastFmMetadataCleanerTests
 
 static class AppSettingsServiceTests
 {
-    public static void PersistsNormalizesAndFallsBack()
+    public static void ProtectsMigratesNormalizesAndFallsBack()
     {
         using var temp = TempDir.Create();
         var path = Path.Combine(temp.Path, "settings.json");
-        var service = new AppSettingsService(path);
+        var credentialStore = new MemorySecureCredentialStore();
+        var service = new AppSettingsService(path, credentialStore);
         var changed = 0;
         service.SettingsChanged += (_, _) => changed++;
 
@@ -136,7 +232,12 @@ static class AppSettingsServiceTests
                 Password = " pass ",
                 ScrobblingEnabled = true
             },
-            Behavior = new BehaviorSettings { AlwaysOnTop = false }
+            Behavior = new BehaviorSettings { AlwaysOnTop = false },
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
         });
 
         Check.Equal(1, changed);
@@ -145,20 +246,948 @@ static class AppSettingsServiceTests
         Check.Equal("user", service.Settings.LastFm.Username);
         Check.Equal(" pass ", service.Settings.LastFm.Password);
         Check.False(service.Settings.Behavior.AlwaysOnTop);
+        Check.True(service.Settings.Social.IsAccountLinked);
+        Check.True(service.Settings.Social.AutomaticallyShareBurns);
 
-        var reloaded = new AppSettingsService(path);
+        var persistedJson = File.ReadAllText(path);
+        Check.False(persistedJson.Contains("ApiKey", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("ApiSecret", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("Username", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("Password", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains("secret", StringComparison.Ordinal));
+        Check.False(persistedJson.Contains(" pass ", StringComparison.Ordinal));
+
+        var reloaded = new AppSettingsService(path, credentialStore);
         Check.True(reloaded.Settings.LastFm.IsConfigured);
         Check.False(reloaded.Settings.Behavior.AlwaysOnTop);
+        Check.False(reloaded.Settings.Social.IsAccountLinked);
+        Check.True(reloaded.Settings.Social.AutomaticallyShareBurns);
 
-        File.WriteAllText(path, """{"LastFm":null,"Behavior":null}""");
-        var nullNested = new AppSettingsService(path);
+        reloaded.SetGlobeConnectionState(isLinked: false);
+        Check.False(reloaded.Settings.Social.AutomaticallyShareBurns);
+
+        var nullPath = Path.Combine(temp.Path, "null-settings.json");
+        File.WriteAllText(nullPath, """{"LastFm":null,"Behavior":null,"Social":null}""");
+        var nullNested = new AppSettingsService(nullPath, new MemorySecureCredentialStore());
         Check.NotNull(nullNested.Settings.LastFm);
         Check.NotNull(nullNested.Settings.Behavior);
+        Check.NotNull(nullNested.Settings.Social);
 
-        File.WriteAllText(path, "{ nope");
-        var corrupt = new AppSettingsService(path);
+        var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
+        var legacyStore = new MemorySecureCredentialStore();
+        File.WriteAllText(
+            legacyPath,
+            """
+            {
+              "LastFm": {
+                "Enabled": true,
+                "ApiKey": "legacy-key",
+                "ApiSecret": "legacy-secret",
+                "Username": "legacy-user",
+                "Password": "legacy-password",
+                "ScrobblingEnabled": true
+              },
+              "Social": { "AutomaticallyShareBurns": false }
+            }
+            """);
+        var migrated = new AppSettingsService(legacyPath, legacyStore);
+        Check.Equal("legacy-key", migrated.Settings.LastFm.ApiKey);
+        Check.Equal("legacy-secret", migrated.Settings.LastFm.ApiSecret);
+        Check.Equal("legacy-user", migrated.Settings.LastFm.Username);
+        Check.Equal("legacy-password", migrated.Settings.LastFm.Password);
+        var migratedJson = File.ReadAllText(legacyPath);
+        Check.False(migratedJson.Contains("legacy-key", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-secret", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-user", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("legacy-password", StringComparison.Ordinal));
+        Check.False(migratedJson.Contains("ApiSecret", StringComparison.Ordinal));
+        var migratedReload = new AppSettingsService(legacyPath, legacyStore);
+        Check.True(migratedReload.Settings.LastFm.IsConfigured);
+
+        var partialMigrationPath = Path.Combine(temp.Path, "partial-migration-settings.json");
+        var partialMigrationStore = new MemorySecureCredentialStore();
+        File.WriteAllText(
+            partialMigrationPath,
+            """
+            {
+              "LastFm": {
+                "Enabled": true,
+                "ApiKey": "stale-plaintext-key",
+                "ApiSecret": "stale-plaintext-secret",
+                "Username": "stale-plaintext-user",
+                "Password": "stale-plaintext-password",
+                "ScrobblingEnabled": true
+              }
+            }
+            """);
+        partialMigrationStore.Write(
+            "lastfm.credentials.v1",
+            """{"ApiKey":"protected-key","ApiSecret":"protected-secret","Username":"protected-user","Password":"protected-password"}""");
+        var partialMigration = new AppSettingsService(partialMigrationPath, partialMigrationStore);
+        Check.Equal("protected-key", partialMigration.Settings.LastFm.ApiKey);
+        Check.Equal("protected-secret", partialMigration.Settings.LastFm.ApiSecret);
+        Check.Equal("protected-user", partialMigration.Settings.LastFm.Username);
+        Check.Equal("protected-password", partialMigration.Settings.LastFm.Password);
+        var sanitizedPartialMigrationJson = File.ReadAllText(partialMigrationPath);
+        Check.False(sanitizedPartialMigrationJson.Contains("stale-plaintext", StringComparison.Ordinal));
+        Check.False(sanitizedPartialMigrationJson.Contains("ApiSecret", StringComparison.Ordinal));
+
+        var corruptPath = Path.Combine(temp.Path, "corrupt-settings.json");
+        File.WriteAllText(corruptPath, "{ nope");
+        var corrupt = new AppSettingsService(corruptPath, new MemorySecureCredentialStore());
         Check.False(corrupt.Settings.LastFm.IsConfigured);
         Check.True(corrupt.Settings.Behavior.AlwaysOnTop);
+        Check.False(corrupt.Settings.Social.IsAccountLinked);
+    }
+}
+
+static class DpapiCredentialStoreTests
+{
+    public static void ProtectsRoundTripsAndDeletes()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = TempDir.Create();
+        var directory = Path.Combine(temp.Path, "credentials");
+        const string key = "test-token";
+        const string secret = "never-write-this-token-in-plaintext";
+        var store = new DpapiCredentialStore(directory);
+        store.Write(key, secret);
+
+        var files = Directory.GetFiles(directory, "*.credential");
+        Check.Equal(1, files.Length);
+        var bytesAtRest = File.ReadAllBytes(files[0]);
+        Check.False(Encoding.UTF8.GetString(bytesAtRest).Contains(secret, StringComparison.Ordinal));
+        Check.Equal(secret, store.Read(key));
+        Check.Equal(secret, new DpapiCredentialStore(directory).Read(key));
+
+        store.Delete(key);
+        Check.Null(store.Read(key));
+    }
+}
+
+static class GlobeConnectionServiceTests
+{
+    public static void LinksSharesAndUnlinks()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
+        });
+
+        var claimCalls = 0;
+        var acknowledgeCalls = 0;
+        var revokeCalls = 0;
+        var burnCalls = 0;
+        var serverCdCount = 0;
+        var burnIds = new List<string>();
+        string? codeChallenge = null;
+        string? codeVerifier = null;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/api/mystral/link/claim")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                claimCalls++;
+                using var claimBody = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                var claimRoot = claimBody.RootElement;
+                var linkCode = claimRoot.GetProperty("link_code").GetString();
+                Check.True(!string.IsNullOrWhiteSpace(linkCode));
+                if (claimCalls == 1)
+                {
+                    codeChallenge = claimRoot.GetProperty("code_challenge").GetString();
+                    Check.True(!string.IsNullOrWhiteSpace(codeChallenge));
+                    Check.Equal(43, codeChallenge!.Length);
+                    Check.False(codeChallenge.Contains('='));
+                    Check.False(claimRoot.TryGetProperty("code_verifier", out _));
+                    return new HttpResponseMessage(HttpStatusCode.Accepted)
+                    {
+                        Content = new StringContent("{\"pending\":true}", Encoding.UTF8, "application/json")
+                    };
+                }
+
+                codeVerifier = claimRoot.GetProperty("code_verifier").GetString();
+                Check.True(!string.IsNullOrWhiteSpace(codeVerifier));
+                Check.Equal(43, codeVerifier!.Length);
+                Check.False(codeVerifier.Contains('='));
+                Check.False(claimRoot.TryGetProperty("code_challenge", out _));
+                var expectedChallenge = Convert.ToBase64String(
+                        System.Security.Cryptography.SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)))
+                    .TrimEnd('=')
+                    .Replace('+', '-')
+                    .Replace('/', '_');
+                Check.Equal(expectedChallenge, codeChallenge);
+
+                return Json(new
+                {
+                    linked = true,
+                    token = "globe-secret-token",
+                    username = "listener",
+                    name = "",
+                    avatar_url = "/avatars/listener.png"
+                });
+            }
+
+            Check.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Check.Equal("globe-secret-token", request.Headers.Authorization?.Parameter);
+            if (path == "/api/mystral/link/ack")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                acknowledgeCalls++;
+                Check.Equal(
+                    "globe-secret-token",
+                    secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+                return Json(new { linked = true, acknowledged = true });
+            }
+
+            if (path == "/api/mystral/link/status")
+            {
+                Check.Equal(HttpMethod.Get, request.Method);
+                Check.True(request.Headers.CacheControl?.NoCache == true);
+                Check.True(request.Headers.CacheControl?.NoStore == true);
+                Check.True(request.Headers.Pragma.Any(value =>
+                    string.Equals(value.Name, "no-cache", StringComparison.OrdinalIgnoreCase)));
+                return Json(new
+                {
+                    linked = true,
+                    username = "listener",
+                    name = "Changed Name",
+                    avatar_url = "/avatars/updated.png",
+                    cd_count = serverCdCount
+                });
+            }
+
+            if (path == "/api/mystral/burns")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                burnCalls++;
+                var idempotencyKey = request.Headers.GetValues("Idempotency-Key").Single();
+                burnIds.Add(idempotencyKey);
+                using var burnBody = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                var root = burnBody.RootElement;
+                Check.Equal(idempotencyKey, root.GetProperty("client_burn_id").GetString());
+                Check.Equal("Album", root.GetProperty("album").GetString());
+                Check.Equal("Artist", root.GetProperty("artist").GetString());
+                Check.Equal(12, root.GetProperty("track_count").GetInt32());
+                if (burnCalls <= 3)
+                {
+                    Check.Contains("data:image/png;base64,", root.GetProperty("cover").GetString()!);
+                }
+                else
+                {
+                    Check.False(root.TryGetProperty("cover", out _));
+                }
+
+                if (burnCalls == 1)
+                {
+                    var limited = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":\"too_many_requests\",\"message\":\"internal limiter bucket 7 overflowed\"}",
+                            Encoding.UTF8,
+                            "application/json")
+                    };
+                    limited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+                    return limited;
+                }
+
+                var created = burnCalls is not 3 and not 7;
+                if (created)
+                {
+                    serverCdCount++;
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(
+                        burnCalls == 3
+                            ? "{\"shared\":true,\"created\":false,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
+                            : burnCalls == 7
+                                ? "{\"shared\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
+                                : "{\"shared\":true,\"created\":true,\"message\":\"inserted database row 42\",\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            if (path == "/api/mystral/link/revoke")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                revokeCalls++;
+                if (revokeCalls == 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":\"route_not_found\"}",
+                            Encoding.UTF8,
+                            "application/json")
+                    };
+                }
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+
+            throw new InvalidOperationException("Unexpected Globe request: " + request.RequestUri);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(
+            apiClient,
+            secureStore,
+            settings,
+            new GlobeConnectionOptions
+            {
+                LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                LinkTimeout = TimeSpan.FromSeconds(1),
+                StatusPollInterval = TimeSpan.FromHours(1)
+            });
+
+        Uri? approvalUri = null;
+        var linkedProfile = connection.LinkAsync(uri =>
+        {
+            Check.Equal(1, claimCalls);
+            approvalUri = uri;
+        }).GetAwaiter().GetResult();
+        Check.NotNull(approvalUri);
+        Check.Equal("/settings/connections/mystral/approve", approvalUri!.AbsolutePath);
+        Check.Contains("code=", approvalUri.Query);
+        Check.Equal(2, claimCalls);
+        Check.Equal(1, acknowledgeCalls);
+        Check.NotNull(codeVerifier);
+        Check.Equal("listener", linkedProfile.DisplayName);
+        Check.Equal("@listener", linkedProfile.DisplayUsername);
+        Check.True(connection.State.IsLinked);
+        Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+
+        var secondApprovalOpened = false;
+        InvalidOperationException? alreadyLinked = null;
+        try
+        {
+            connection.LinkAsync(_ => secondApprovalOpened = true).GetAwaiter().GetResult();
+        }
+        catch (InvalidOperationException ex)
+        {
+            alreadyLinked = ex;
+        }
+        Check.NotNull(alreadyLinked);
+        Check.Equal(
+            "Unlink your current globe account before linking another one.",
+            alreadyLinked!.Message);
+        Check.False(secondApprovalOpened);
+        Check.Equal(2, claimCalls);
+        Check.True(connection.State.IsLinked);
+
+        Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal("Changed Name", connection.State.Profile!.DisplayName);
+        Check.Equal("http://localhost:3000/avatars/updated.png", connection.State.Profile.AvatarUrl);
+
+        var request = new GlobeBurnShareRequest(
+            " Album ",
+            " Artist ",
+            new DateTimeOffset(2026, 7, 13, 12, 0, 0, TimeSpan.FromHours(-6)),
+            12,
+            [0x89, 0x50, 0x4E, 0x47, 1, 2, 3],
+            "stable-burn-id");
+        GlobeApiException? rateLimit = null;
+        try
+        {
+            _ = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        }
+        catch (GlobeApiException ex)
+        {
+            rateLimit = ex;
+        }
+
+        Check.NotNull(rateLimit);
+        Check.Equal(HttpStatusCode.TooManyRequests, rateLimit!.StatusCode);
+        Check.Equal("too_many_requests", rateLimit.ErrorCode);
+        Check.Equal(
+            "globe is receiving too many requests. Please wait a moment and try again.",
+            rateLimit.Message);
+        Check.Equal(TimeSpan.FromSeconds(7), rateLimit.RetryAfter!.Value);
+        Check.True(connection.State.IsLinked);
+
+        var shared = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        Check.Equal("82", shared.PostId);
+        Check.Equal("41", shared.CollectionEntryId);
+        Check.Equal("The burned CD was shared to globe.", shared.Message);
+        Check.Equal(2, burnIds.Count);
+        Check.Equal(burnIds[0], burnIds[1]);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+
+        var duplicate = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        Check.False(duplicate.Created);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+        Check.Equal(3, burnIds.Count);
+        Check.Equal(burnIds[0], burnIds[2]);
+
+        var oversizedCover = new byte[(5 * 1024 * 1024) + 1];
+        oversizedCover[0] = 0x89;
+        oversizedCover[1] = 0x50;
+        oversizedCover[2] = 0x4E;
+        oversizedCover[3] = 0x47;
+        _ = connection.ShareBurnAsync(new GlobeBurnShareRequest(
+            "Album",
+            "Artist",
+            DateTimeOffset.UtcNow,
+            12,
+            oversizedCover,
+            "oversized-cover-burn")).GetAwaiter().GetResult();
+
+        Task.WhenAll(
+            connection.ShareBurnAsync(new GlobeBurnShareRequest(
+                "Album",
+                "Artist",
+                DateTimeOffset.UtcNow,
+                12,
+                burnId: "concurrent-burn-a")),
+            connection.ShareBurnAsync(new GlobeBurnShareRequest(
+                "Album",
+                "Artist",
+                DateTimeOffset.UtcNow,
+                12,
+                burnId: "concurrent-burn-b"))).GetAwaiter().GetResult();
+        Check.Equal(4, connection.State.Profile!.CdCount);
+
+        var unspecifiedCreation = connection.ShareBurnAsync(new GlobeBurnShareRequest(
+            "Album",
+            "Artist",
+            DateTimeOffset.UtcNow,
+            12,
+            burnId: "unspecified-created-burn")).GetAwaiter().GetResult();
+        Check.False(unspecifiedCreation.Created);
+        Check.Equal(4, connection.State.Profile!.CdCount);
+
+        Check.Throws<GlobeApiException>(() => connection.UnlinkAsync().GetAwaiter().GetResult());
+        Check.True(connection.State.IsLinked);
+        Check.True(connection.HasStoredToken);
+        Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+
+        connection.UnlinkAsync().GetAwaiter().GetResult();
+        Check.Equal(2, revokeCalls);
+        Check.False(connection.State.IsLinked);
+        Check.False(connection.HasStoredToken);
+        Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.False(settings.Settings.Social.AutomaticallyShareBurns);
+    }
+
+    public static void DetectsRevocationOnce()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings
+            {
+                IsAccountLinked = true,
+                AutomaticallyShareBurns = true
+            }
+        });
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "revoked-token");
+        var statusCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/status", request.RequestUri!.AbsolutePath);
+            statusCalls++;
+            return new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent(
+                    "{\"linked\":false,\"error\":\"mystral_link_invalid\",\"message\":\"token hash 123 was deleted from mystral_connections\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        var revocations = 0;
+        GlobeLinkRevokedEventArgs? revocation = null;
+        connection.LinkRevoked += (_, args) =>
+        {
+            revocations++;
+            revocation = args;
+        };
+
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(1, statusCalls);
+        Check.Equal(1, revocations);
+        Check.Equal(GlobeLinkRevocationSource.StatusCheck, revocation!.Source);
+        Check.Equal("Your globe account is no longer linked.", revocation.Message);
+        Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.False(settings.Settings.Social.AutomaticallyShareBurns);
+        Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
+    }
+
+    public static void CachesProfileAndSurvivesOutages()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings { AutomaticallyShareBurns = true }
+        });
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "cached-token");
+
+        var mode = 0;
+        var statusCalls = 0;
+        var burnCalls = 0;
+        var retryBurnIds = new List<string>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            Check.Equal("cached-token", request.Headers.Authorization?.Parameter);
+            if (path == "/api/mystral/burns")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                Check.Equal(2, mode);
+                burnCalls++;
+                retryBurnIds.Add(request.Headers.GetValues("Idempotency-Key").Single());
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(
+                        "{\"shared\":true,\"created\":true,\"burn\":{\"id\":91},\"post\":{\"id\":92}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            Check.Equal("/api/mystral/link/status", path);
+            statusCalls++;
+            if (mode == 1)
+            {
+                throw new HttpRequestException("server offline");
+            }
+
+            return Json(new
+            {
+                linked = true,
+                username = "listener",
+                name = mode == 2 ? "Updated Listener" : "Cached Listener",
+                avatar_url = mode == 2 ? "/avatars/new.png" : "/avatars/cached.png",
+                cd_count = mode == 2 ? 8 : 7
+            });
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using (var first = new GlobeConnectionService(apiClient, secureStore, settings))
+        {
+            Check.True(first.ValidateAsync().GetAwaiter().GetResult());
+            first.CacheAvatar(first.State.Profile!, [1, 2, 3, 4]);
+        }
+
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        Check.True(connection.State.IsLinked);
+        Check.False(connection.State.CanShare);
+        Check.Equal("Cached Listener", connection.State.Profile!.DisplayName);
+        Check.Sequence(new byte[] { 1, 2, 3, 4 }, connection.GetCachedAvatar(connection.State.Profile.AvatarUrl)!);
+
+        var outageWarnings = 0;
+        connection.ServerUnavailable += (_, _) => outageWarnings++;
+        mode = 1;
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(GlobeConnectionStatus.Offline, connection.State.Status);
+        Check.True(connection.State.IsLinked);
+        Check.False(connection.State.CanShare);
+        Check.True(connection.HasStoredToken);
+        Check.True(settings.Settings.Social.AutomaticallyShareBurns);
+        Check.Equal(1, outageWarnings);
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(1, outageWarnings);
+
+        mode = 2;
+        var statusCallsBeforeRetry = statusCalls;
+        var offlineRetry = new GlobeBurnShareRequest(
+            "Recovered Album",
+            "Recovered Artist",
+            DateTimeOffset.UtcNow,
+            9,
+            burnId: "offline-retry-burn-id");
+        var retryResult = connection.ShareBurnAsync(offlineRetry).GetAwaiter().GetResult();
+        Check.True(retryResult.Created);
+        Check.Equal(statusCallsBeforeRetry + 1, statusCalls);
+        Check.Equal(1, burnCalls);
+        Check.Sequence(new[] { offlineRetry.BurnId }, retryBurnIds);
+        Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+        Check.True(connection.State.CanShare);
+        Check.Equal("Updated Listener", connection.State.Profile!.DisplayName);
+        Check.Equal(9, connection.State.Profile.CdCount);
+        Check.Null(connection.GetCachedAvatar(connection.State.Profile.AvatarUrl));
+
+        mode = 1;
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(2, outageWarnings);
+
+        var noCacheStore = new MemorySecureCredentialStore();
+        noCacheStore.Write(GlobeConnectionService.TokenCredentialKey, "cached-token");
+        var noCacheSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "no-cache-settings.json"),
+            noCacheStore);
+        noCacheSettings.Save(new AppSettings
+        {
+            Social = new SocialSettings { AutomaticallyShareBurns = true }
+        });
+        using var noCacheConnection = new GlobeConnectionService(
+            apiClient,
+            noCacheStore,
+            noCacheSettings);
+        Check.False(noCacheConnection.State.IsLinked);
+        Check.False(noCacheConnection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(GlobeConnectionStatus.Offline, noCacheConnection.State.Status);
+        Check.True(noCacheConnection.State.IsLinked);
+        Check.True(noCacheConnection.HasStoredToken);
+        Check.True(noCacheSettings.Settings.Social.AutomaticallyShareBurns);
+    }
+
+    public static void DetectsBrowserCancellation()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        var claimCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/claim", request.RequestUri!.AbsolutePath);
+            claimCalls++;
+            if (claimCalls == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.Accepted);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Gone)
+            {
+                Content = new StringContent(
+                    "{\"error\":\"link_code_cancelled\",\"message\":\"this Mystral link request was cancelled\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(
+            apiClient,
+            secureStore,
+            settings,
+            new GlobeConnectionOptions
+            {
+                LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                LinkTimeout = TimeSpan.FromSeconds(1)
+            });
+        Uri? opened = null;
+        GlobeLinkCancelledException? cancellation = null;
+        try
+        {
+            connection.LinkAsync(uri => opened = uri).GetAwaiter().GetResult();
+        }
+        catch (GlobeLinkCancelledException ex)
+        {
+            cancellation = ex;
+        }
+        Check.NotNull(cancellation);
+        Check.Equal("The globe account link was canceled.", cancellation!.Message);
+        Check.NotNull(opened);
+        Check.Equal(2, claimCalls);
+        Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
+        Check.False(connection.HasStoredToken);
+    }
+
+    public static void ReconcilesDuplicateBurnCount()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "duplicate-token");
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        var burnReachedServer = false;
+        var statusCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("duplicate-token", request.Headers.Authorization?.Parameter);
+            if (request.RequestUri!.AbsolutePath == "/api/mystral/burns")
+            {
+                burnReachedServer = true;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "{\"shared\":true,\"created\":false,\"burn\":{\"id\":51,\"postId\":52},\"post\":{\"id\":52}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            Check.Equal("/api/mystral/link/status", request.RequestUri.AbsolutePath);
+            statusCalls++;
+            return Json(new
+            {
+                linked = true,
+                username = "duplicate-listener",
+                name = "Duplicate Listener",
+                avatar_url = "/avatars/duplicate.png",
+                cd_count = burnReachedServer ? 1 : 0
+            });
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(0, connection.State.Profile!.CdCount);
+
+        var retryRequest = new GlobeBurnShareRequest(
+            "Recovered Album",
+            "Recovered Artist",
+            DateTimeOffset.UtcNow,
+            10,
+            burnId: "lost-response-burn");
+        var duplicate = connection.ShareBurnAsync(retryRequest).GetAwaiter().GetResult();
+        Check.False(duplicate.Created);
+        Check.Equal(2, statusCalls);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+
+        using var falseSuccessHttpClient = new HttpClient(new FakeHttpMessageHandler(_ => Json(new
+        {
+            shared = false,
+            created = false
+        })));
+        using var falseSuccessApiClient = new GlobeApiClient(
+            falseSuccessHttpClient,
+            new Uri("http://localhost:3000/"));
+        Check.Throws<GlobeApiException>(() =>
+            falseSuccessApiClient.ShareBurnAsync("token", retryRequest).GetAwaiter().GetResult());
+    }
+
+    public static void RecoversPendingAcknowledgement()
+    {
+        RunScenario(cancelDuringAcknowledgement: false, statusCanRecoverLostAcknowledgement: false);
+        RunScenario(cancelDuringAcknowledgement: true, statusCanRecoverLostAcknowledgement: false);
+        RunScenario(cancelDuringAcknowledgement: false, statusCanRecoverLostAcknowledgement: true);
+
+        static void RunScenario(
+            bool cancelDuringAcknowledgement,
+            bool statusCanRecoverLostAcknowledgement)
+        {
+            using var temp = TempDir.Create();
+            var secureStore = new MemorySecureCredentialStore();
+            var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+            using var cancellation = new CancellationTokenSource();
+            var claimCalls = 0;
+            var acknowledgeCalls = 0;
+            var statusCalls = 0;
+            var acknowledgementAvailable = false;
+            var handler = new FakeHttpMessageHandler(request =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                if (path == "/api/mystral/link/claim")
+                {
+                    claimCalls++;
+                    return claimCalls == 1
+                        ? new HttpResponseMessage(HttpStatusCode.Accepted)
+                        : Json(new
+                        {
+                            linked = true,
+                            token = "pending-ack-token",
+                            username = "pending-listener",
+                            name = "Pending Listener",
+                            avatar_url = "/avatars/pending.png",
+                            cd_count = 3
+                        });
+                }
+
+                Check.Equal("pending-ack-token", request.Headers.Authorization?.Parameter);
+                if (path == "/api/mystral/link/ack")
+                {
+                    acknowledgeCalls++;
+                    Check.Equal(
+                        "pending-ack-token",
+                        secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+                    if (!acknowledgementAvailable)
+                    {
+                        if (cancelDuringAcknowledgement)
+                        {
+                            cancellation.Cancel();
+                            throw new OperationCanceledException(cancellation.Token);
+                        }
+
+                        throw new HttpRequestException("ack response was lost");
+                    }
+
+                    return Json(new { linked = true, acknowledged = true });
+                }
+
+                Check.Equal("/api/mystral/link/status", path);
+                statusCalls++;
+                if (!acknowledgementAvailable && !statusCanRecoverLostAcknowledgement)
+                {
+                    throw new HttpRequestException("status response was also lost");
+                }
+
+                return Json(new
+                {
+                    linked = true,
+                    username = "pending-listener",
+                    name = "Recovered Listener",
+                    avatar_url = "/avatars/recovered.png",
+                    cd_count = 4
+                });
+            });
+
+            using var httpClient = new HttpClient(handler);
+            using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+            using var connection = new GlobeConnectionService(
+                apiClient,
+                secureStore,
+                settings,
+                new GlobeConnectionOptions
+                {
+                    LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                    LinkTimeout = TimeSpan.FromSeconds(1),
+                    StatusPollInterval = TimeSpan.FromHours(1)
+                });
+
+            if (statusCanRecoverLostAcknowledgement)
+            {
+                var recoveredDuringLink = connection.LinkAsync(_ => { }).GetAwaiter().GetResult();
+                Check.Equal("Recovered Listener", recoveredDuringLink.DisplayName);
+                Check.Equal(3, acknowledgeCalls);
+                Check.Equal(1, statusCalls);
+                Check.True(connection.HasStoredToken);
+                Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+                Check.True(connection.State.CanShare);
+                Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+                return;
+            }
+
+            if (cancelDuringAcknowledgement)
+            {
+                Check.Throws<OperationCanceledException>(() =>
+                    connection.LinkAsync(_ => { }, cancellation.Token).GetAwaiter().GetResult());
+                Check.Equal(1, acknowledgeCalls);
+                Check.Equal(0, statusCalls);
+            }
+            else
+            {
+                Check.Throws<GlobeUnavailableException>(() =>
+                    connection.LinkAsync(_ => { }).GetAwaiter().GetResult());
+                Check.Equal(3, acknowledgeCalls);
+                Check.Equal(1, statusCalls);
+            }
+
+            Check.True(connection.HasStoredToken);
+            Check.Equal("pending-ack-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+            Check.Equal("pending", secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+            Check.Equal(GlobeConnectionStatus.Offline, connection.State.Status);
+            Check.True(connection.State.IsLinked);
+            Check.False(connection.State.CanShare);
+
+            acknowledgementAvailable = true;
+            Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+            Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+            Check.Equal("Recovered Listener", connection.State.Profile!.DisplayName);
+            Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+        }
+    }
+
+    public static void TreatsMissingEndpointsAsFailures()
+    {
+        using var temp = TempDir.Create();
+
+        var claimStore = new MemorySecureCredentialStore();
+        var claimSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "claim-settings.json"),
+            claimStore);
+        using (var claimHttpClient = new HttpClient(new FakeHttpMessageHandler(_ =>
+                   new HttpResponseMessage(HttpStatusCode.NotFound)
+                   {
+                       Content = new StringContent(
+                           "{\"error\":\"route_not_found\"}",
+                           Encoding.UTF8,
+                           "application/json")
+                   })))
+        using (var claimApiClient = new GlobeApiClient(
+                   claimHttpClient,
+                   new Uri("http://localhost:3000/")))
+        using (var claimConnection = new GlobeConnectionService(
+                   claimApiClient,
+                   claimStore,
+                   claimSettings))
+        {
+            var browserOpened = false;
+            Check.Throws<GlobeApiException>(() =>
+                claimConnection.LinkAsync(_ => browserOpened = true).GetAwaiter().GetResult());
+            Check.False(browserOpened);
+            Check.False(claimConnection.HasStoredToken);
+            Check.Equal(GlobeConnectionStatus.Unlinked, claimConnection.State.Status);
+        }
+
+        var revokeStore = new MemorySecureCredentialStore();
+        revokeStore.Write(GlobeConnectionService.TokenCredentialKey, "live-revoke-token");
+        var revokeSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "revoke-settings.json"),
+            revokeStore);
+        using var revokeHttpClient = new HttpClient(new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/revoke", request.RequestUri!.AbsolutePath);
+            Check.Equal("live-revoke-token", request.Headers.Authorization?.Parameter);
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent(
+                    "{\"error\":\"route_not_found\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }));
+        using var revokeApiClient = new GlobeApiClient(
+            revokeHttpClient,
+            new Uri("http://localhost:3000/"));
+        using var revokeConnection = new GlobeConnectionService(
+            revokeApiClient,
+            revokeStore,
+            revokeSettings);
+        Check.Throws<GlobeApiException>(() =>
+            revokeConnection.UnlinkAsync().GetAwaiter().GetResult());
+        Check.True(revokeConnection.HasStoredToken);
+        Check.Equal("live-revoke-token", revokeStore.Read(GlobeConnectionService.TokenCredentialKey));
+    }
+
+    public static void ValidatesAvatarDimensions()
+    {
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(256, 256));
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8192, 4096));
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(20, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(0, 256));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8193, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8192, 4097));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(21, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(int.MaxValue, int.MaxValue));
+
+        using var httpClient = new HttpClient(new FakeHttpMessageHandler(_ => Json(new
+        {
+            linked = true,
+            username = "safe-user",
+            name = "Safe User",
+            avatar_url = "https://untrusted.example/private-resource",
+            cd_count = 0
+        })));
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        var profile = apiClient.GetStatusAsync("safe-token").GetAwaiter().GetResult();
+        Check.Equal(string.Empty, profile.AvatarUrl);
     }
 }
 
@@ -359,6 +1388,17 @@ static class ModelTests
         Check.Equal(DateTimeOffset.FromUnixTimeSeconds(0).LocalDateTime.ToString("yyyy-MM-dd"), new ScrobbleRecord { Timestamp = 0 }.FormattedTime[..10]);
         Check.False(new ScrobbleRecord().IsSelected);
 
+        var globeBurn = GlobeBurnShareRequest.FromDraft(new BurnTrackDraft
+        {
+            SourcePath = "song.wav",
+            Album = " ",
+            Artist = "",
+            TrackTotal = "9999"
+        });
+        Check.Equal("Unknown album", globeBurn.Album);
+        Check.Equal("Unknown artist", globeBurn.Artist);
+        Check.Equal(GlobeBurnShareRequest.MaximumTrackCount, globeBurn.TrackCount);
+
         var lines = new[] { new LyricLine(TimeSpan.Zero, "line") };
         Check.Equal(LyricsStatus.Synced, LyricsResult.Synced(lines).Status);
         Check.Same(lines, LyricsResult.Synced(lines).SyncedLines);
@@ -388,6 +1428,575 @@ static class ArtworkTintTests
         Check.NotNull(tint);
         Check.True(tint!.Value.R > tint.Value.G);
         Check.True(tint.Value.G > tint.Value.B);
+    }
+}
+
+static class CdArtworkComposerTests
+{
+    public static void ComposesMaskedLayerStack()
+    {
+        var transparent = Pixel(0, 0, 0, 0);
+        var composed = CdArtworkComposer.Compose(
+            Pixel(100, 150, 200, 255),
+            Pixel(255, 255, 255, 255),
+            Pixel(128, 255, 64, 255),
+            Pixel(0, 128, 255, 255),
+            transparent);
+
+        Check.True(composed.IsFrozen);
+        Check.Equal(1, composed.PixelWidth);
+        Check.Equal(1, composed.PixelHeight);
+        Check.Sequence(new byte[] { 50, 203, 255, 255 }, ReadPixel(composed));
+
+        var halfMasked = CdArtworkComposer.Compose(
+            Pixel(30, 60, 90, 200),
+            Pixel(128, 128, 128, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Sequence(new byte[] { 30, 60, 90, 100 }, ReadPixel(halfMasked));
+
+        var fullyMasked = CdArtworkComposer.Compose(
+            Pixel(30, 60, 90, 255),
+            Pixel(0, 0, 0, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Equal((byte)0, ReadPixel(fullyMasked)[3]);
+
+        var partialAlpha = CdArtworkComposer.Compose(
+            Pixel(0, 0, 255, 128),
+            Pixel(255, 255, 255, 255),
+            transparent,
+            transparent,
+            Pixel(255, 0, 0, 128));
+        Check.Sequence(new byte[] { 170, 0, 85, 192 }, ReadPixel(partialAlpha));
+
+        var centerCrop = CdArtworkComposer.Compose(
+            Bitmap(2, 1,
+            [
+                0, 0, 0, 255,
+                255, 255, 255, 255
+            ]),
+            Pixel(255, 255, 255, 255),
+            transparent,
+            transparent,
+            transparent);
+        Check.Sequence(new byte[] { 128, 128, 128, 255 }, ReadPixel(centerCrop));
+    }
+
+    private static BitmapSource Pixel(byte blue, byte green, byte red, byte alpha)
+    {
+        return Bitmap(1, 1, [blue, green, red, alpha]);
+    }
+
+    private static BitmapSource Bitmap(int width, int height, byte[] pixels)
+    {
+        var bitmap = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            width * 4);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private static byte[] ReadPixel(BitmapSource bitmap)
+    {
+        var pixel = new byte[4];
+        bitmap.CopyPixels(pixel, 4, 0);
+        return pixel;
+    }
+}
+
+static class ImageArtworkLoaderTests
+{
+    public static void ValidatesDecodedImageContent()
+    {
+        using var temp = TempDir.Create();
+        var loader = new ImageArtworkLoader();
+        var png = Png(
+            width: 2,
+            height: 1,
+            pixels:
+            [
+                20, 40, 220, 255,
+                180, 80, 10, 255
+            ]);
+        var validPath = Path.Combine(temp.Path, "cover.not-an-image-extension");
+        File.WriteAllBytes(validPath, png);
+
+        var artwork = loader.LoadFileAsync(validPath).GetAwaiter().GetResult();
+
+        Check.Sequence(png, artwork.Data);
+        Check.True(artwork.Preview.IsFrozen);
+        Check.Equal(2, artwork.Preview.PixelWidth);
+        Check.Equal(1, artwork.Preview.PixelHeight);
+
+        var fakeImagePath = Path.Combine(temp.Path, "fake.png");
+        File.WriteAllText(fakeImagePath, "this is not an image");
+        Check.Throws<InvalidDataException>(() =>
+            loader.LoadFileAsync(fakeImagePath).GetAwaiter().GetResult());
+        Check.Throws<InvalidDataException>(() =>
+            loader.LoadAsync([]).GetAwaiter().GetResult());
+    }
+}
+
+static class MusicBrainzServiceTests
+{
+    public static void MapsRecordingAndArtworkResponses()
+    {
+        var coverBytes = new byte[] { 1, 3, 5, 7 };
+        var discBytes = new byte[] { 2, 4, 6, 8 };
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal(HttpMethod.Get, request.Method);
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Contains("Mystral/", request.Headers.UserAgent.ToString());
+                var query = Uri.UnescapeDataString(uri.Query);
+                Check.Contains("recording:\"Requested title\"", query);
+                Check.Contains("artist:\"Lead & Guest\"", query);
+                Check.Contains("release:\"Wanted album\"", query);
+                return JsonText("""
+                    {
+                      "recordings": [
+                        {
+                          "score": "100",
+                          "title": "Wrong result",
+                          "length": 180000,
+                          "artist-credit": [{ "name": "Someone else" }],
+                          "releases": []
+                        },
+                        {
+                          "score": "85",
+                          "title": "Mapped title",
+                          "length": 211000,
+                          "first-release-date": "1998",
+                          "artist-credit": [
+                            { "name": "Lead", "joinphrase": " & " },
+                            { "artist": { "name": "Guest" } }
+                          ],
+                          "tags": [
+                            { "count": 2, "name": "ambient" },
+                            { "count": 12, "name": "rock" }
+                          ],
+                          "releases": [
+                            {
+                              "id": "release-other",
+                              "title": "Other album",
+                              "status": "Official",
+                              "media": [{ "format": "CD", "track-count": 9, "track": [{ "number": "1" }] }]
+                            },
+                            {
+                              "id": "release-good",
+                              "title": "Wanted album",
+                              "status": "Official",
+                              "date": "2001-02-03",
+                              "release-group": { "id": "group-good", "primary-type": "Album" },
+                              "media": [{ "format": "CD", "track-count": "12", "track": [{ "number": "07" }] }]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath.Equals("/release/release-good/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        {
+                          "approved": true,
+                          "front": true,
+                          "types": ["Front"],
+                          "image": "http://assets.test/cover-original",
+                          "thumbnails": { "1200": "http://assets.test/cover-1200" }
+                        },
+                        {
+                          "approved": true,
+                          "front": false,
+                          "types": ["Medium"],
+                          "image": "http://assets.test/disc-original",
+                          "thumbnails": { "500": "http://assets.test/disc-500" }
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/cover-1200")))
+            {
+                return Bytes(coverBytes);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/disc-500")))
+            {
+                return Bytes(discBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchTrackDataAsync(
+                "Requested title",
+                "Lead & Guest",
+                "Wanted album",
+                "",
+                TimeSpan.FromSeconds(211))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Equal("Mapped title", result!.Title);
+        Check.Equal("Lead & Guest", result.Artist);
+        Check.Equal("rock", result.Genre);
+        Check.Equal("2001", result.Year);
+        Check.Equal("Wanted album", result.Album);
+        Check.Equal("07", result.TrackNumber);
+        Check.Equal("12", result.TrackTotal);
+        Check.Sequence(coverBytes, result.CoverArtwork!);
+        Check.Sequence(discBytes, result.DiscArtwork!);
+        Check.Equal(4, handler.Count);
+
+        var empty = service.FetchTrackDataAsync("", "Artist", "Album", "", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(empty);
+        Check.Equal(4, handler.Count);
+
+        var survivingDiscBytes = new byte[] { 9, 8, 7, 6 };
+        var coverFallbackBytes = new byte[] { 5, 5, 5, 5 };
+        var partialArtworkHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "score": 100,
+                        "title": "Resilient title",
+                        "artist-credit": [{ "name": "Resilient artist" }],
+                        "releases": [{ "id": "resilient-release", "title": "Resilient album", "media": [] }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.AbsolutePath.Equals("/release/resilient-release/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        { "approved": true, "front": true, "types": ["Front"], "image": "https://assets.test/failing-cover", "thumbnails": {} },
+                        { "approved": true, "front": false, "types": ["Medium"], "image": "https://assets.test/working-disc", "thumbnails": {} }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/failing-cover")))
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            // When the indexed front thumbnail fails, the release/front-500 endpoint
+            // is the next fallback and can still recover the cover.
+            if (uri.AbsolutePath.Equals("/release/resilient-release/front-500", StringComparison.Ordinal))
+            {
+                return Bytes(coverFallbackBytes);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/working-disc")))
+            {
+                return Bytes(survivingDiscBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+        using var partialArtworkClient = new HttpClient(partialArtworkHandler);
+        using var partialArtworkService = new MusicBrainzService(partialArtworkClient);
+        var partialArtworkResult = partialArtworkService.FetchTrackDataAsync(
+                "Resilient title",
+                "Resilient artist",
+                "Resilient album",
+                "",
+                TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.NotNull(partialArtworkResult);
+        Check.Sequence(coverFallbackBytes, partialArtworkResult!.CoverArtwork!);
+        Check.Sequence(survivingDiscBytes, partialArtworkResult.DiscArtwork!);
+        Check.Equal(5, partialArtworkHandler.Count);
+
+        using var malformedClient = new HttpClient(new FakeHttpMessageHandler(_ => JsonText("{")));
+        using var malformedService = new MusicBrainzService(malformedClient);
+        Check.Throws<InvalidDataException>(() =>
+            malformedService.FetchTrackDataAsync(
+                    "Song",
+                    "Artist",
+                    "",
+                    "",
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult());
+    }
+}
+
+static class BurnMetadataValidationTests
+{
+    public static void ValidatesFieldsAndSuggestedFileNames()
+    {
+        var draft = new BurnTrackDraft
+        {
+            SourcePath = @"C:\Music\original.flac",
+            Title = new string('T', BurnTrackDraft.MaxTitleLength),
+            Artist = new string('A', BurnTrackDraft.MaxArtistLength),
+            Album = new string('L', BurnTrackDraft.MaxAlbumLength),
+            Genre = new string('G', BurnTrackDraft.MaxGenreLength),
+            Year = "2026",
+            TrackNumber = "9998",
+            TrackTotal = "9999"
+        };
+
+        AudioTagService.ValidateDraft(draft);
+
+        draft.Title += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Title = "AC/DC: Live?";
+
+        draft.Artist += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Artist = "Artist";
+
+        draft.Album += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Album = "Album";
+
+        draft.Genre += "x";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Genre = "Genre";
+
+        draft.Year = "20A6";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.Year = "2026";
+
+        draft.TrackNumber = "seven";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.TrackNumber = "0";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.TrackNumber = "12";
+        draft.TrackTotal = "11";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+
+        draft.TrackNumber = "7";
+        draft.TrackTotal = "12";
+        AudioTagService.ValidateDraft(draft);
+        Check.Equal("AC_DC_ Live_.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+
+        draft.Title = "CON";
+        Check.Equal("_CON.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+        draft.Title = "  ...  ";
+        Check.Equal("Untitled.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
+        draft.Title = new string('x', 300);
+        var boundedName = AudioTagService.CreateSuggestedOutputFileName(draft);
+        Check.Equal(255, boundedName.Length);
+        Check.True(boundedName.EndsWith(".flac", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+static class AudioTagServiceTests
+{
+    public static void ReadsAndSavesMetadataWithoutTouchingSource()
+    {
+        using var temp = TempDir.Create();
+        var sourcePath = Path.Combine(temp.Path, "original.wav");
+        var sourceBytes = PcmWave(duration: TimeSpan.FromSeconds(1));
+        File.WriteAllBytes(sourcePath, sourceBytes);
+
+        var service = new AudioTagService();
+        var draft = service.ReadAsync(sourcePath).GetAwaiter().GetResult();
+
+        Check.Equal(Path.GetFullPath(sourcePath), draft.SourcePath);
+        Check.True(draft.Duration >= TimeSpan.FromMilliseconds(990));
+        Check.True(draft.Duration <= TimeSpan.FromMilliseconds(1010));
+        Check.Equal("", draft.Title);
+        Check.Equal("", draft.Artist);
+
+        draft.Title = "Burned title";
+        draft.Artist = "Burned artist";
+        draft.Genre = "Rock";
+        draft.Year = "1995";
+        draft.Album = "Burned album";
+        draft.TrackNumber = "7";
+        draft.TrackTotal = "12";
+        var artworkLoader = new ImageArtworkLoader();
+        var coverPng = Png(1, 1, [10, 20, 30, 255]);
+        var discPng = Png(1, 1, [40, 50, 60, 255]);
+        draft.CoverArtwork = artworkLoader.LoadAsync(coverPng).GetAwaiter().GetResult();
+        draft.DiscArtwork = artworkLoader.LoadAsync(discPng).GetAwaiter().GetResult();
+        draft.CoverArtworkChanged = true;
+        draft.DiscArtworkChanged = true;
+        var destinationPath = Path.Combine(temp.Path, "burned.wav");
+
+        service.SaveCopyAsync(draft, destinationPath).GetAwaiter().GetResult();
+
+        Check.Sequence(sourceBytes, File.ReadAllBytes(sourcePath));
+        Check.True(File.Exists(destinationPath));
+        var saved = service.ReadAsync(destinationPath).GetAwaiter().GetResult();
+        Check.Equal("Burned title", saved.Title);
+        Check.Equal("Burned artist", saved.Artist);
+        Check.Equal("Rock", saved.Genre);
+        Check.Equal("1995", saved.Year);
+        Check.Equal("Burned album", saved.Album);
+        Check.Equal("7", saved.TrackNumber);
+        Check.Equal("12", saved.TrackTotal);
+        Check.NotNull(saved.CoverArtwork);
+        Check.NotNull(saved.DiscArtwork);
+
+        // The cover is the only embedded picture and it is a front cover. The disc art
+        // must NOT be an embedded picture (players would render it as the cover);
+        // it lives in a private tag field instead.
+        var savedTrack = new ATL.Track(destinationPath);
+        Check.Equal(1, savedTrack.EmbeddedPictures.Count);
+        Check.Equal(ATL.PictureInfo.PIC_TYPE.Front, savedTrack.EmbeddedPictures[0].PicType);
+        Check.False(savedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+        var discField = savedTrack.AdditionalFields
+            .FirstOrDefault(field => field.Key.Contains("MYSTRAL_DISC_ART", StringComparison.OrdinalIgnoreCase))
+            .Value;
+        Check.NotNull(discField);
+        Check.Sequence(discPng, Convert.FromBase64String(discField!));
+
+        // Replacing only the cover must keep exactly one front-cover picture and leave
+        // the disc art field untouched (no CD picture is ever introduced).
+        var replacedCoverBytes = Png(1, 1, [11, 22, 33, 255]);
+        saved.CoverArtwork = artworkLoader.LoadAsync(replacedCoverBytes).GetAwaiter().GetResult();
+        saved.CoverArtworkChanged = true;
+        saved.DiscArtworkChanged = false;
+        var coverReplacedPath = Path.Combine(temp.Path, "cover-replaced.wav");
+        service.SaveCopyAsync(saved, coverReplacedPath).GetAwaiter().GetResult();
+        var coverReplacedTrack = new ATL.Track(coverReplacedPath);
+        Check.Equal(1, coverReplacedTrack.EmbeddedPictures.Count);
+        Check.Equal(ATL.PictureInfo.PIC_TYPE.Front, coverReplacedTrack.EmbeddedPictures[0].PicType);
+        Check.True(coverReplacedTrack.EmbeddedPictures[0].PictureData.AsSpan().SequenceEqual(replacedCoverBytes));
+        Check.False(coverReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+        var coverReplacedReadback = service.ReadAsync(coverReplacedPath).GetAwaiter().GetResult();
+        Check.NotNull(coverReplacedReadback.DiscArtwork);
+
+        // Backward compatibility: a legacy file that stored the disc art as a CD
+        // picture must still be read as disc art (not as the cover).
+        var legacyPath = Path.Combine(temp.Path, "legacy-disc.wav");
+        File.WriteAllBytes(legacyPath, PcmWave(duration: TimeSpan.FromSeconds(1)));
+        var legacyCoverPng = Png(1, 1, [1, 2, 3, 255]);
+        var legacyDiscPng = Png(1, 1, [4, 5, 6, 255]);
+        var legacyTrack = new ATL.Track(legacyPath);
+        legacyTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(legacyCoverPng, ATL.PictureInfo.PIC_TYPE.Front));
+        legacyTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(legacyDiscPng, ATL.PictureInfo.PIC_TYPE.CD));
+        Check.True(legacyTrack.Save());
+        var legacyRead = service.ReadAsync(legacyPath).GetAwaiter().GetResult();
+        Check.NotNull(legacyRead.CoverArtwork);
+        Check.Sequence(legacyCoverPng, legacyRead.CoverArtwork!.Data);
+        Check.NotNull(legacyRead.DiscArtwork);
+        Check.Sequence(legacyDiscPng, legacyRead.DiscArtwork!.Data);
+        // Re-saving a legacy file migrates the disc art out of the CD picture.
+        legacyRead.DiscArtworkChanged = true;
+        var legacyMigratedPath = Path.Combine(temp.Path, "legacy-migrated.wav");
+        service.SaveCopyAsync(legacyRead, legacyMigratedPath).GetAwaiter().GetResult();
+        var legacyMigratedTrack = new ATL.Track(legacyMigratedPath);
+        Check.False(legacyMigratedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+
+        saved.CoverArtwork = null;
+        saved.DiscArtwork = null;
+        saved.CoverArtworkChanged = true;
+        saved.DiscArtworkChanged = true;
+        var artworkRemovedPath = Path.Combine(temp.Path, "artwork-removed.wav");
+        service.SaveCopyAsync(saved, artworkRemovedPath).GetAwaiter().GetResult();
+        var artworkRemoved = service.ReadAsync(artworkRemovedPath).GetAwaiter().GetResult();
+        Check.Null(artworkRemoved.CoverArtwork);
+        Check.Null(artworkRemoved.DiscArtwork);
+
+        var fallbackPath = Path.Combine(temp.Path, "fallback-artwork.wav");
+        File.WriteAllBytes(fallbackPath, PcmWave(duration: TimeSpan.FromSeconds(1)));
+        var displayedFallback = Png(1, 1, [70, 80, 90, 255]);
+        var unrelatedArtwork = Png(1, 1, [100, 110, 120, 255]);
+        var fallbackTrack = new ATL.Track(fallbackPath);
+        fallbackTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(displayedFallback, ATL.PictureInfo.PIC_TYPE.Back));
+        fallbackTrack.EmbeddedPictures.Add(ATL.PictureInfo.fromBinaryData(unrelatedArtwork, ATL.PictureInfo.PIC_TYPE.Leaflet));
+        Check.True(fallbackTrack.Save());
+
+        var fallbackDraft = service.ReadAsync(fallbackPath).GetAwaiter().GetResult();
+        Check.True(fallbackDraft.CoverArtworkOriginalType == ATL.PictureInfo.PIC_TYPE.Back);
+        fallbackDraft.CoverArtwork = null;
+        fallbackDraft.CoverArtworkChanged = true;
+        var fallbackRemovedPath = Path.Combine(temp.Path, "fallback-artwork-removed.wav");
+        service.SaveCopyAsync(fallbackDraft, fallbackRemovedPath).GetAwaiter().GetResult();
+
+        var fallbackRemovedTrack = new ATL.Track(fallbackRemovedPath);
+        Check.False(fallbackRemovedTrack.EmbeddedPictures.Any(picture => picture.PicType == ATL.PictureInfo.PIC_TYPE.Back));
+        Check.True(fallbackRemovedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Leaflet
+            && picture.PictureData.AsSpan().SequenceEqual(unrelatedArtwork)));
+
+        var replacementArtwork = Png(1, 1, [130, 140, 150, 255]);
+        var replacementDraft = service.ReadAsync(fallbackPath).GetAwaiter().GetResult();
+        replacementDraft.CoverArtwork = new ImageArtworkLoader()
+            .LoadAsync(replacementArtwork)
+            .GetAwaiter()
+            .GetResult();
+        replacementDraft.CoverArtworkChanged = true;
+        var fallbackReplacedPath = Path.Combine(temp.Path, "fallback-artwork-replaced.wav");
+        service.SaveCopyAsync(replacementDraft, fallbackReplacedPath).GetAwaiter().GetResult();
+
+        var fallbackReplacedTrack = new ATL.Track(fallbackReplacedPath);
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Back
+            && picture.PictureData.AsSpan().SequenceEqual(displayedFallback)));
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Leaflet
+            && picture.PictureData.AsSpan().SequenceEqual(unrelatedArtwork)));
+        Check.True(fallbackReplacedTrack.EmbeddedPictures.Any(picture =>
+            picture.PicType == ATL.PictureInfo.PIC_TYPE.Front
+            && picture.PictureData.AsSpan().SequenceEqual(replacementArtwork)));
+
+        draft.Year = "2001-04";
+        var invalidDatePath = Path.Combine(temp.Path, "invalid-year.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, invalidDatePath).GetAwaiter().GetResult());
+        Check.False(File.Exists(invalidDatePath));
+
+        draft.Year = "2001";
+        draft.TrackTotal = "6";
+        var invalidTrackTotalPath = Path.Combine(temp.Path, "invalid-track-total.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, invalidTrackTotalPath).GetAwaiter().GetResult());
+        Check.False(File.Exists(invalidTrackTotalPath));
+
+        draft.TrackTotal = "twelve";
+        var malformedTrackTotalPath = Path.Combine(temp.Path, "malformed-track-total.wav");
+        Check.Throws<InvalidDataException>(() =>
+            service.SaveCopyAsync(draft, malformedTrackTotalPath).GetAwaiter().GetResult());
+        Check.False(File.Exists(malformedTrackTotalPath));
+        Check.False(Directory.EnumerateFiles(temp.Path, "*.mystral*", SearchOption.TopDirectoryOnly).Any());
+
+        var disguisedText = Path.Combine(temp.Path, "not-audio.wav");
+        File.WriteAllText(disguisedText, "RIFF is not enough to make this audio");
+        Check.Throws<InvalidDataException>(() =>
+            service.ReadAsync(disguisedText).GetAwaiter().GetResult());
     }
 }
 
@@ -442,6 +2051,66 @@ static class Samples
             Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json")
         };
     }
+
+    public static HttpResponseMessage JsonText(string value)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(value, Encoding.UTF8, "application/json")
+        };
+    }
+
+    public static HttpResponseMessage Bytes(byte[] value)
+    {
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(value)
+        };
+    }
+
+    public static byte[] Png(int width, int height, byte[] pixels)
+    {
+        var bitmap = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            pixels,
+            width * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    public static byte[] PcmWave(TimeSpan duration, int sampleRate = 8000)
+    {
+        const short channelCount = 1;
+        const short bitsPerSample = 16;
+        var sampleCount = checked((int)Math.Round(duration.TotalSeconds * sampleRate));
+        var dataLength = checked(sampleCount * channelCount * (bitsPerSample / 8));
+        using var stream = new MemoryStream(capacity: 44 + dataLength);
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(36 + dataLength);
+        writer.Write(Encoding.ASCII.GetBytes("WAVE"));
+        writer.Write(Encoding.ASCII.GetBytes("fmt "));
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write(channelCount);
+        writer.Write(sampleRate);
+        writer.Write(sampleRate * channelCount * (bitsPerSample / 8));
+        writer.Write((short)(channelCount * (bitsPerSample / 8)));
+        writer.Write(bitsPerSample);
+        writer.Write(Encoding.ASCII.GetBytes("data"));
+        writer.Write(dataLength);
+        writer.Write(new byte[dataLength]);
+        writer.Flush();
+        return stream.ToArray();
+    }
 }
 
 sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
@@ -452,6 +2121,35 @@ sealed class FakeHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage
     {
         Count++;
         return Task.FromResult(respond(request));
+    }
+}
+
+sealed class MemorySecureCredentialStore : ISecureCredentialStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public string? Read(string key)
+    {
+        lock (_values)
+        {
+            return _values.GetValueOrDefault(key);
+        }
+    }
+
+    public void Write(string key, string value)
+    {
+        lock (_values)
+        {
+            _values[key] = value;
+        }
+    }
+
+    public void Delete(string key)
+    {
+        lock (_values)
+        {
+            _values.Remove(key);
+        }
     }
 }
 
@@ -564,5 +2262,20 @@ static class Check
         {
             throw new InvalidOperationException($"Expected '{actual}' to contain '{expected}'.");
         }
+    }
+
+    public static void Throws<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 }

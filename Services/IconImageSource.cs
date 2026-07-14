@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -31,6 +32,21 @@ public static class IconImageSource
     public static ImageSource LoadBestFitFrame(string relativePath, int targetSize)
     {
         return LoadFrame(relativePath, targetSize);
+    }
+
+    public static ImageSource LoadOverlayIcon(
+        string primaryRelativePath,
+        string badgeRelativePath)
+    {
+        var primary = LoadBestFitFrame(primaryRelativePath, 32);
+        var badge = LoadBestFitFrame(badgeRelativePath, 16);
+        var drawing = new DrawingGroup();
+        drawing.Children.Add(new ImageDrawing(primary, new Rect(0, 0, 29, 29)));
+        drawing.Children.Add(new ImageDrawing(badge, new Rect(16, 16, 16, 16)));
+        drawing.Freeze();
+        var source = new DrawingImage(drawing);
+        source.Freeze();
+        return source;
     }
 
     private static ImageSource LoadFrame(string relativePath, int? targetSize)

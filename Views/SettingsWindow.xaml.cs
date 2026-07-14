@@ -6,6 +6,9 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Mystral.Configuration;
 using Mystral.Models;
 using Mystral.Services;
@@ -14,17 +17,42 @@ namespace Mystral.Views;
 
 public partial class SettingsWindow : Window
 {
+    private const int MaximumSocialAvatarDownloadBytes = 5 * 1024 * 1024;
+    private const int MaximumSocialAvatarSourceDimension = 8192;
+    private const long MaximumSocialAvatarSourcePixels = 32L * 1024 * 1024;
+    private const int MaximumSocialAvatarAspectRatio = 20;
+    private const int SocialAvatarDecodeDimension = 256;
     private readonly AppSettingsService _settingsService;
     private readonly LastFmService _lastFmService;
+    private readonly GlobeConnectionService _globeConnectionService;
     private bool _isLoadingSettings;
     private bool _hasUnsavedChanges;
     private bool _isClosingConfirmed;
     private bool _isSaving;
+    private bool _isCloseRequestPending;
+    private bool _isSocialAccountLinked;
+    private bool _isSocialSharingAvailable;
+    private bool _isSocialSigningIn;
+    private bool _isGlobeApprovalPending;
+    private bool _isGlobeApprovalCloseWarningOpen;
+    private bool _startSocialLinkRequested;
+    private long _socialProfileTransitionId;
+    private long _socialSignInTransitionId;
+    private CancellationTokenSource? _socialSignInCancellation;
+    private GlobeProfile? _socialProfile;
+    private ImageSource? _socialProfileImage;
+    private int _socialAvatarGeneration;
 
-    public SettingsWindow(AppSettingsService settingsService, LastFmService lastFmService)
+    internal event EventHandler? CloseRequestCanceled;
+
+    public SettingsWindow(
+        AppSettingsService settingsService,
+        LastFmService lastFmService,
+        GlobeConnectionService globeConnectionService)
     {
         _settingsService = settingsService;
         _lastFmService = lastFmService;
+        _globeConnectionService = globeConnectionService;
 
         InitializeComponent();
 #if DEBUG
@@ -34,14 +62,34 @@ public partial class SettingsWindow : Window
 #endif
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
+        _globeConnectionService.StateChanged += GlobeConnectionService_StateChanged;
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
 
         LocalScrobbleCacheService.Instance.ScrobbleAdded += LocalScrobbleCache_ScrobbleAdded;
         Closed += (s, e) =>
         {
+            CancelSocialSignIn(restoreProfile: false);
+            _globeConnectionService.StateChanged -= GlobeConnectionService_StateChanged;
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
+    }
+
+    internal void ShowSocialSection(bool startLinking = false)
+    {
+        CategoriesListBox.SelectedItem = SocialCategoryItem;
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        Activate();
+        _ = Dispatcher.BeginInvoke(() => _ = RefreshSocialProfileAsync());
+        if (startLinking)
+        {
+            _startSocialLinkRequested = true;
+            _ = Dispatcher.BeginInvoke(TryStartRequestedSocialLink);
+        }
     }
 
     private void LoadSettings()
@@ -58,6 +106,17 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
+        var globeState = _globeConnectionService.State;
+        _isSocialAccountLinked = globeState.IsLinked;
+        _isSocialSharingAvailable = globeState.CanShare;
+        _socialProfile = globeState.Profile;
+        _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
+        AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
+        UpdateSocialPanel(animate: false);
+        if (_socialProfile is not null)
+        {
+            _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
+        }
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
@@ -71,6 +130,7 @@ public partial class SettingsWindow : Window
         
         LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        SocialPanel.Visibility = selectedItem == SocialCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
 
         if (selectedItem == LastFmCategoryItem)
@@ -83,6 +143,15 @@ public partial class SettingsWindow : Window
             SettingsTitleText.Text = "Behavior";
             SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         }
+        else if (selectedItem == SocialCategoryItem)
+        {
+            SettingsTitleText.Text = "Social";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/globe.ico", 16);
+            if (IsLoaded)
+            {
+                _ = RefreshSocialProfileAsync();
+            }
+        }
         else if (selectedItem == HistoryCategoryItem)
         {
             SettingsTitleText.Text = "Playback History";
@@ -92,6 +161,11 @@ public partial class SettingsWindow : Window
     }
 
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
+    {
+        RefreshDirtyState();
+    }
+
+    private void RefreshDirtyState()
     {
         if (_isLoadingSettings)
         {
@@ -112,6 +186,7 @@ public partial class SettingsWindow : Window
     private async Task<bool> SaveSettingsAsync(bool showSuccess = true)
     {
         var settings = CreateSettingsFromFields();
+        var lastFmChanged = settings.LastFm != _settingsService.Settings.LastFm;
         if (!CanSave(settings))
         {
             UpdateLastFmStatus();
@@ -123,7 +198,7 @@ public partial class SettingsWindow : Window
         UpdateDirtyStatus();
         try
         {
-            if (settings.LastFm.IsConfigured)
+            if (lastFmChanged && settings.LastFm.IsConfigured)
             {
                 SetLastFmStatus(
                     settings.LastFm.ScrobblingEnabled
@@ -155,6 +230,14 @@ public partial class SettingsWindow : Window
             }
             return true;
         }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowError(
+                this,
+                "Could not save settings",
+                ex.Message);
+            return false;
+        }
         finally
         {
             _isSaving = false;
@@ -182,8 +265,640 @@ public partial class SettingsWindow : Window
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
                 CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true
+            },
+            Social = new SocialSettings
+            {
+                IsAccountLinked = _isSocialAccountLinked,
+                AutomaticallyShareBurns = _isSocialAccountLinked
+                    && AutomaticallyShareBurnsCheckBox.IsChecked == true
             }
         };
+    }
+
+    private void SocialAd_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = AppMetadata.GlobeBaseUri.AbsoluteUri,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowWarning(this, "Could not open globe", ex.Message);
+        }
+    }
+
+    private async void LinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isSocialSigningIn)
+        {
+            return;
+        }
+
+        if (_isSocialAccountLinked)
+        {
+            ShowGlobeAccountAlreadyLinkedWarning();
+            return;
+        }
+
+        if (_globeConnectionService.HasStoredToken)
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "Checking globe link",
+                "Mystral is still checking the saved globe link. Wait a moment and try again.");
+            return;
+        }
+
+        _startSocialLinkRequested = false;
+        var transitionId = ++_socialSignInTransitionId;
+        using var cancellation = new CancellationTokenSource();
+        _socialSignInCancellation = cancellation;
+        SocialSigningInText.Text = "Waiting for globe approval...";
+        SetSocialSigningInState(true);
+        SetGlobeApprovalPending(true);
+
+        try
+        {
+            var profile = await _globeConnectionService.LinkAsync(
+                approvalUri => Process.Start(new ProcessStartInfo
+                {
+                    FileName = approvalUri.AbsoluteUri,
+                    UseShellExecute = true
+                }),
+                cancellation.Token);
+            SetGlobeApprovalPending(false);
+            if (cancellation.IsCancellationRequested ||
+                transitionId != _socialSignInTransitionId ||
+                !IsLoaded)
+            {
+                return;
+            }
+
+            _isSocialAccountLinked = true;
+            _isSocialSharingAvailable = true;
+            _socialProfile = profile;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+            UpdateSocialPanel(animate: true);
+            _ = RefreshSocialAvatarAsync(profile, animate: true);
+            RefreshDirtyState();
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowConfirmationWithBadge(
+                this,
+                "globe account linked",
+                "Your globe account is now linked to Mystral.",
+                "Resources/user.ico",
+                "Resources/checkmark.ico");
+        }
+        catch (OperationCanceledException)
+        {
+            SetGlobeApprovalPending(false);
+        }
+        catch (GlobeLinkCancelledException)
+        {
+            SetGlobeApprovalPending(false);
+            if (IsLoaded && transitionId == _socialSignInTransitionId)
+            {
+                SetSocialSigningInState(false);
+                AppDialogWindow.ShowError(
+                    this,
+                    "Link canceled",
+                    "The globe account link was canceled.");
+            }
+        }
+        catch (Exception ex)
+        {
+            SetGlobeApprovalPending(false);
+            if (IsLoaded)
+            {
+                SetSocialSigningInState(false);
+                AppDialogWindow.ShowError(this, "Could not link globe", ex.Message);
+            }
+        }
+        finally
+        {
+            if (transitionId == _socialSignInTransitionId)
+            {
+                _socialSignInCancellation = null;
+                SetGlobeApprovalPending(false);
+                SetSocialSigningInState(false);
+            }
+        }
+    }
+
+    private void TryStartRequestedSocialLink()
+    {
+        if (!_startSocialLinkRequested || !IsLoaded)
+        {
+            return;
+        }
+
+        if (_isSocialSigningIn)
+        {
+            _startSocialLinkRequested = false;
+            if (_isSocialAccountLinked && !_isGlobeApprovalPending)
+            {
+                ShowGlobeAccountAlreadyLinkedWarning();
+            }
+            return;
+        }
+
+        if (_isSocialAccountLinked)
+        {
+            if (_globeConnectionService.State.Status == GlobeConnectionStatus.Validating
+                && _globeConnectionService.HasStoredToken)
+            {
+                return;
+            }
+
+            _startSocialLinkRequested = false;
+            ShowGlobeAccountAlreadyLinkedWarning();
+            return;
+        }
+
+        // A cached token may still be completing its initial validation. Wait
+        // for StateChanged instead of opening a second, conflicting flow.
+        if (_globeConnectionService.HasStoredToken)
+        {
+            return;
+        }
+
+        _startSocialLinkRequested = false;
+        LinkSocialAccount_Click(this, new RoutedEventArgs());
+    }
+
+    private async void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
+    {
+        CancelSocialSignIn(restoreProfile: true);
+        if (!_isSocialAccountLinked || _globeConnectionService.State.IsOffline)
+        {
+            return;
+        }
+
+        if (AppDialogWindow.ShowQuestion(
+                this,
+                "Unlink globe account",
+                "Are you sure you want to unlink your account?") != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        SocialSigningInText.Text = "Unlinking from globe...";
+        SetSocialSigningInState(true);
+        try
+        {
+            await _globeConnectionService.UnlinkAsync();
+            _isSocialAccountLinked = false;
+            _isSocialSharingAvailable = false;
+            _socialProfile = null;
+            _socialProfileImage = null;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+            UpdateSocialPanel(animate: true);
+            RefreshDirtyState();
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowConfirmationWithBadge(
+                this,
+                "Account unlinked",
+                "Your account was unlinked successfully.",
+                "Resources/user.ico",
+                "Resources/cross.ico");
+        }
+        catch (Exception ex)
+        {
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowError(this, "Could not unlink globe", ex.Message);
+        }
+        finally
+        {
+            if (IsLoaded)
+            {
+                SetSocialSigningInState(false);
+            }
+        }
+    }
+
+    private void SetSocialSigningInState(bool isSigningIn)
+    {
+        _isSocialSigningIn = isSigningIn;
+        SocialProfileContent.Visibility = isSigningIn
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        SocialSigningInPanel.Visibility = isSigningIn
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AutomaticallyShareBurnsCheckBox.IsEnabled = !isSigningIn
+            && _isSocialAccountLinked
+            && _isSocialSharingAvailable;
+
+        if (isSigningIn)
+        {
+            StartSocialSignInAnimation();
+        }
+        else
+        {
+            StopSocialSignInAnimation();
+        }
+    }
+
+    private void SetGlobeApprovalPending(bool isPending)
+    {
+        _isGlobeApprovalPending = isPending;
+        CloseButton.IsEnabled = !isPending;
+    }
+
+    private void ShowGlobeAccountAlreadyLinkedWarning()
+    {
+        AppDialogWindow.ShowWarning(
+            this,
+            "globe account already linked",
+            "Unlink your current globe account before linking another one.");
+    }
+
+    private void StartSocialSignInAnimation()
+    {
+        const int frameCount = 32;
+        const int frameWidth = 48;
+        const int frameDurationMilliseconds = 58;
+
+        SocialSigningInSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        SocialSigningInSpriteTranslate.X = 0;
+
+        var spriteAnimation = new DoubleAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromMilliseconds(frameCount * frameDurationMilliseconds),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        for (var frame = 0; frame < frameCount; frame++)
+        {
+            spriteAnimation.KeyFrames.Add(new DiscreteDoubleKeyFrame(
+                -frame * frameWidth,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(frame * frameDurationMilliseconds))));
+        }
+
+        SocialSigningInSpriteTranslate.BeginAnimation(
+            TranslateTransform.XProperty,
+            spriteAnimation);
+    }
+
+    private void StopSocialSignInAnimation()
+    {
+        SocialSigningInSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        SocialSigningInSpriteTranslate.X = 0;
+    }
+
+    private void CancelSocialSignIn(bool restoreProfile)
+    {
+        if (!_isSocialSigningIn && _socialSignInCancellation is null)
+        {
+            return;
+        }
+
+        _socialSignInTransitionId++;
+        _socialSignInCancellation?.Cancel();
+        _socialSignInCancellation = null;
+        SetGlobeApprovalPending(false);
+
+        if (restoreProfile)
+        {
+            SetSocialSigningInState(false);
+        }
+        else
+        {
+            _isSocialSigningIn = false;
+        }
+    }
+
+    private void GlobeConnectionService_StateChanged(
+        object? sender,
+        GlobeConnectionStateChangedEventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => GlobeConnectionService_StateChanged(sender, e));
+            return;
+        }
+
+        var wasLinked = _isSocialAccountLinked;
+        var previousAvatarUrl = _socialProfile?.AvatarUrl;
+        _isSocialAccountLinked = e.State.IsLinked;
+        _isSocialSharingAvailable = e.State.CanShare;
+        _socialProfile = e.State.Profile;
+        if (e.State.Status == GlobeConnectionStatus.Unlinked)
+        {
+            _socialProfileImage = null;
+            AutomaticallyShareBurnsCheckBox.IsChecked = false;
+        }
+        else if (_socialProfile is not null
+                 && (!string.Equals(previousAvatarUrl, _socialProfile.AvatarUrl, StringComparison.Ordinal)
+                     || _socialProfileImage is null))
+        {
+            _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
+        }
+
+        UpdateSocialPanel(animate: wasLinked != _isSocialAccountLinked);
+        if (_socialProfile is not null
+            && !e.State.IsChecking
+            && string.IsNullOrWhiteSpace(e.State.ErrorMessage))
+        {
+            _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
+        }
+        RefreshDirtyState();
+        TryStartRequestedSocialLink();
+    }
+
+    private async Task RefreshSocialProfileAsync()
+    {
+        if (!_globeConnectionService.HasStoredToken
+            || _globeConnectionService.State.IsChecking)
+        {
+            return;
+        }
+
+        try
+        {
+            await _globeConnectionService.ValidateAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // Validation publishes its linked/offline state and the main
+            // window owns the once-per-outage warning. Opening Settings must
+            // not add a second error dialog for the same background check.
+        }
+    }
+
+    private async Task RefreshSocialAvatarAsync(GlobeProfile profile, bool animate)
+    {
+        var generation = ++_socialAvatarGeneration;
+        var placeholder = IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png");
+        if (!Uri.TryCreate(profile.AvatarUrl, UriKind.Absolute, out var avatarUri)
+            || !AppMetadata.IsTrustedGlobeAvatarUri(avatarUri))
+        {
+            _socialProfileImage = placeholder;
+            UpdateSocialPanel(animate);
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                Timeout = TimeSpan.FromSeconds(15)
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                CreateFreshAvatarRequestUri(avatarUri));
+            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+            {
+                NoCache = true
+            };
+            using var response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is > MaximumSocialAvatarDownloadBytes)
+            {
+                throw new InvalidDataException("The globe profile image is too large.");
+            }
+
+            var bytes = await ReadSocialAvatarBytesAsync(response.Content, timeout.Token);
+
+            var image = DecodeSocialAvatar(bytes);
+            if (generation != _socialAvatarGeneration
+                || _socialProfile?.AvatarUrl != profile.AvatarUrl
+                || !IsLoaded)
+            {
+                return;
+            }
+
+            _socialProfileImage = image;
+            _globeConnectionService.CacheAvatar(profile, EncodeSocialAvatar(image));
+            UpdateSocialPanel(animate);
+        }
+        catch
+        {
+            if (generation == _socialAvatarGeneration
+                && _socialProfile?.AvatarUrl == profile.AvatarUrl
+                && IsLoaded)
+            {
+                _socialProfileImage ??= placeholder;
+                UpdateSocialPanel(animate);
+            }
+        }
+    }
+
+    internal static Uri CreateFreshAvatarRequestUri(Uri avatarUri)
+    {
+        ArgumentNullException.ThrowIfNull(avatarUri);
+        var cdnBase = AppMetadata.GlobeAvatarCdnBaseUri;
+        if (!avatarUri.IsAbsoluteUri
+            || cdnBase is null
+            || !string.IsNullOrEmpty(avatarUri.Query)
+            || !string.Equals(avatarUri.Scheme, cdnBase.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(avatarUri.IdnHost, cdnBase.IdnHost, StringComparison.OrdinalIgnoreCase)
+            || avatarUri.Port != cdnBase.Port)
+        {
+            return avatarUri;
+        }
+
+        var builder = new UriBuilder(avatarUri)
+        {
+            Query = "mystral_refresh=" + Guid.NewGuid().ToString("N")
+        };
+        return builder.Uri;
+    }
+
+    private ImageSource? TryLoadCachedSocialAvatar(GlobeProfile? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        var bytes = _globeConnectionService.GetCachedAvatar(profile.AvatarUrl);
+        if (bytes is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return DecodeSocialAvatar(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static System.Windows.Media.Imaging.BitmapSource DecodeSocialAvatar(byte[] bytes)
+    {
+        using var metadataStream = new MemoryStream(bytes, writable: false);
+        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+            metadataStream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+            System.Windows.Media.Imaging.BitmapCacheOption.None);
+        if (decoder.Frames.Count == 0)
+        {
+            throw new InvalidDataException("The globe profile image is invalid.");
+        }
+
+        var sourceWidth = decoder.Frames[0].PixelWidth;
+        var sourceHeight = decoder.Frames[0].PixelHeight;
+        if (!AreSocialAvatarDimensionsSafe(sourceWidth, sourceHeight))
+        {
+            throw new InvalidDataException("The globe profile image dimensions are not supported.");
+        }
+
+        using var stream = new MemoryStream(bytes, writable: false);
+        var image = new System.Windows.Media.Imaging.BitmapImage();
+        image.BeginInit();
+        image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        if (sourceWidth >= sourceHeight)
+        {
+            image.DecodePixelWidth = SocialAvatarDecodeDimension;
+        }
+        else
+        {
+            image.DecodePixelHeight = SocialAvatarDecodeDimension;
+        }
+        image.StreamSource = stream;
+        image.EndInit();
+        if (image.PixelWidth <= 0
+            || image.PixelHeight <= 0
+            || image.PixelWidth > SocialAvatarDecodeDimension
+            || image.PixelHeight > SocialAvatarDecodeDimension)
+        {
+            throw new InvalidDataException("The globe profile image is invalid.");
+        }
+
+        image.Freeze();
+        return image;
+    }
+
+    internal static bool AreSocialAvatarDimensionsSafe(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        var smallerDimension = Math.Min(width, height);
+        var largerDimension = Math.Max(width, height);
+        return largerDimension <= MaximumSocialAvatarSourceDimension
+               && (long)width * height <= MaximumSocialAvatarSourcePixels
+               && (long)largerDimension <= (long)smallerDimension * MaximumSocialAvatarAspectRatio;
+    }
+
+    private static async Task<byte[]> ReadSocialAvatarBytesAsync(
+        HttpContent content,
+        CancellationToken cancellationToken)
+    {
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0)
+            {
+                return output.ToArray();
+            }
+
+            if (output.Length + read > MaximumSocialAvatarDownloadBytes)
+            {
+                throw new InvalidDataException("The globe profile image is too large.");
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+    }
+
+    private static byte[] EncodeSocialAvatar(System.Windows.Media.Imaging.BitmapSource image)
+    {
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    private void UpdateSocialPanel(bool animate)
+    {
+        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked
+            && _isSocialSharingAvailable
+            && !_isSocialSigningIn;
+        AutomaticallyShareBurnsCheckBox.ToolTip = _isSocialAccountLinked && !_isSocialSharingAvailable
+            ? "Sharing will be available when globe reconnects."
+            : null;
+        var isGlobeOffline = _globeConnectionService.State.IsOffline;
+        UnlinkSocialAccountLink.IsEnabled = _isSocialAccountLinked && !isGlobeOffline;
+        UnlinkSocialAccountLink.ToolTip = isGlobeOffline
+            ? "Unlinking will be available when globe reconnects."
+            : null;
+        var profile = _socialProfile;
+        SocialUsernameText.Text = profile?.DisplayUsername
+            ?? (_isSocialAccountLinked ? "globe unavailable" : string.Empty);
+        SocialDisplayNameText.Text = profile?.DisplayName
+            ?? (_isSocialAccountLinked ? "Account linked" : string.Empty);
+        var cdCount = profile?.CdCount ?? 0;
+        SocialCdCountText.Text = profile is null && _isSocialAccountLinked
+            ? "Account details will refresh when globe reconnects."
+            : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
+        SocialProfileFrame.SetProfile(
+            _isSocialAccountLinked,
+            _socialProfileImage
+            ?? IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png"),
+            animate);
+
+        var transitionId = ++_socialProfileTransitionId;
+        SocialProfileDetailsHost.BeginAnimation(OpacityProperty, null);
+        if (!animate)
+        {
+            ApplySocialProfileDetailsVisibility();
+            SocialProfileDetailsHost.Opacity = 1;
+            return;
+        }
+
+        SocialProfileDetailsHost.Opacity = 0;
+        var fadeOut = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(120));
+        fadeOut.Completed += (_, _) =>
+        {
+            if (transitionId != _socialProfileTransitionId)
+            {
+                return;
+            }
+
+            ApplySocialProfileDetailsVisibility();
+            SocialProfileDetailsHost.Opacity = 1;
+            SocialProfileDetailsHost.BeginAnimation(
+                OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(160))
+                {
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                });
+        };
+        SocialProfileDetailsHost.BeginAnimation(OpacityProperty, fadeOut);
+    }
+
+    private void ApplySocialProfileDetailsVisibility()
+    {
+        UnlinkedSocialProfilePanel.Visibility = _isSocialAccountLinked
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        LinkedSocialProfilePanel.Visibility = _isSocialAccountLinked
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
@@ -191,11 +906,68 @@ public partial class SettingsWindow : Window
         Close();
     }
 
+    internal void PrepareForCloseRequest()
+    {
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        Activate();
+    }
+
+    internal bool WarnIfGlobeApprovalPreventsClose()
+    {
+        if (!_isGlobeApprovalPending)
+        {
+            return false;
+        }
+
+        if (_isGlobeApprovalCloseWarningOpen)
+        {
+            return true;
+        }
+
+        _isGlobeApprovalCloseWarningOpen = true;
+        try
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "globe approval pending",
+                "Finish or cancel the globe approval before closing Mystral.");
+        }
+        finally
+        {
+            _isGlobeApprovalCloseWarningOpen = false;
+        }
+
+        return true;
+    }
+
     private async void Window_Closing(object? sender, CancelEventArgs e)
     {
+        if (WarnIfGlobeApprovalPreventsClose())
+        {
+            e.Cancel = true;
+            CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        if (_isCloseRequestPending)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         if (_isSaving)
         {
             e.Cancel = true;
+            CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -204,28 +976,41 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        var result = AppDialogWindow.ShowQuestion(
-            this,
-            "Unsaved changes",
-            "Save your settings before closing?");
-
-        if (result == MessageBoxResult.Cancel)
+        _isCloseRequestPending = true;
+        try
         {
+            var result = AppDialogWindow.ShowQuestion(
+                this,
+                "Unsaved changes",
+                "Save your settings before closing?");
+
+            if (result == MessageBoxResult.Cancel)
+            {
+                e.Cancel = true;
+                CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (result == MessageBoxResult.No)
+            {
+                _isClosingConfirmed = true;
+                return;
+            }
+
             e.Cancel = true;
-            return;
+            if (await SaveSettingsAsync(showSuccess: false))
+            {
+                _isClosingConfirmed = true;
+                _ = Dispatcher.BeginInvoke(Close);
+            }
+            else
+            {
+                CloseRequestCanceled?.Invoke(this, EventArgs.Empty);
+            }
         }
-
-        if (result == MessageBoxResult.No)
+        finally
         {
-            _isClosingConfirmed = true;
-            return;
-        }
-
-        e.Cancel = true;
-        if (await SaveSettingsAsync(showSuccess: false))
-        {
-            _isClosingConfirmed = true;
-            _ = Dispatcher.BeginInvoke(Close);
+            _isCloseRequestPending = false;
         }
     }
 
@@ -317,7 +1102,7 @@ public partial class SettingsWindow : Window
     internal static async Task CheckForUpdatesAsync(Window owner, bool showNoUpdateMessage, bool showErrors, Button? sourceButton = null)
     {
         var originalContent = sourceButton?.Content;
-        UpdateProgressWindow? progressWindow = null;
+        OperationProgressWindow? progressWindow = null;
         if (sourceButton is not null)
         {
             sourceButton.IsEnabled = false;
@@ -366,12 +1151,19 @@ public partial class SettingsWindow : Window
 
             string? installerPath = null;
             Exception? downloadError = null;
-            progressWindow = new UpdateProgressWindow(owner, $"Mystral {latestVersion}", downloadCancellation.Cancel);
+            progressWindow = new OperationProgressWindow(
+                owner,
+                "Downloading update",
+                "Downloading update",
+                $"Mystral {latestVersion}",
+                isIndeterminate: false,
+                downloadCancellation.Cancel,
+                iconPath: "Resources/ico.ico");
             progressWindow.ContentRendered += async (_, _) =>
             {
                 try
                 {
-                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetProgress, downloadCancellation.Token);
+                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetByteProgress, downloadCancellation.Token);
                 }
                 catch (Exception ex)
                 {
@@ -379,7 +1171,7 @@ public partial class SettingsWindow : Window
                 }
                 finally
                 {
-                    progressWindow.CloseDownloadWindow();
+                    progressWindow.CloseOperationWindow();
                 }
             };
             progressWindow.ShowDialog();
@@ -419,7 +1211,7 @@ public partial class SettingsWindow : Window
         }
         finally
         {
-            progressWindow?.CloseDownloadWindow();
+            progressWindow?.CloseOperationWindow();
             if (sourceButton is not null)
             {
                 sourceButton.Content = originalContent;
@@ -498,194 +1290,6 @@ public partial class SettingsWindow : Window
             }
 
             throw;
-        }
-    }
-
-    private sealed class UpdateProgressWindow : Window
-    {
-        private readonly Action _cancelDownload;
-        private readonly ProgressBar _progressBar = new()
-        {
-            Height = 22,
-            Minimum = 0,
-            Maximum = 100,
-            Foreground = System.Windows.Media.Brushes.DodgerBlue
-        };
-
-        private readonly TextBlock _progressText = new()
-        {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = System.Windows.Media.Brushes.Black,
-            FontSize = 11,
-            IsHitTestVisible = false,
-            Text = "0%",
-            TextTrimming = TextTrimming.CharacterEllipsis
-        };
-
-        private readonly Button _cancelButton = new()
-        {
-            Content = "Cancel",
-            Height = 23,
-            MinWidth = 72
-        };
-
-        private bool _canClose;
-        private bool _isClosed;
-        private bool _isCanceling;
-
-        public UpdateProgressWindow(Window owner, string versionInfo, Action cancelDownload)
-        {
-            _cancelDownload = cancelDownload;
-            Title = "Downloading update";
-            Icon = owner.Icon;
-            Width = 430;
-            SizeToContent = SizeToContent.Height;
-            ResizeMode = ResizeMode.NoResize;
-            if (owner.IsVisible)
-            {
-                Owner = owner;
-                WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            }
-            else
-            {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            }
-            ShowInTaskbar = false;
-            Background = System.Windows.Media.Brushes.White;
-            FontFamily = new System.Windows.Media.FontFamily("Segoe UI");
-            SnapsToDevicePixels = true;
-            UseLayoutRounding = true;
-            Resources.MergedDictionaries.Add(new ResourceDictionary
-            {
-                Source = new Uri("/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml", UriKind.Relative)
-            });
-            Closing += (_, e) =>
-            {
-                if (!_canClose)
-                {
-                    RequestCancel();
-                    e.Cancel = true;
-                }
-            };
-            Closed += (_, _) => _isClosed = true;
-            _cancelButton.Click += (_, _) => RequestCancel();
-
-            var progressGrid = new Grid
-            {
-                Margin = new Thickness(0, 12, 0, 0),
-                Children =
-                {
-                    _progressBar,
-                    _progressText
-                }
-            };
-
-            var body = new StackPanel
-            {
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Margin = new Thickness(0, 0, 0, 2),
-                        FontSize = 19,
-                        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(53, 90, 136)),
-                        Text = "Downloading update",
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    new TextBlock
-                    {
-                        Foreground = System.Windows.Media.Brushes.DimGray,
-                        Text = versionInfo,
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    progressGrid
-                }
-            };
-
-            var root = new Grid
-            {
-                Background = new System.Windows.Media.ImageBrush
-                {
-                    ImageSource = new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://siteoforigin:,,,/Resources/Images/dialog_background.png")),
-                    Stretch = System.Windows.Media.Stretch.Fill
-                }
-            };
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            var contentGrid = new Grid { Margin = new Thickness(16) };
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-            contentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var iconImage = new Image
-            {
-                Source = IconImageSource.LoadBestFitFrame("Resources/ico.ico", 32),
-                Width = 32,
-                Height = 32,
-                VerticalAlignment = VerticalAlignment.Top
-            };
-            System.Windows.Media.RenderOptions.SetBitmapScalingMode(iconImage, System.Windows.Media.BitmapScalingMode.HighQuality);
-            contentGrid.Children.Add(iconImage);
-            Grid.SetColumn(body, 1);
-            body.Margin = new Thickness(8, 0, 0, 0);
-            contentGrid.Children.Add(body);
-
-            var buttonPanel = new StackPanel
-            {
-                Margin = new Thickness(15, 11, 15, 11),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Orientation = Orientation.Horizontal,
-                Children = { _cancelButton }
-            };
-
-            root.Children.Add(contentGrid);
-            Grid.SetRow(buttonPanel, 1);
-            root.Children.Add(buttonPanel);
-            Content = root;
-        }
-
-        public void SetProgress(long downloadedBytes, long? totalBytes)
-        {
-            if (totalBytes is > 0)
-            {
-                var percent = Math.Clamp(downloadedBytes * 100d / totalBytes.Value, 0, 100);
-                _progressBar.IsIndeterminate = false;
-                _progressBar.Value = percent;
-                _progressText.Text = $"{percent:0}% ({FormatBytes(downloadedBytes)} of {FormatBytes(totalBytes.Value)})";
-                return;
-            }
-
-            _progressBar.IsIndeterminate = true;
-            _progressText.Text = $"Downloaded {FormatBytes(downloadedBytes)}";
-        }
-
-        public void CloseDownloadWindow()
-        {
-            _canClose = true;
-            if (!_isClosed)
-            {
-                Close();
-            }
-        }
-
-        private void RequestCancel()
-        {
-            _cancelButton.IsEnabled = false;
-            _progressText.Text = "Canceling...";
-            if (_isCanceling)
-            {
-                return;
-            }
-
-            _isCanceling = true;
-            _cancelDownload();
-        }
-
-        private static string FormatBytes(long bytes)
-        {
-            return bytes >= 1024 * 1024
-                ? $"{bytes / 1024d / 1024d:0.0} MB"
-                : $"{bytes / 1024d:0.0} KB";
         }
     }
 

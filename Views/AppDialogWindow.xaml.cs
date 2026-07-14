@@ -46,12 +46,71 @@ public partial class AppDialogWindow : Window
 
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
-        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons(), "warning.wav");
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            FromSystemIcon(System.Drawing.SystemIcons.Warning),
+            ContinueButtons(),
+            "warning.wav");
     }
 
     public static MessageBoxResult ShowError(Window owner, string title, string message)
     {
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons(), "error.wav");
+    }
+
+    public static MessageBoxResult ShowConfirmationWithBadge(
+        Window owner,
+        string title,
+        string message,
+        string primaryIconPath,
+        string badgeIconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadOverlayIcon(primaryIconPath, badgeIconPath),
+            ContinueButtons(),
+            "confirmation.wav");
+    }
+
+    internal static bool ShowAction(
+        Window owner,
+        string title,
+        string message,
+        string actionCaption,
+        bool isError = false,
+        bool isWarning = false,
+        bool placeActionOnNewLine = false)
+    {
+        var actionSelected = false;
+        var dialog = new AppDialogWindow(
+            title,
+            FromSystemIcon(
+                isWarning
+                    ? System.Drawing.SystemIcons.Warning
+                    : isError
+                        ? System.Drawing.SystemIcons.Error
+                        : System.Drawing.SystemIcons.Information),
+            ContinueButtons());
+        dialog.DialogDescriptionText.Inlines.Add(new Run(message));
+        dialog.DialogDescriptionText.Inlines.Add(
+            placeActionOnNewLine ? new LineBreak() : new Run(" "));
+        var action = new Hyperlink(new Run(actionCaption));
+        action.Click += (_, _) =>
+        {
+            actionSelected = true;
+            dialog.Result = MessageBoxResult.OK;
+            dialog.Close();
+        };
+        dialog.DialogDescriptionText.Inlines.Add(action);
+        ShowDialog(
+            owner,
+            dialog,
+            isWarning ? "warning.wav" : isError ? "error.wav" : "confirmation.wav");
+        return actionSelected;
     }
 
     public static MessageBoxResult ShowAbout(Window owner, Func<Window, Button, Task>? checkForUpdates = null)
@@ -68,20 +127,16 @@ public partial class AppDialogWindow : Window
                     new DialogButtonSpec("OK", MessageBoxResult.OK, IsDefault: true, IsCancel: true)
                 ]);
 
-        dialog.AboutStampImage.Visibility = Visibility.Visible;
-        dialog.DialogTitleText.Text = AppMetadata.Name;
-        dialog.DialogDescriptionText.Inlines.Clear();
-        dialog.DialogDescriptionText.Inlines.Add(new Run($"Version {AppMetadata.Version}"));
-        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
-        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
-        dialog.DialogDescriptionText.Inlines.Add(new Run("Made with love by "));
-        var link = new Hyperlink(new Run("ponkis"))
-        {
-            NavigateUri = new Uri("https://ponkis.xyz/"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0, 102, 204))
-        };
-        link.RequestNavigate += Hyperlink_RequestNavigate;
-        dialog.DialogDescriptionText.Inlines.Add(link);
+        dialog.Width = 430;
+        dialog.MinHeight = 0;
+        dialog.Height = 340;
+        dialog.SizeToContent = SizeToContent.Manual;
+        dialog.StandardDialogContent.Visibility = Visibility.Collapsed;
+        dialog.AboutDialogContent.Visibility = Visibility.Visible;
+        dialog.AboutLogoImage.Source = IconImageSource.LoadBestFrame("Resources/ico.ico");
+        dialog.AboutAppNameText.Text = AppMetadata.Name;
+        dialog.AboutVersionText.Text = $"version {AppMetadata.Version}";
+        dialog.AboutCopyrightText.Text = $"Copyright © {DateTime.Now.Year} ponkis.";
 
         return ShowDialog(owner, dialog);
     }
@@ -101,7 +156,13 @@ public partial class AppDialogWindow : Window
             "confirmation.wav");
     }
 
-    private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons, string? soundFile = null)
+    private static MessageBoxResult ShowDialog(
+        Window owner,
+        string title,
+        string message,
+        ImageSource icon,
+        IReadOnlyList<DialogButtonSpec> buttons,
+        string? soundFile = null)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
         return ShowDialog(owner, dialog, soundFile);
@@ -138,7 +199,7 @@ public partial class AppDialogWindow : Window
         return dialog.Result;
     }
 
-    private static void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
+    private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {
         OpenExternalUrl(e.Uri.AbsoluteUri);
         e.Handled = true;

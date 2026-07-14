@@ -80,12 +80,18 @@ Release builds store settings in:
 %LOCALAPPDATA%\Mystral\settings.json
 ```
 
+Last.fm credentials and the globe bearer token are never written to
+`settings.json`. They are stored in the environment-specific `credentials`
+directory and encrypted for the current Windows user with DPAPI. Existing
+plaintext Last.fm fields are migrated to that protected store the next time
+settings are loaded successfully.
+
 ## Versioning
 
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>1.1.1</VersionPrefix>
+<VersionPrefix>2.0.0</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.
@@ -96,6 +102,33 @@ The build environment is selected through MSBuild:
 
 - Debug defaults to `AppEnvironment=Development`.
 - Release defaults to `AppEnvironment=Production`.
+
+Build outputs are isolated by both values under
+`bin\<Configuration>\<AppEnvironment>` so a Development executable cannot be
+silently replaced by a Production-flavored build in the same folder.
+
+Development builds connect to `http://localhost:3000/` and register
+`mystral-dev://settings/social`. Set `MYSTRAL_GLOBE_BASE_URL` when the local
+globe server uses another origin. Production builds always use
+`https://chat.ponkis.xyz/` and `mystral://settings/social`.
+
+Avatar downloads are restricted to the globe origin and globe's current
+first-party R2 origin, both embedded as exact allowlist entries. If the image
+CDN changes, set the GitHub Actions repository variable
+`GLOBE_AVATAR_CDN_URL` to the new exact public base URL before creating a
+release; the release workflow embeds that override with `GlobeAvatarCdnUrl`.
+Development can override it with `MYSTRAL_GLOBE_AVATAR_CDN_URL` when testing a
+different CDN.
+
+The development packaging script registers the published executable without
+opening a window. A regular Debug build also registers itself when launched,
+or it can be registered explicitly without starting the UI. Run this from the
+same normal Windows account as the browser (not an elevated/admin shell),
+because the handler is stored in that user's `HKCU` registry hive:
+
+```powershell
+.\scripts\Register-DevProtocol.cmd
+```
 
 ```powershell
 dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development

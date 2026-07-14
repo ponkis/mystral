@@ -1,0 +1,534 @@
+<Window x:Class="Mystral.Views.BurningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Mystral.Controls"
+        xmlns:models="clr-namespace:Mystral.Models"
+        Title="Mystral"
+        Icon="pack://siteoforigin:,,,/Resources/ico.ico"
+        Width="650"
+        Height="560"
+        MinWidth="650"
+        MinHeight="560"
+        MaxWidth="650"
+        MaxHeight="560"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True"
+        Loaded="Window_Loaded"
+        Closing="Window_Closing">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <DropShadowEffect x:Key="CardShadow"
+                              BlurRadius="24"
+                              ShadowDepth="0"
+                              Opacity="0.52"
+                              Color="#050708" />
+            <DropShadowEffect x:Key="TextShadow"
+                              BlurRadius="2"
+                              ShadowDepth="1"
+                              Opacity="0.48"
+                              Color="#000000" />
+
+            <Style x:Key="ChromeButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="36" />
+                <Setter Property="Height" Value="28" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Foreground" Value="#F7FAF7" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Chrome"
+                                    Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#3CFFFFFF" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Chrome" Property="Background" Value="#52000000" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="EditorTextBoxStyle" TargetType="TextBox">
+                <Setter Property="Height" Value="29" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Padding" Value="7,1" />
+                <Setter Property="Foreground" Value="#202529" />
+                <Setter Property="Background" Value="#F8FFFFFF" />
+                <Setter Property="BorderBrush" Value="#8B7893A1" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="SelectionBrush" Value="#6BAEE8FF" />
+            </Style>
+
+            <Style x:Key="EditorLabelStyle" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,0,12,8" />
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="TextAlignment" Value="Right" />
+                <Setter Property="Foreground" Value="#687077" />
+            </Style>
+
+            <Style x:Key="UploadTileStyle" TargetType="Button">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="#A65C7A89" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Tile"
+                                    CornerRadius="0"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <Grid>
+                                    <ContentPresenter HorizontalAlignment="Stretch"
+                                                      VerticalAlignment="Stretch" />
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Tile" Property="BorderBrush" Value="#EF4C9DCC" />
+                                    <Setter TargetName="Tile" Property="Background" Value="Transparent" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Tile" Property="Opacity" Value="0.76" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Margin="14">
+        <Border x:Name="RootCard"
+                CornerRadius="9"
+                BorderThickness="1"
+                BorderBrush="#A5DCE9EE"
+                Effect="{StaticResource CardShadow}"
+                ClipToBounds="True"
+                RenderTransformOrigin="0.5,0.5"
+                SizeChanged="RoundedSurface_SizeChanged">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="WindowScale" ScaleX="1" ScaleY="1" />
+            </Border.RenderTransform>
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop x:Name="CardTopStop" Color="#906F7D84" Offset="0" />
+                    <GradientStop x:Name="CardUpperStop" Color="#82576268" Offset="0.48" />
+                    <GradientStop x:Name="CardLowerStop" Color="#76343D42" Offset="0.53" />
+                    <GradientStop x:Name="CardBottomStop" Color="#84434E54" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+
+            <Grid x:Name="GlassSurface"
+                  ClipToBounds="True"
+                  SizeChanged="RoundedSurface_SizeChanged">
+                <Grid.Background>
+                    <RadialGradientBrush Center="0.8,1.1"
+                                         GradientOrigin="0.72,0.94"
+                                         RadiusX="0.86"
+                                         RadiusY="0.78">
+                        <GradientStop x:Name="GlowPrimaryStop" Color="#76E6F4FA" Offset="0" />
+                        <GradientStop x:Name="GlowSecondaryStop" Color="#1C8496A0" Offset="0.45" />
+                        <GradientStop Color="#00000000" Offset="1" />
+                    </RadialGradientBrush>
+                </Grid.Background>
+
+                <Image x:Name="BlurredCoverImage"
+                       Stretch="UniformToFill"
+                       Opacity="0.16"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="LowQuality">
+                    <Image.Effect>
+                        <BlurEffect Radius="24" KernelType="Gaussian" />
+                    </Image.Effect>
+                </Image>
+
+                <Rectangle Height="82"
+                           VerticalAlignment="Top"
+                           Opacity="0.52"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#E8FFFFFF" Offset="0" />
+                            <GradientStop Color="#4FFFFFFF" Offset="0.42" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border Margin="1"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        BorderBrush="#35FFFFFF"
+                        IsHitTestVisible="False" />
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30" />
+                        <RowDefinition Height="140" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="50" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="2"
+                            Grid.RowSpan="2"
+                            Background="#FFF0F0F0"
+                            IsHitTestVisible="False" />
+
+                    <Grid x:Name="TitleBar"
+                          Grid.Row="0"
+                          Background="#12000000"
+                          MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Image Width="16"
+                               Height="16"
+                               Margin="10,0,0,0"
+                               VerticalAlignment="Center"
+                               Source="pack://siteoforigin:,,,/Resources/ico.ico"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Grid.Column="1"
+                                   Margin="7,0,0,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FCFEFC"
+                                   Effect="{StaticResource TextShadow}"
+                                   Text="Mystral" />
+                        <Button x:Name="CloseButton"
+                                Grid.Column="2"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="CloseButton_Click"
+                                ToolTip="Close">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Stroke="#F7FAF7"
+                                  StrokeThickness="1.8"
+                                  Data="M 1,1 L 10,10 M 10,1 L 1,10" />
+                        </Button>
+                    </Grid>
+
+                    <Border Grid.Row="1"
+                            BorderBrush="#55FFFFFF"
+                            BorderThickness="0,1,0,1"
+                            Background="#36000000">
+                        <Grid Margin="18,5,20,5">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="160" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                             <controls:JewelCasePreview x:Name="JewelPreview"
+                                                       Width="126"
+                                                       Height="113"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       UploadCoverRequested="JewelPreview_UploadCoverRequested" />
+
+                            <StackPanel Grid.Column="2"
+                                        VerticalAlignment="Center">
+                                <TextBlock x:Name="PreviewTitleText"
+                                           FontSize="21"
+                                           FontWeight="SemiBold"
+                                           Foreground="#FCFEFC"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                                <TextBlock x:Name="PreviewArtistText"
+                                           Margin="0,5,0,0"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Foreground="#F0F5F1"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                                <TextBlock x:Name="PreviewAlbumText"
+                                           Margin="0,4,0,0"
+                                           FontSize="13"
+                                           Foreground="#DDE7E1"
+                                           TextTrimming="CharacterEllipsis"
+                                           Effect="{StaticResource TextShadow}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TabControl x:Name="EditorTabs"
+                                Grid.Row="2"
+                                Margin="14,12,14,8">
+                        <TabItem Header="Details">
+                            <Border Padding="20,16">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="96" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Grid.Row="0" Style="{StaticResource EditorLabelStyle}" Text="Title" />
+                                    <TextBox x:Name="TitleBox" Grid.Row="0" Grid.Column="1" MaxLength="{x:Static models:BurnTrackDraft.MaxTitleLength}" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="1" Style="{StaticResource EditorLabelStyle}" Text="Artist" />
+                                    <TextBox x:Name="ArtistBox" Grid.Row="1" Grid.Column="1" MaxLength="{x:Static models:BurnTrackDraft.MaxArtistLength}" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="2" Style="{StaticResource EditorLabelStyle}" Text="Album" />
+                                    <TextBox x:Name="AlbumBox" Grid.Row="2" Grid.Column="1" MaxLength="{x:Static models:BurnTrackDraft.MaxAlbumLength}" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="3" Style="{StaticResource EditorLabelStyle}" Text="Genre" />
+                                    <TextBox x:Name="GenreBox" Grid.Row="3" Grid.Column="1" MaxLength="{x:Static models:BurnTrackDraft.MaxGenreLength}" Margin="0,0,0,8" Style="{StaticResource EditorTextBoxStyle}" TextChanged="MetadataBox_TextChanged" />
+                                    <TextBlock Grid.Row="4" Style="{StaticResource EditorLabelStyle}" Text="Year" />
+                                    <TextBox x:Name="YearBox"
+                                             Grid.Row="4"
+                                             Grid.Column="1"
+                                             Width="92"
+                                             MaxLength="{x:Static models:BurnTrackDraft.MaxYearLength}"
+                                             Margin="0,0,0,8"
+                                             HorizontalAlignment="Left"
+                                             Style="{StaticResource EditorTextBoxStyle}"
+                                             TextChanged="MetadataBox_TextChanged"
+                                             PreviewTextInput="NumericTextBox_PreviewTextInput"
+                                             DataObject.Pasting="NumericTextBox_Pasting"
+                                             ToolTip="Four-digit year" />
+                                    <TextBlock Grid.Row="5" Margin="0,0,12,0" Style="{StaticResource EditorLabelStyle}" Text="Track" />
+                                    <StackPanel Grid.Row="5"
+                                                Grid.Column="1"
+                                                Orientation="Horizontal">
+                                        <TextBox x:Name="TrackNumberBox"
+                                                 Width="64"
+                                                 MaxLength="{x:Static models:BurnTrackDraft.MaxTrackNumberLength}"
+                                                 HorizontalAlignment="Left"
+                                                 Style="{StaticResource EditorTextBoxStyle}"
+                                                 TextChanged="MetadataBox_TextChanged"
+                                                 PreviewTextInput="NumericTextBox_PreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_Pasting" />
+                                        <TextBlock Margin="9,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="#687077"
+                                                   Text="of" />
+                                        <TextBox x:Name="TrackTotalBox"
+                                                 Width="64"
+                                                 MaxLength="{x:Static models:BurnTrackDraft.MaxTrackTotalLength}"
+                                                 HorizontalAlignment="Left"
+                                                 Style="{StaticResource EditorTextBoxStyle}"
+                                                 TextChanged="MetadataBox_TextChanged"
+                                                 PreviewTextInput="NumericTextBox_PreviewTextInput"
+                                                 DataObject.Pasting="NumericTextBox_Pasting" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </TabItem>
+
+                        <TabItem Header="Artwork">
+                            <Border Padding="18,16">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="CoverUploadButton"
+                                            Grid.Column="0"
+                                            Height="210"
+                                            Tag="Cover"
+                                            ToolTip="Upload cover artwork"
+                                            Style="{StaticResource UploadTileStyle}"
+                                            ContextMenuOpening="ArtworkButton_ContextMenuOpening"
+                                            Click="CoverUploadButton_Click">
+                                        <Button.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Delete artwork" Click="DeleteCoverArtwork_Click">
+                                                    <MenuItem.Icon>
+                                                        <Image Width="16"
+                                                               Height="16"
+                                                               Source="pack://siteoforigin:,,,/Resources/delete.ico"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                        <Grid Margin="11">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border Width="120"
+                                                    Height="120"
+                                                    HorizontalAlignment="Center"
+                                                    CornerRadius="0"
+                                                    ClipToBounds="True"
+                                                    BorderBrush="#8B7B8D96"
+                                                    BorderThickness="1"
+                                                    Background="#24333A3E">
+                                                <Image x:Name="CoverUploadImage"
+                                                       Stretch="UniformToFill"
+                                                       RenderOptions.BitmapScalingMode="HighQuality" />
+                                            </Border>
+                                            <TextBlock Grid.Row="1"
+                                                       Margin="0,9,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="#253139"
+                                                       Text="Cover artwork" />
+                                            <TextBlock Grid.Row="2"
+                                                       Margin="0,3,0,0"
+                                                       HorizontalAlignment="Center"
+                                                       FontSize="11"
+                                                       Foreground="#647078"
+                                                       Text="Click to upload an image" />
+                                        </Grid>
+                                    </Button>
+
+                                    <Border x:Name="DiscUploadTile"
+                                            Grid.Column="2"
+                                            Height="210"
+                                            Tag="Disc"
+                                            Cursor="Hand"
+                                            ToolTip="Upload CD artwork"
+                                            ContextMenuOpening="ArtworkButton_ContextMenuOpening"
+                                            PreviewMouseLeftButtonDown="DiscUploadTile_PreviewMouseLeftButtonDown"
+                                            PreviewMouseLeftButtonUp="DiscUploadTile_PreviewMouseLeftButtonUp"
+                                            LostMouseCapture="DiscUploadTile_LostMouseCapture">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="#A65C7A89" />
+                                                <Setter Property="BorderThickness" Value="1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter Property="BorderBrush" Value="#EF4C9DCC" />
+                                                        <Setter Property="Background" Value="Transparent" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Border.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Delete artwork" Click="DeleteDiscArtwork_Click">
+                                                    <MenuItem.Icon>
+                                                        <Image Width="16"
+                                                               Height="16"
+                                                               Source="pack://siteoforigin:,,,/Resources/delete.ico"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </ContextMenu>
+                                        </Border.ContextMenu>
+                                        <Grid>
+                                            <Grid Margin="11">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="*" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <controls:CdArtworkPreview x:Name="DiscArtworkPreview"
+                                                                           ToolTip="Upload CD artwork"
+                                                                           UploadArtworkRequested="DiscArtworkPreview_UploadArtworkRequested" />
+                                                <TextBlock Grid.Row="1"
+                                                           Margin="0,9,0,0"
+                                                           HorizontalAlignment="Center"
+                                                           FontSize="13"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#253139"
+                                                           Text="CD artwork" />
+                                                <TextBlock Grid.Row="2"
+                                                           Margin="0,3,0,0"
+                                                           HorizontalAlignment="Center"
+                                                           FontSize="11"
+                                                           Foreground="#647078"
+                                                           Text="Optional disc or medium scan" />
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </TabItem>
+                    </TabControl>
+
+                    <Border Grid.Row="3"
+                            BorderBrush="#FFD0D0D0"
+                            BorderThickness="0,1,0,0"
+                            Background="#FFF0F0F0">
+                        <Grid Margin="12,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="ReplaceSongButton"
+                                        MinWidth="92"
+                                        Height="23"
+                                        Margin="0,0,6,0"
+                                        Click="ReplaceSongButton_Click"
+                                        Content="Replace song" />
+                                <Button x:Name="FetchButton"
+                                        MinWidth="100"
+                                        Height="23"
+                                        Click="FetchButton_Click"
+                                        Content="Fetch song data" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="DirtyStatusText"
+                                       Grid.Column="1"
+                                       Margin="12,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="#555555"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis" />
+
+                            <StackPanel Grid.Column="2"
+                                        Orientation="Horizontal">
+                                <Button x:Name="CancelButton"
+                                        MinWidth="72"
+                                        Height="23"
+                                        Margin="0,0,6,0"
+                                        Click="CancelButton_Click"
+                                        Content="Cancel" />
+                                <Button x:Name="SaveButton"
+                                        MinWidth="72"
+                                        Height="23"
+                                        Click="SaveButton_Click"
+                                        Content="Save" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

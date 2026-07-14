@@ -1,11 +1,26 @@
 <Project>
   <PropertyGroup>
-    <VersionPrefix>1.2.6</VersionPrefix>
+    <!-- Directory.Build.props is evaluated before the SDK assigns its default
+         configuration. Set the same default here so a plain `dotnet build`
+         cannot compile Production behavior into the Debug output folder. -->
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <VersionPrefix>2.0.0</VersionPrefix>
     <VersionSuffix Condition="'$(Configuration)' == 'Debug' and '$(VersionSuffix)' == ''">dev</VersionSuffix>
     <Version Condition="'$(Version)' == '' and '$(VersionSuffix)' != ''">$(VersionPrefix)-$(VersionSuffix)</Version>
     <Version Condition="'$(Version)' == ''">$(VersionPrefix)</Version>
     <AppEnvironment Condition="'$(AppEnvironment)' == '' and '$(Configuration)' == 'Debug'">Development</AppEnvironment>
     <AppEnvironment Condition="'$(AppEnvironment)' == ''">Production</AppEnvironment>
     <DefineConstants Condition="'$(AppEnvironment)' == 'Development'">$(DefineConstants);APP_ENVIRONMENT_DEVELOPMENT</DefineConstants>
+    <!-- Configuration alone is not enough to distinguish the supported
+         Release+Development package from Release+Production. Keep compiler
+         intermediates and binaries isolated so one flavor cannot be reused or
+         registered as the other. The SDK appends the target framework. -->
+    <OutputPath>bin\$(Configuration)\$(AppEnvironment)\</OutputPath>
+    <IntermediateOutputPath>obj\$(Configuration)\$(AppEnvironment)\</IntermediateOutputPath>
   </PropertyGroup>
+  <ItemGroup Condition="'$(GlobeAvatarCdnUrl)' != ''">
+    <!-- Embed the deployment's exact public R2/CDN origin so production
+         desktop builds never have to trust arbitrary avatar hosts. -->
+    <AssemblyMetadata Include="GlobeAvatarCdnUrl" Value="$(GlobeAvatarCdnUrl)" />
+  </ItemGroup>
 </Project>
