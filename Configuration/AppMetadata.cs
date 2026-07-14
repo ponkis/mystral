@@ -58,9 +58,17 @@ public static class AppMetadata
 
     private static string GetInformationalVersion()
     {
-        var version = typeof(AppMetadata).Assembly
+        var assembly = typeof(AppMetadata).Assembly;
+        var version = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "2.0.0";
+            ?.InformationalVersion;
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            var assemblyVersion = assembly.GetName().Version
+                ?? throw new InvalidOperationException("The Mystral assembly version is unavailable.");
+            version = assemblyVersion.ToString(3);
+        }
 
         var plusIndex = version.IndexOf('+');
         return plusIndex >= 0 ? version[..plusIndex] : version;
