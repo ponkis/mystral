@@ -714,11 +714,26 @@ public partial class BurningWindow : Window
 
             UpdateDirtyState();
             await RefreshArtworkUiAsync();
-            AppDialogWindow.ShowConfirmation(
-                this,
-                "Song data fetched",
-                "Song data was fetched from MusicBrainz.");
-            if (fetchedDisc is null && _draft.DiscArtwork is null)
+            if (result.CoverOutcome == ArtworkFetchOutcome.Failed && _draft.CoverArtwork is null)
+            {
+                // Text metadata arrived, but the cover download failed (e.g. a temporary
+                // Cover Art Archive issue) — say so instead of implying there is no cover.
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "Cover art not downloaded",
+                    "Song data was fetched, but the cover art couldn't be downloaded right now (a temporary Cover Art Archive issue). Try fetching again to retrieve it.");
+            }
+            else
+            {
+                AppDialogWindow.ShowConfirmation(
+                    this,
+                    "Song data fetched",
+                    "Song data was fetched from MusicBrainz.");
+            }
+
+            if (fetchedDisc is null
+                && _draft.DiscArtwork is null
+                && result.DiscOutcome == ArtworkFetchOutcome.NotAvailable)
             {
                 AppDialogWindow.ShowWarning(
                     this,
