@@ -150,6 +150,7 @@ public partial class MainWindow : Window
     private string _lastNotificationTrackTitle = string.Empty;
     private string _lastNotificationTrackArtist = string.Empty;
     private bool _globeRevocationWarningPending;
+    private bool _globeServerWarningPending;
 
     private MediaSnapshot Snapshot { get; set; } = MediaSnapshot.Empty;
     private LyricsResult Lyrics { get; set; } = LyricsResult.Empty;
@@ -169,6 +170,7 @@ public partial class MainWindow : Window
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _globeConnectionService.LinkRevoked += GlobeConnectionService_LinkRevoked;
+        _globeConnectionService.ServerUnavailable += GlobeConnectionService_ServerUnavailable;
 
         _mediaPollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _mediaPollTimer.Tick += async (_, _) => await _mediaService.RefreshAsync();
@@ -241,7 +243,7 @@ public partial class MainWindow : Window
             {
                 AppDialogWindow.ShowWarning(
                     this,
-                    "Could not check Globe link",
+                    "could not check globe link",
                     ex.Message);
             }
         }
@@ -3950,7 +3952,9 @@ public partial class MainWindow : Window
         settingsWindow.Show();
     }
 
-    internal void ActivateFromExternalRequest(bool openSocialSettings)
+    internal void ActivateFromExternalRequest(
+        bool openSocialSettings,
+        bool startSocialLinking = false)
     {
         if (!IsVisible)
         {
@@ -3971,7 +3975,7 @@ public partial class MainWindow : Window
         }
 
         ShowSettingsWindow();
-        _settingsWindow?.ShowSocialSection();
+        _settingsWindow?.ShowSocialSection(startSocialLinking);
     }
 
     private void SettingsWindow_Closed(object? sender, EventArgs e)
@@ -4057,8 +4061,42 @@ public partial class MainWindow : Window
                 ?? this;
             AppDialogWindow.ShowWarning(
                 owner,
-                "Globe account unlinked",
-                "Your Globe account is no longer linked. Automatic sharing has been turned off. You can link it again from Settings → Social.");
+                "globe account unlinked",
+                "your globe account is no longer linked.");
+        }, DispatcherPriority.Normal);
+    }
+
+    private void GlobeConnectionService_ServerUnavailable(
+        object? sender,
+        GlobeServerUnavailableEventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => GlobeConnectionService_ServerUnavailable(sender, e),
+                DispatcherPriority.Normal);
+            return;
+        }
+
+        if (_globeServerWarningPending)
+        {
+            return;
+        }
+
+        _globeServerWarningPending = true;
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            _globeServerWarningPending = false;
+            if (_isClosing)
+            {
+                return;
+            }
+
+            var owner = Application.Current.Windows
+                .OfType<Window>()
+                .FirstOrDefault(window => window.IsVisible && window.IsActive)
+                ?? this;
+            AppDialogWindow.ShowWarning(owner, "globe connection unavailable", e.Message);
         }, DispatcherPriority.Normal);
     }
 
@@ -4395,6 +4433,7 @@ public partial class MainWindow : Window
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _globeConnectionService.LinkRevoked -= GlobeConnectionService_LinkRevoked;
+        _globeConnectionService.ServerUnavailable -= GlobeConnectionService_ServerUnavailable;
         if (_notifyIcon is not null)
         {
             _notifyIcon.MouseUp -= NotifyIcon_MouseUp;

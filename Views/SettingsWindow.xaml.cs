@@ -17,6 +17,11 @@ namespace Mystral.Views;
 
 public partial class SettingsWindow : Window
 {
+    private const int MaximumSocialAvatarDownloadBytes = 5 * 1024 * 1024;
+    private const int MaximumSocialAvatarSourceDimension = 8192;
+    private const long MaximumSocialAvatarSourcePixels = 32L * 1024 * 1024;
+    private const int MaximumSocialAvatarAspectRatio = 20;
+    private const int SocialAvatarDecodeDimension = 256;
     private readonly AppSettingsService _settingsService;
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
@@ -26,7 +31,9 @@ public partial class SettingsWindow : Window
     private bool _isSaving;
     private bool _isCloseRequestPending;
     private bool _isSocialAccountLinked;
+    private bool _isSocialSharingAvailable;
     private bool _isSocialSigningIn;
+    private bool _startSocialLinkRequested;
     private long _socialProfileTransitionId;
     private long _socialSignInTransitionId;
     private CancellationTokenSource? _socialSignInCancellation;
@@ -66,7 +73,7 @@ public partial class SettingsWindow : Window
         };
     }
 
-    internal void ShowSocialSection()
+    internal void ShowSocialSection(bool startLinking = false)
     {
         CategoriesListBox.SelectedItem = SocialCategoryItem;
         if (WindowState == WindowState.Minimized)
@@ -75,6 +82,11 @@ public partial class SettingsWindow : Window
         }
 
         Activate();
+        if (startLinking)
+        {
+            _startSocialLinkRequested = true;
+            _ = Dispatcher.BeginInvoke(TryStartRequestedSocialLink);
+        }
     }
 
     private void LoadSettings()
@@ -93,7 +105,9 @@ public partial class SettingsWindow : Window
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
         var globeState = _globeConnectionService.State;
         _isSocialAccountLinked = globeState.IsLinked;
+        _isSocialSharingAvailable = globeState.CanShare;
         _socialProfile = globeState.Profile;
+        _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
         AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
         UpdateSocialPanel(animate: false);
         if (_socialProfile is not null)
@@ -267,7 +281,7 @@ public partial class SettingsWindow : Window
         }
         catch (Exception ex)
         {
-            AppDialogWindow.ShowWarning(this, "Could not open Globe", ex.Message);
+            AppDialogWindow.ShowWarning(this, "could not open globe", ex.Message);
         }
     }
 
@@ -282,15 +296,16 @@ public partial class SettingsWindow : Window
         {
             AppDialogWindow.ShowWarning(
                 this,
-                "Checking Globe link",
-                "Mystral is still checking the saved Globe link. Wait a moment and try again.");
+                "checking globe link",
+                "Mystral is still checking the saved globe link. wait a moment and try again.");
             return;
         }
 
+        _startSocialLinkRequested = false;
         var transitionId = ++_socialSignInTransitionId;
         using var cancellation = new CancellationTokenSource();
         _socialSignInCancellation = cancellation;
-        SocialSigningInText.Text = "Waiting for Globe approval...";
+        SocialSigningInText.Text = "waiting for globe approval...";
         SetSocialSigningInState(true);
 
         try
@@ -310,24 +325,40 @@ public partial class SettingsWindow : Window
             }
 
             _isSocialAccountLinked = true;
+            _isSocialSharingAvailable = true;
             _socialProfile = profile;
             AutomaticallyShareBurnsCheckBox.IsChecked = false;
             UpdateSocialPanel(animate: true);
             _ = RefreshSocialAvatarAsync(profile, animate: true);
             RefreshDirtyState();
-            AppDialogWindow.ShowConfirmation(
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowConfirmationWithBadge(
                 this,
-                "Globe account linked",
-                $"Mystral is now linked to {profile.DisplayUsername}.");
+                "globe account linked",
+                "your account is now linked to globe.",
+                "Resources/user.ico",
+                "Resources/checkmark.ico");
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (GlobeLinkCancelledException)
+        {
+            if (IsLoaded && transitionId == _socialSignInTransitionId)
+            {
+                SetSocialSigningInState(false);
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "link canceled",
+                    "the globe account link was canceled.");
+            }
         }
         catch (Exception ex)
         {
             if (IsLoaded)
             {
-                AppDialogWindow.ShowError(this, "Could not link Globe", ex.Message);
+                SetSocialSigningInState(false);
+                AppDialogWindow.ShowError(this, "could not link globe", ex.Message);
             }
         }
         finally
@@ -340,6 +371,42 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private void TryStartRequestedSocialLink()
+    {
+        if (!_startSocialLinkRequested || !IsLoaded)
+        {
+            return;
+        }
+
+        if (_isSocialSigningIn)
+        {
+            _startSocialLinkRequested = false;
+            return;
+        }
+
+        if (_isSocialAccountLinked)
+        {
+            if (_globeConnectionService.State.Status == GlobeConnectionStatus.Validating
+                && _globeConnectionService.HasStoredToken)
+            {
+                return;
+            }
+
+            _startSocialLinkRequested = false;
+            return;
+        }
+
+        // A cached token may still be completing its initial validation. Wait
+        // for StateChanged instead of opening a second, conflicting flow.
+        if (_globeConnectionService.HasStoredToken)
+        {
+            return;
+        }
+
+        _startSocialLinkRequested = false;
+        LinkSocialAccount_Click(this, new RoutedEventArgs());
+    }
+
     private async void UnlinkSocialAccount_Click(object sender, RoutedEventArgs e)
     {
         CancelSocialSignIn(restoreProfile: true);
@@ -350,31 +417,36 @@ public partial class SettingsWindow : Window
 
         if (AppDialogWindow.ShowQuestion(
                 this,
-                "Unlink Globe account",
-                "Unlink this Globe account from Mystral?") != MessageBoxResult.Yes)
+                "unlink globe account",
+                "Are you sure you want to unlink your account?") != MessageBoxResult.Yes)
         {
             return;
         }
 
-        SocialSigningInText.Text = "Unlinking from Globe...";
+        SocialSigningInText.Text = "unlinking from globe...";
         SetSocialSigningInState(true);
         try
         {
             await _globeConnectionService.UnlinkAsync();
             _isSocialAccountLinked = false;
+            _isSocialSharingAvailable = false;
             _socialProfile = null;
             _socialProfileImage = null;
             AutomaticallyShareBurnsCheckBox.IsChecked = false;
             UpdateSocialPanel(animate: true);
             RefreshDirtyState();
-            AppDialogWindow.ShowConfirmation(
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowConfirmationWithBadge(
                 this,
-                "Globe account unlinked",
-                "Your Globe account was unlinked from Mystral.");
+                "account unlinked",
+                "your account was unlinked successfully.",
+                "Resources/user.ico",
+                "Resources/cross.ico");
         }
         catch (Exception ex)
         {
-            AppDialogWindow.ShowError(this, "Could not unlink Globe", ex.Message);
+            SetSocialSigningInState(false);
+            AppDialogWindow.ShowError(this, "could not unlink globe", ex.Message);
         }
         finally
         {
@@ -394,7 +466,9 @@ public partial class SettingsWindow : Window
         SocialSigningInPanel.Visibility = isSigningIn
             ? Visibility.Visible
             : Visibility.Collapsed;
-        AutomaticallyShareBurnsCheckBox.IsEnabled = !isSigningIn && _isSocialAccountLinked;
+        AutomaticallyShareBurnsCheckBox.IsEnabled = !isSigningIn
+            && _isSocialAccountLinked
+            && _isSocialSharingAvailable;
 
         if (isSigningIn)
         {
@@ -471,12 +545,20 @@ public partial class SettingsWindow : Window
         }
 
         var wasLinked = _isSocialAccountLinked;
+        var previousAvatarUrl = _socialProfile?.AvatarUrl;
         _isSocialAccountLinked = e.State.IsLinked;
+        _isSocialSharingAvailable = e.State.CanShare;
         _socialProfile = e.State.Profile;
         if (e.State.Status == GlobeConnectionStatus.Unlinked)
         {
             _socialProfileImage = null;
             AutomaticallyShareBurnsCheckBox.IsChecked = false;
+        }
+        else if (_socialProfile is not null
+                 && (!string.Equals(previousAvatarUrl, _socialProfile.AvatarUrl, StringComparison.Ordinal)
+                     || _socialProfileImage is null))
+        {
+            _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
         }
 
         UpdateSocialPanel(animate: wasLinked != _isSocialAccountLinked);
@@ -487,6 +569,7 @@ public partial class SettingsWindow : Window
             _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
         }
         RefreshDirtyState();
+        TryStartRequestedSocialLink();
     }
 
     private async Task RefreshSocialAvatarAsync(GlobeProfile profile, bool animate)
@@ -494,8 +577,7 @@ public partial class SettingsWindow : Window
         var generation = ++_socialAvatarGeneration;
         var placeholder = IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png");
         if (!Uri.TryCreate(profile.AvatarUrl, UriKind.Absolute, out var avatarUri)
-            || (avatarUri.Scheme != Uri.UriSchemeHttp
-                && avatarUri.Scheme != Uri.UriSchemeHttps))
+            || !AppMetadata.IsTrustedGlobeAvatarUri(avatarUri))
         {
             _socialProfileImage = placeholder;
             UpdateSocialPanel(animate);
@@ -504,29 +586,30 @@ public partial class SettingsWindow : Window
 
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            using var response = await client.GetAsync(
-                avatarUri,
-                HttpCompletionOption.ResponseHeadersRead);
+            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            {
+                Timeout = TimeSpan.FromSeconds(15)
+            };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
+            using var request = new HttpRequestMessage(HttpMethod.Get, avatarUri);
+            request.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue
+            {
+                NoCache = true
+            };
+            using var response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
             response.EnsureSuccessStatusCode();
-            if (response.Content.Headers.ContentLength is > 5 * 1024 * 1024)
+            if (response.Content.Headers.ContentLength is > MaximumSocialAvatarDownloadBytes)
             {
-                throw new InvalidDataException("The Globe profile image is too large.");
+                throw new InvalidDataException("The globe profile image is too large.");
             }
 
-            var bytes = await response.Content.ReadAsByteArrayAsync();
-            if (bytes.Length > 5 * 1024 * 1024)
-            {
-                throw new InvalidDataException("The Globe profile image is too large.");
-            }
+            var bytes = await ReadSocialAvatarBytesAsync(response.Content, timeout.Token);
 
-            using var stream = new MemoryStream(bytes, writable: false);
-            var image = new System.Windows.Media.Imaging.BitmapImage();
-            image.BeginInit();
-            image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
-            image.StreamSource = stream;
-            image.EndInit();
-            image.Freeze();
+            var image = DecodeSocialAvatar(bytes);
             if (generation != _socialAvatarGeneration
                 || _socialProfile?.AvatarUrl != profile.AvatarUrl
                 || !IsLoaded)
@@ -535,6 +618,7 @@ public partial class SettingsWindow : Window
             }
 
             _socialProfileImage = image;
+            _globeConnectionService.CacheAvatar(profile, EncodeSocialAvatar(image));
             UpdateSocialPanel(animate);
         }
         catch
@@ -543,20 +627,144 @@ public partial class SettingsWindow : Window
                 && _socialProfile?.AvatarUrl == profile.AvatarUrl
                 && IsLoaded)
             {
-                _socialProfileImage = placeholder;
+                _socialProfileImage ??= placeholder;
                 UpdateSocialPanel(animate);
             }
         }
     }
 
+    private ImageSource? TryLoadCachedSocialAvatar(GlobeProfile? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        var bytes = _globeConnectionService.GetCachedAvatar(profile.AvatarUrl);
+        if (bytes is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return DecodeSocialAvatar(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static System.Windows.Media.Imaging.BitmapSource DecodeSocialAvatar(byte[] bytes)
+    {
+        using var metadataStream = new MemoryStream(bytes, writable: false);
+        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+            metadataStream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+            System.Windows.Media.Imaging.BitmapCacheOption.None);
+        if (decoder.Frames.Count == 0)
+        {
+            throw new InvalidDataException("The globe profile image is invalid.");
+        }
+
+        var sourceWidth = decoder.Frames[0].PixelWidth;
+        var sourceHeight = decoder.Frames[0].PixelHeight;
+        if (!AreSocialAvatarDimensionsSafe(sourceWidth, sourceHeight))
+        {
+            throw new InvalidDataException("The globe profile image dimensions are not supported.");
+        }
+
+        using var stream = new MemoryStream(bytes, writable: false);
+        var image = new System.Windows.Media.Imaging.BitmapImage();
+        image.BeginInit();
+        image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        if (sourceWidth >= sourceHeight)
+        {
+            image.DecodePixelWidth = SocialAvatarDecodeDimension;
+        }
+        else
+        {
+            image.DecodePixelHeight = SocialAvatarDecodeDimension;
+        }
+        image.StreamSource = stream;
+        image.EndInit();
+        if (image.PixelWidth <= 0
+            || image.PixelHeight <= 0
+            || image.PixelWidth > SocialAvatarDecodeDimension
+            || image.PixelHeight > SocialAvatarDecodeDimension)
+        {
+            throw new InvalidDataException("The globe profile image is invalid.");
+        }
+
+        image.Freeze();
+        return image;
+    }
+
+    internal static bool AreSocialAvatarDimensionsSafe(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        var smallerDimension = Math.Min(width, height);
+        var largerDimension = Math.Max(width, height);
+        return largerDimension <= MaximumSocialAvatarSourceDimension
+               && (long)width * height <= MaximumSocialAvatarSourcePixels
+               && (long)largerDimension <= (long)smallerDimension * MaximumSocialAvatarAspectRatio;
+    }
+
+    private static async Task<byte[]> ReadSocialAvatarBytesAsync(
+        HttpContent content,
+        CancellationToken cancellationToken)
+    {
+        await using var input = await content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0)
+            {
+                return output.ToArray();
+            }
+
+            if (output.Length + read > MaximumSocialAvatarDownloadBytes)
+            {
+                throw new InvalidDataException("The globe profile image is too large.");
+            }
+
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+    }
+
+    private static byte[] EncodeSocialAvatar(System.Windows.Media.Imaging.BitmapSource image)
+    {
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
     private void UpdateSocialPanel(bool animate)
     {
-        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked && !_isSocialSigningIn;
+        AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked
+            && _isSocialSharingAvailable
+            && !_isSocialSigningIn;
+        AutomaticallyShareBurnsCheckBox.ToolTip = _isSocialAccountLinked && !_isSocialSharingAvailable
+            ? "sharing will be available when globe reconnects"
+            : null;
         var profile = _socialProfile;
-        SocialUsernameText.Text = profile?.DisplayUsername ?? string.Empty;
-        SocialDisplayNameText.Text = profile?.DisplayName ?? string.Empty;
+        SocialUsernameText.Text = profile?.DisplayUsername
+            ?? (_isSocialAccountLinked ? "globe unavailable" : string.Empty);
+        SocialDisplayNameText.Text = profile?.DisplayName
+            ?? (_isSocialAccountLinked ? "account linked" : string.Empty);
         var cdCount = profile?.CdCount ?? 0;
-        SocialCdCountText.Text = $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
+        SocialCdCountText.Text = profile is null && _isSocialAccountLinked
+            ? "account details will refresh when globe reconnects"
+            : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
         SocialProfileFrame.SetProfile(
             _isSocialAccountLinked,
             _socialProfileImage

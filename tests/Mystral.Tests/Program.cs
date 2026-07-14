@@ -26,6 +26,12 @@ internal static class Program
             ("desktop activation accepts only the environment-specific Social route", DesktopActivationServiceTests.ValidatesProtocolRoute),
             ("Globe service links, refreshes profiles, shares idempotently, and unlinks", GlobeConnectionServiceTests.LinksSharesAndUnlinks),
             ("Globe service detects revoked tokens once and disables sharing", GlobeConnectionServiceTests.DetectsRevocationOnce),
+            ("Globe service caches profiles, survives outages, and recovers", GlobeConnectionServiceTests.CachesProfileAndSurvivesOutages),
+            ("Globe duplicate burn retries reconcile the live CD total", GlobeConnectionServiceTests.ReconcilesDuplicateBurnCount),
+            ("Globe linking distinguishes browser cancellation", GlobeConnectionServiceTests.DetectsBrowserCancellation),
+            ("Globe linking retains protected tokens until acknowledgement recovers", GlobeConnectionServiceTests.RecoversPendingAcknowledgement),
+            ("Globe missing claim and revoke endpoints fail safely", GlobeConnectionServiceTests.TreatsMissingEndpointsAsFailures),
+            ("Globe avatar dimensions reject oversized and extreme inputs", GlobeConnectionServiceTests.ValidatesAvatarDimensions),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
             ("lyrics service keys, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
@@ -106,6 +112,16 @@ static class DesktopActivationServiceTests
         Check.False(DesktopActivationService.IsSocialSettingsActivation($"{scheme}://settings/social/extra"));
         Check.False(DesktopActivationService.IsSocialSettingsActivation(
             scheme == "mystral" ? "mystral-dev://settings/social" : "mystral://settings/social"));
+        var localGlobe = new Uri("http://localhost:3000/");
+        Check.True(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("http://localhost:3000/avatars/user.png"),
+            localGlobe));
+        Check.False(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("https://untrusted.example/avatar.png"),
+            localGlobe));
+        Check.False(Mystral.Configuration.AppMetadata.IsTrustedGlobeAvatarUri(
+            new Uri("http://user:password@localhost:3000/avatar.png"),
+            localGlobe));
 
         var socialActivation = $"{scheme}://settings/social";
         Check.Equal(
@@ -356,8 +372,13 @@ static class GlobeConnectionServiceTests
         });
 
         var claimCalls = 0;
+        var acknowledgeCalls = 0;
+        var revokeCalls = 0;
         var burnCalls = 0;
+        var serverCdCount = 0;
         var burnIds = new List<string>();
+        string? codeChallenge = null;
+        string? codeVerifier = null;
         var handler = new FakeHttpMessageHandler(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
@@ -366,15 +387,33 @@ static class GlobeConnectionServiceTests
                 Check.Equal(HttpMethod.Post, request.Method);
                 claimCalls++;
                 using var claimBody = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-                var linkCode = claimBody.RootElement.GetProperty("link_code").GetString();
+                var claimRoot = claimBody.RootElement;
+                var linkCode = claimRoot.GetProperty("link_code").GetString();
                 Check.True(!string.IsNullOrWhiteSpace(linkCode));
                 if (claimCalls == 1)
                 {
+                    codeChallenge = claimRoot.GetProperty("code_challenge").GetString();
+                    Check.True(!string.IsNullOrWhiteSpace(codeChallenge));
+                    Check.Equal(43, codeChallenge!.Length);
+                    Check.False(codeChallenge.Contains('='));
+                    Check.False(claimRoot.TryGetProperty("code_verifier", out _));
                     return new HttpResponseMessage(HttpStatusCode.Accepted)
                     {
                         Content = new StringContent("{\"pending\":true}", Encoding.UTF8, "application/json")
                     };
                 }
+
+                codeVerifier = claimRoot.GetProperty("code_verifier").GetString();
+                Check.True(!string.IsNullOrWhiteSpace(codeVerifier));
+                Check.Equal(43, codeVerifier!.Length);
+                Check.False(codeVerifier.Contains('='));
+                Check.False(claimRoot.TryGetProperty("code_challenge", out _));
+                var expectedChallenge = Convert.ToBase64String(
+                        System.Security.Cryptography.SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)))
+                    .TrimEnd('=')
+                    .Replace('+', '-')
+                    .Replace('/', '_');
+                Check.Equal(expectedChallenge, codeChallenge);
 
                 return Json(new
                 {
@@ -388,6 +427,16 @@ static class GlobeConnectionServiceTests
 
             Check.Equal("Bearer", request.Headers.Authorization?.Scheme);
             Check.Equal("globe-secret-token", request.Headers.Authorization?.Parameter);
+            if (path == "/api/mystral/link/ack")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                acknowledgeCalls++;
+                Check.Equal(
+                    "globe-secret-token",
+                    secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+                return Json(new { linked = true, acknowledged = true });
+            }
+
             if (path == "/api/mystral/link/status")
             {
                 Check.Equal(HttpMethod.Get, request.Method);
@@ -396,7 +445,8 @@ static class GlobeConnectionServiceTests
                     linked = true,
                     username = "listener",
                     name = "Changed Name",
-                    avatar_url = "/avatars/updated.png"
+                    avatar_url = "/avatars/updated.png",
+                    cd_count = serverCdCount
                 });
             }
 
@@ -412,7 +462,7 @@ static class GlobeConnectionServiceTests
                 Check.Equal("Album", root.GetProperty("album").GetString());
                 Check.Equal("Artist", root.GetProperty("artist").GetString());
                 Check.Equal(12, root.GetProperty("track_count").GetInt32());
-                if (burnCalls <= 2)
+                if (burnCalls <= 3)
                 {
                     Check.Contains("data:image/png;base64,", root.GetProperty("cover").GetString()!);
                 }
@@ -431,10 +481,20 @@ static class GlobeConnectionServiceTests
                     return limited;
                 }
 
+                var created = burnCalls is not 3 and not 7;
+                if (created)
+                {
+                    serverCdCount++;
+                }
+
                 return new HttpResponseMessage(HttpStatusCode.Created)
                 {
                     Content = new StringContent(
-                        "{\"shared\":true,\"created\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
+                        burnCalls == 3
+                            ? "{\"shared\":true,\"created\":false,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
+                            : burnCalls == 7
+                                ? "{\"shared\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}"
+                                : "{\"shared\":true,\"created\":true,\"burn\":{\"id\":41,\"postId\":82},\"post\":{\"id\":82}}",
                         Encoding.UTF8,
                         "application/json")
                 };
@@ -443,6 +503,17 @@ static class GlobeConnectionServiceTests
             if (path == "/api/mystral/link/revoke")
             {
                 Check.Equal(HttpMethod.Post, request.Method);
+                revokeCalls++;
+                if (revokeCalls == 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":\"route_not_found\"}",
+                            Encoding.UTF8,
+                            "application/json")
+                    };
+                }
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
 
@@ -463,15 +534,22 @@ static class GlobeConnectionServiceTests
             });
 
         Uri? approvalUri = null;
-        var linkedProfile = connection.LinkAsync(uri => approvalUri = uri).GetAwaiter().GetResult();
+        var linkedProfile = connection.LinkAsync(uri =>
+        {
+            Check.Equal(1, claimCalls);
+            approvalUri = uri;
+        }).GetAwaiter().GetResult();
         Check.NotNull(approvalUri);
         Check.Equal("/settings/connections/mystral/approve", approvalUri!.AbsolutePath);
         Check.Contains("code=", approvalUri.Query);
         Check.Equal(2, claimCalls);
+        Check.Equal(1, acknowledgeCalls);
+        Check.NotNull(codeVerifier);
         Check.Equal("listener", linkedProfile.DisplayName);
         Check.Equal("@listener", linkedProfile.DisplayUsername);
         Check.True(connection.State.IsLinked);
         Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+        Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
 
         Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
         Check.Equal("Changed Name", connection.State.Profile!.DisplayName);
@@ -505,6 +583,13 @@ static class GlobeConnectionServiceTests
         Check.Equal("41", shared.CollectionEntryId);
         Check.Equal(2, burnIds.Count);
         Check.Equal(burnIds[0], burnIds[1]);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+
+        var duplicate = connection.ShareBurnAsync(request).GetAwaiter().GetResult();
+        Check.False(duplicate.Created);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+        Check.Equal(3, burnIds.Count);
+        Check.Equal(burnIds[0], burnIds[2]);
 
         var oversizedCover = new byte[(5 * 1024 * 1024) + 1];
         oversizedCover[0] = 0x89;
@@ -519,7 +604,37 @@ static class GlobeConnectionServiceTests
             oversizedCover,
             "oversized-cover-burn")).GetAwaiter().GetResult();
 
+        Task.WhenAll(
+            connection.ShareBurnAsync(new GlobeBurnShareRequest(
+                "Album",
+                "Artist",
+                DateTimeOffset.UtcNow,
+                12,
+                burnId: "concurrent-burn-a")),
+            connection.ShareBurnAsync(new GlobeBurnShareRequest(
+                "Album",
+                "Artist",
+                DateTimeOffset.UtcNow,
+                12,
+                burnId: "concurrent-burn-b"))).GetAwaiter().GetResult();
+        Check.Equal(4, connection.State.Profile!.CdCount);
+
+        var unspecifiedCreation = connection.ShareBurnAsync(new GlobeBurnShareRequest(
+            "Album",
+            "Artist",
+            DateTimeOffset.UtcNow,
+            12,
+            burnId: "unspecified-created-burn")).GetAwaiter().GetResult();
+        Check.False(unspecifiedCreation.Created);
+        Check.Equal(4, connection.State.Profile!.CdCount);
+
+        Check.Throws<GlobeApiException>(() => connection.UnlinkAsync().GetAwaiter().GetResult());
+        Check.True(connection.State.IsLinked);
+        Check.True(connection.HasStoredToken);
+        Check.Equal("globe-secret-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+
         connection.UnlinkAsync().GetAwaiter().GetResult();
+        Check.Equal(2, revokeCalls);
         Check.False(connection.State.IsLinked);
         Check.False(connection.HasStoredToken);
         Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
@@ -570,10 +685,457 @@ static class GlobeConnectionServiceTests
         Check.Equal(1, statusCalls);
         Check.Equal(1, revocations);
         Check.Equal(GlobeLinkRevocationSource.StatusCheck, revocation!.Source);
-        Check.Equal("Your Globe account is no longer linked.", revocation.Message);
+        Check.Equal("your globe account is no longer linked.", revocation.Message);
         Check.Null(secureStore.Read(GlobeConnectionService.TokenCredentialKey));
         Check.False(settings.Settings.Social.AutomaticallyShareBurns);
         Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
+    }
+
+    public static void CachesProfileAndSurvivesOutages()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        settings.Save(new AppSettings
+        {
+            Social = new SocialSettings { AutomaticallyShareBurns = true }
+        });
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "cached-token");
+
+        var mode = 0;
+        var statusCalls = 0;
+        var burnCalls = 0;
+        var retryBurnIds = new List<string>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            Check.Equal("cached-token", request.Headers.Authorization?.Parameter);
+            if (path == "/api/mystral/burns")
+            {
+                Check.Equal(HttpMethod.Post, request.Method);
+                Check.Equal(2, mode);
+                burnCalls++;
+                retryBurnIds.Add(request.Headers.GetValues("Idempotency-Key").Single());
+                return new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(
+                        "{\"shared\":true,\"created\":true,\"burn\":{\"id\":91},\"post\":{\"id\":92}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            Check.Equal("/api/mystral/link/status", path);
+            statusCalls++;
+            if (mode == 1)
+            {
+                throw new HttpRequestException("server offline");
+            }
+
+            return Json(new
+            {
+                linked = true,
+                username = "listener",
+                name = mode == 2 ? "Updated Listener" : "Cached Listener",
+                avatar_url = mode == 2 ? "/avatars/new.png" : "/avatars/cached.png",
+                cd_count = mode == 2 ? 8 : 7
+            });
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using (var first = new GlobeConnectionService(apiClient, secureStore, settings))
+        {
+            Check.True(first.ValidateAsync().GetAwaiter().GetResult());
+            first.CacheAvatar(first.State.Profile!, [1, 2, 3, 4]);
+        }
+
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        Check.True(connection.State.IsLinked);
+        Check.False(connection.State.CanShare);
+        Check.Equal("Cached Listener", connection.State.Profile!.DisplayName);
+        Check.Sequence(new byte[] { 1, 2, 3, 4 }, connection.GetCachedAvatar(connection.State.Profile.AvatarUrl)!);
+
+        var outageWarnings = 0;
+        connection.ServerUnavailable += (_, _) => outageWarnings++;
+        mode = 1;
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(GlobeConnectionStatus.Offline, connection.State.Status);
+        Check.True(connection.State.IsLinked);
+        Check.False(connection.State.CanShare);
+        Check.True(connection.HasStoredToken);
+        Check.True(settings.Settings.Social.AutomaticallyShareBurns);
+        Check.Equal(1, outageWarnings);
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(1, outageWarnings);
+
+        mode = 2;
+        var statusCallsBeforeRetry = statusCalls;
+        var offlineRetry = new GlobeBurnShareRequest(
+            "Recovered Album",
+            "Recovered Artist",
+            DateTimeOffset.UtcNow,
+            9,
+            burnId: "offline-retry-burn-id");
+        var retryResult = connection.ShareBurnAsync(offlineRetry).GetAwaiter().GetResult();
+        Check.True(retryResult.Created);
+        Check.Equal(statusCallsBeforeRetry + 1, statusCalls);
+        Check.Equal(1, burnCalls);
+        Check.Sequence(new[] { offlineRetry.BurnId }, retryBurnIds);
+        Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+        Check.True(connection.State.CanShare);
+        Check.Equal("Updated Listener", connection.State.Profile!.DisplayName);
+        Check.Equal(9, connection.State.Profile.CdCount);
+        Check.Null(connection.GetCachedAvatar(connection.State.Profile.AvatarUrl));
+
+        mode = 1;
+        Check.False(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(2, outageWarnings);
+
+        var noCacheStore = new MemorySecureCredentialStore();
+        noCacheStore.Write(GlobeConnectionService.TokenCredentialKey, "cached-token");
+        var noCacheSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "no-cache-settings.json"),
+            noCacheStore);
+        noCacheSettings.Save(new AppSettings
+        {
+            Social = new SocialSettings { AutomaticallyShareBurns = true }
+        });
+        using var noCacheConnection = new GlobeConnectionService(
+            apiClient,
+            noCacheStore,
+            noCacheSettings);
+        Check.False(noCacheConnection.State.IsLinked);
+        Check.False(noCacheConnection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(GlobeConnectionStatus.Offline, noCacheConnection.State.Status);
+        Check.True(noCacheConnection.State.IsLinked);
+        Check.True(noCacheConnection.HasStoredToken);
+        Check.True(noCacheSettings.Settings.Social.AutomaticallyShareBurns);
+    }
+
+    public static void DetectsBrowserCancellation()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        var claimCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/claim", request.RequestUri!.AbsolutePath);
+            claimCalls++;
+            if (claimCalls == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.Accepted);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Gone)
+            {
+                Content = new StringContent(
+                    "{\"error\":\"link_code_cancelled\",\"message\":\"this Mystral link request was cancelled\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(
+            apiClient,
+            secureStore,
+            settings,
+            new GlobeConnectionOptions
+            {
+                LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                LinkTimeout = TimeSpan.FromSeconds(1)
+            });
+        Uri? opened = null;
+        Check.Throws<GlobeLinkCancelledException>(() =>
+            connection.LinkAsync(uri => opened = uri).GetAwaiter().GetResult());
+        Check.NotNull(opened);
+        Check.Equal(2, claimCalls);
+        Check.Equal(GlobeConnectionStatus.Unlinked, connection.State.Status);
+        Check.False(connection.HasStoredToken);
+    }
+
+    public static void ReconcilesDuplicateBurnCount()
+    {
+        using var temp = TempDir.Create();
+        var secureStore = new MemorySecureCredentialStore();
+        secureStore.Write(GlobeConnectionService.TokenCredentialKey, "duplicate-token");
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+        var burnReachedServer = false;
+        var statusCalls = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("duplicate-token", request.Headers.Authorization?.Parameter);
+            if (request.RequestUri!.AbsolutePath == "/api/mystral/burns")
+            {
+                burnReachedServer = true;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "{\"shared\":true,\"created\":false,\"burn\":{\"id\":51,\"postId\":52},\"post\":{\"id\":52}}",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            Check.Equal("/api/mystral/link/status", request.RequestUri.AbsolutePath);
+            statusCalls++;
+            return Json(new
+            {
+                linked = true,
+                username = "duplicate-listener",
+                name = "Duplicate Listener",
+                avatar_url = "/avatars/duplicate.png",
+                cd_count = burnReachedServer ? 1 : 0
+            });
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        using var connection = new GlobeConnectionService(apiClient, secureStore, settings);
+        Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+        Check.Equal(0, connection.State.Profile!.CdCount);
+
+        var retryRequest = new GlobeBurnShareRequest(
+            "Recovered Album",
+            "Recovered Artist",
+            DateTimeOffset.UtcNow,
+            10,
+            burnId: "lost-response-burn");
+        var duplicate = connection.ShareBurnAsync(retryRequest).GetAwaiter().GetResult();
+        Check.False(duplicate.Created);
+        Check.Equal(2, statusCalls);
+        Check.Equal(1, connection.State.Profile!.CdCount);
+
+        using var falseSuccessHttpClient = new HttpClient(new FakeHttpMessageHandler(_ => Json(new
+        {
+            shared = false,
+            created = false
+        })));
+        using var falseSuccessApiClient = new GlobeApiClient(
+            falseSuccessHttpClient,
+            new Uri("http://localhost:3000/"));
+        Check.Throws<GlobeApiException>(() =>
+            falseSuccessApiClient.ShareBurnAsync("token", retryRequest).GetAwaiter().GetResult());
+    }
+
+    public static void RecoversPendingAcknowledgement()
+    {
+        RunScenario(cancelDuringAcknowledgement: false, statusCanRecoverLostAcknowledgement: false);
+        RunScenario(cancelDuringAcknowledgement: true, statusCanRecoverLostAcknowledgement: false);
+        RunScenario(cancelDuringAcknowledgement: false, statusCanRecoverLostAcknowledgement: true);
+
+        static void RunScenario(
+            bool cancelDuringAcknowledgement,
+            bool statusCanRecoverLostAcknowledgement)
+        {
+            using var temp = TempDir.Create();
+            var secureStore = new MemorySecureCredentialStore();
+            var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"), secureStore);
+            using var cancellation = new CancellationTokenSource();
+            var claimCalls = 0;
+            var acknowledgeCalls = 0;
+            var statusCalls = 0;
+            var acknowledgementAvailable = false;
+            var handler = new FakeHttpMessageHandler(request =>
+            {
+                var path = request.RequestUri!.AbsolutePath;
+                if (path == "/api/mystral/link/claim")
+                {
+                    claimCalls++;
+                    return claimCalls == 1
+                        ? new HttpResponseMessage(HttpStatusCode.Accepted)
+                        : Json(new
+                        {
+                            linked = true,
+                            token = "pending-ack-token",
+                            username = "pending-listener",
+                            name = "Pending Listener",
+                            avatar_url = "/avatars/pending.png",
+                            cd_count = 3
+                        });
+                }
+
+                Check.Equal("pending-ack-token", request.Headers.Authorization?.Parameter);
+                if (path == "/api/mystral/link/ack")
+                {
+                    acknowledgeCalls++;
+                    Check.Equal(
+                        "pending-ack-token",
+                        secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+                    if (!acknowledgementAvailable)
+                    {
+                        if (cancelDuringAcknowledgement)
+                        {
+                            cancellation.Cancel();
+                            throw new OperationCanceledException(cancellation.Token);
+                        }
+
+                        throw new HttpRequestException("ack response was lost");
+                    }
+
+                    return Json(new { linked = true, acknowledged = true });
+                }
+
+                Check.Equal("/api/mystral/link/status", path);
+                statusCalls++;
+                if (!acknowledgementAvailable && !statusCanRecoverLostAcknowledgement)
+                {
+                    throw new HttpRequestException("status response was also lost");
+                }
+
+                return Json(new
+                {
+                    linked = true,
+                    username = "pending-listener",
+                    name = "Recovered Listener",
+                    avatar_url = "/avatars/recovered.png",
+                    cd_count = 4
+                });
+            });
+
+            using var httpClient = new HttpClient(handler);
+            using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+            using var connection = new GlobeConnectionService(
+                apiClient,
+                secureStore,
+                settings,
+                new GlobeConnectionOptions
+                {
+                    LinkPollInterval = TimeSpan.FromMilliseconds(1),
+                    LinkTimeout = TimeSpan.FromSeconds(1),
+                    StatusPollInterval = TimeSpan.FromHours(1)
+                });
+
+            if (statusCanRecoverLostAcknowledgement)
+            {
+                var recoveredDuringLink = connection.LinkAsync(_ => { }).GetAwaiter().GetResult();
+                Check.Equal("Recovered Listener", recoveredDuringLink.DisplayName);
+                Check.Equal(3, acknowledgeCalls);
+                Check.Equal(1, statusCalls);
+                Check.True(connection.HasStoredToken);
+                Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+                Check.True(connection.State.CanShare);
+                Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+                return;
+            }
+
+            if (cancelDuringAcknowledgement)
+            {
+                Check.Throws<OperationCanceledException>(() =>
+                    connection.LinkAsync(_ => { }, cancellation.Token).GetAwaiter().GetResult());
+                Check.Equal(1, acknowledgeCalls);
+                Check.Equal(0, statusCalls);
+            }
+            else
+            {
+                Check.Throws<GlobeUnavailableException>(() =>
+                    connection.LinkAsync(_ => { }).GetAwaiter().GetResult());
+                Check.Equal(3, acknowledgeCalls);
+                Check.Equal(1, statusCalls);
+            }
+
+            Check.True(connection.HasStoredToken);
+            Check.Equal("pending-ack-token", secureStore.Read(GlobeConnectionService.TokenCredentialKey));
+            Check.Equal("pending", secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+            Check.Equal(GlobeConnectionStatus.Offline, connection.State.Status);
+            Check.True(connection.State.IsLinked);
+            Check.False(connection.State.CanShare);
+
+            acknowledgementAvailable = true;
+            Check.True(connection.ValidateAsync().GetAwaiter().GetResult());
+            Check.Equal(GlobeConnectionStatus.Linked, connection.State.Status);
+            Check.Equal("Recovered Listener", connection.State.Profile!.DisplayName);
+            Check.Null(secureStore.Read(GlobeConnectionService.LinkAckPendingCredentialKey));
+        }
+    }
+
+    public static void TreatsMissingEndpointsAsFailures()
+    {
+        using var temp = TempDir.Create();
+
+        var claimStore = new MemorySecureCredentialStore();
+        var claimSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "claim-settings.json"),
+            claimStore);
+        using (var claimHttpClient = new HttpClient(new FakeHttpMessageHandler(_ =>
+                   new HttpResponseMessage(HttpStatusCode.NotFound)
+                   {
+                       Content = new StringContent(
+                           "{\"error\":\"route_not_found\"}",
+                           Encoding.UTF8,
+                           "application/json")
+                   })))
+        using (var claimApiClient = new GlobeApiClient(
+                   claimHttpClient,
+                   new Uri("http://localhost:3000/")))
+        using (var claimConnection = new GlobeConnectionService(
+                   claimApiClient,
+                   claimStore,
+                   claimSettings))
+        {
+            var browserOpened = false;
+            Check.Throws<GlobeApiException>(() =>
+                claimConnection.LinkAsync(_ => browserOpened = true).GetAwaiter().GetResult());
+            Check.False(browserOpened);
+            Check.False(claimConnection.HasStoredToken);
+            Check.Equal(GlobeConnectionStatus.Unlinked, claimConnection.State.Status);
+        }
+
+        var revokeStore = new MemorySecureCredentialStore();
+        revokeStore.Write(GlobeConnectionService.TokenCredentialKey, "live-revoke-token");
+        var revokeSettings = new AppSettingsService(
+            Path.Combine(temp.Path, "revoke-settings.json"),
+            revokeStore);
+        using var revokeHttpClient = new HttpClient(new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/mystral/link/revoke", request.RequestUri!.AbsolutePath);
+            Check.Equal("live-revoke-token", request.Headers.Authorization?.Parameter);
+            return new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent(
+                    "{\"error\":\"route_not_found\"}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }));
+        using var revokeApiClient = new GlobeApiClient(
+            revokeHttpClient,
+            new Uri("http://localhost:3000/"));
+        using var revokeConnection = new GlobeConnectionService(
+            revokeApiClient,
+            revokeStore,
+            revokeSettings);
+        Check.Throws<GlobeApiException>(() =>
+            revokeConnection.UnlinkAsync().GetAwaiter().GetResult());
+        Check.True(revokeConnection.HasStoredToken);
+        Check.Equal("live-revoke-token", revokeStore.Read(GlobeConnectionService.TokenCredentialKey));
+    }
+
+    public static void ValidatesAvatarDimensions()
+    {
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(256, 256));
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8192, 4096));
+        Check.True(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(20, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(0, 256));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8193, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(8192, 4097));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(21, 1));
+        Check.False(Mystral.Views.SettingsWindow.AreSocialAvatarDimensionsSafe(int.MaxValue, int.MaxValue));
+
+        using var httpClient = new HttpClient(new FakeHttpMessageHandler(_ => Json(new
+        {
+            linked = true,
+            username = "safe-user",
+            name = "Safe User",
+            avatar_url = "https://untrusted.example/private-resource",
+            cd_count = 0
+        })));
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+        var profile = apiClient.GetStatusAsync("safe-token").GetAwaiter().GetResult();
+        Check.Equal(string.Empty, profile.AvatarUrl);
     }
 }
 

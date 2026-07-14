@@ -882,8 +882,10 @@ public partial class BurningWindow : Window
         GlobeBurnShareRequest shareRequest,
         bool showSuccess)
     {
-        var isLinked = _globeConnectionService.State.IsLinked;
-        var automaticallyShare = isLinked
+        var globeState = _globeConnectionService.State;
+        var isLinked = globeState.IsLinked;
+        var canShare = globeState.CanShare;
+        var automaticallyShare = canShare
             && _settingsService.Settings.Social.AutomaticallyShareBurns;
 
         if (automaticallyShare)
@@ -896,10 +898,10 @@ public partial class BurningWindow : Window
                     AppDialogWindow.ShowConfirmation(
                         this,
                         "Burn complete",
-                        "Successfully shared to your globe profile.");
+                        "Successfully burned and shared to your globe profile!");
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 if (!showSuccess)
                 {
@@ -908,10 +910,10 @@ public partial class BurningWindow : Window
 
                 var retry = AppDialogWindow.ShowAction(
                     this,
-                    "Burn complete — Globe share failed",
-                    $"Your CD was burned, but automatic sharing failed: {ex.Message}",
+                    "Burn complete — sharing failed",
+                    "Your CD was burned, but it couldn't be shared to globe. Check your connection and try again.",
                     "Retry",
-                    isError: true);
+                    isWarning: true);
                 if (retry)
                 {
                     ShowShareStatus(shareRequest);
@@ -922,6 +924,15 @@ public partial class BurningWindow : Window
 
         if (!showSuccess)
         {
+            return;
+        }
+
+        if (isLinked && !canShare)
+        {
+            AppDialogWindow.ShowWarning(
+                this,
+                "Burn complete — sharing unavailable",
+                "Your CD has been burned! globe is unavailable right now, so sharing is temporarily disabled.");
             return;
         }
 
@@ -943,7 +954,8 @@ public partial class BurningWindow : Window
             this,
             "Burn complete",
             "Your CD has been burned!",
-            "Link your globe account");
+            "Link your account to share to the internet",
+            placeActionOnNewLine: true);
         if (link && Application.Current.MainWindow is MainWindow mainWindow)
         {
             mainWindow.ActivateFromExternalRequest(openSocialSettings: true);

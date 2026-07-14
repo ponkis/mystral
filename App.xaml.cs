@@ -142,7 +142,9 @@ public partial class App : Application
             return;
         }
 
+        var openSocialSettings = DesktopActivationService.IsSocialSettingsActivation(activationArgument);
         mainWindow.ActivateFromExternalRequest(
-            DesktopActivationService.IsSocialSettingsActivation(activationArgument));
+            openSocialSettings,
+            startSocialLinking: openSocialSettings);
     }
 }

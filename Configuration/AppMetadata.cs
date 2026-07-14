@@ -22,6 +22,37 @@ public static class AppMetadata
         EnvironmentName == "Production" ? Name : $"{Name} {EnvironmentName}");
 
     public static Uri GlobeBaseUri { get; } = ResolveGlobeBaseUri();
+    public static Uri? GlobeAvatarCdnBaseUri { get; } = ResolveGlobeAvatarCdnBaseUri();
+
+    public static bool IsTrustedGlobeAvatarUri(Uri uri, Uri? globeBaseUri = null)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        if (!uri.IsAbsoluteUri || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            return false;
+        }
+
+        var globeBase = globeBaseUri ?? GlobeBaseUri;
+        if (HasSameOrigin(uri, globeBase))
+        {
+            return uri.Scheme == Uri.UriSchemeHttps
+                   || (globeBase.Scheme == Uri.UriSchemeHttp
+                       && uri.Scheme == Uri.UriSchemeHttp);
+        }
+
+        var cdnBase = GlobeAvatarCdnBaseUri;
+        if (cdnBase is null || !HasSameOrigin(uri, cdnBase))
+        {
+            return false;
+        }
+
+        var trustedPath = cdnBase.AbsolutePath.TrimEnd('/') + "/";
+        return (trustedPath == "/"
+                || uri.AbsolutePath.StartsWith(trustedPath, StringComparison.Ordinal))
+               && (uri.Scheme == Uri.UriSchemeHttps
+                   || (cdnBase.Scheme == Uri.UriSchemeHttp
+                       && uri.Scheme == Uri.UriSchemeHttp));
+    }
 
     private static string GetInformationalVersion()
     {
@@ -47,6 +78,37 @@ public static class AppMetadata
 #else
         return new Uri(GlobeProductionBaseUrl, UriKind.Absolute);
 #endif
+    }
+
+    private static Uri? ResolveGlobeAvatarCdnBaseUri()
+    {
+        var configured = typeof(AppMetadata).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute =>
+                string.Equals(attribute.Key, "GlobeAvatarCdnUrl", StringComparison.Ordinal))
+            ?.Value;
+#if APP_ENVIRONMENT_DEVELOPMENT
+        configured = Environment.GetEnvironmentVariable("MYSTRAL_GLOBE_AVATAR_CDN_URL")
+                     ?? configured;
+#endif
+        if (!Uri.TryCreate(configured, UriKind.Absolute, out var uri)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || (uri.Scheme != Uri.UriSchemeHttps
+                && (EnvironmentName != "Development" || uri.Scheme != Uri.UriSchemeHttp)))
+        {
+            return null;
+        }
+
+        return EnsureTrailingSlash(uri);
+    }
+
+    private static bool HasSameOrigin(Uri first, Uri second)
+    {
+        return string.Equals(first.Scheme, second.Scheme, StringComparison.OrdinalIgnoreCase)
+               && string.Equals(first.IdnHost, second.IdnHost, StringComparison.OrdinalIgnoreCase)
+               && first.Port == second.Port;
     }
 
     private static Uri EnsureTrailingSlash(Uri uri)

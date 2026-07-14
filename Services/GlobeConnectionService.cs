@@ -1,5 +1,9 @@
 using System.IO;
+using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Mystral.Models;
 
 namespace Mystral.Services;
@@ -12,6 +16,11 @@ namespace Mystral.Services;
 public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
 {
     internal const string TokenCredentialKey = "globe.api-token.v1";
+    internal const string ProfileCacheCredentialKey = "globe.profile-cache.v1";
+    internal const string LinkAckPendingCredentialKey = "globe.link-ack-pending.v1";
+    internal const int MaximumCachedAvatarBytes = 2 * 1024 * 1024;
+    internal const string OfflineMessage =
+        "globe might be offline. Mystral kept your account and will check again automatically. sharing is disabled until the connection returns.";
 
     private readonly GlobeApiClient _apiClient;
     private readonly ISecureCredentialStore _credentialStore;
@@ -21,11 +30,15 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
     private readonly object _sync = new();
     private readonly SemaphoreSlim _linkGate = new(1, 1);
     private readonly SemaphoreSlim _validationGate = new(1, 1);
+    private readonly SemaphoreSlim _shareGate = new(1, 1);
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
     private GlobeConnectionState _state;
     private string? _token;
+    private CachedGlobeProfile? _profileCache;
+    private bool _linkAcknowledgementPending;
+    private bool _serverUnavailableRaised;
     private bool _disposed;
 
     public GlobeConnectionService(
@@ -77,13 +90,51 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            loadError = "Mystral could not read the protected Globe token: " + ex.Message;
+            loadError = "Mystral could not read the protected globe token: " + ex.Message;
             _token = null;
+        }
+
+        if (_token is not null)
+        {
+            try
+            {
+                _profileCache = TryReadProfileCache();
+            }
+            catch
+            {
+                // A corrupt optional presentation cache must never sign the
+                // user out or prevent authoritative server validation.
+                _profileCache = null;
+                TryDeleteProfileCache();
+            }
+
+            try
+            {
+                _linkAcknowledgementPending = string.Equals(
+                    _credentialStore.Read(LinkAckPendingCredentialKey),
+                    "pending",
+                    StringComparison.Ordinal);
+            }
+            catch
+            {
+                _linkAcknowledgementPending = false;
+            }
         }
 
         _state = _token is null
             ? new GlobeConnectionState(GlobeConnectionStatus.Unlinked, ErrorMessage: loadError)
-            : new GlobeConnectionState(GlobeConnectionStatus.Validating);
+            : new GlobeConnectionState(
+                GlobeConnectionStatus.Validating,
+                _profileCache?.Profile,
+                IsChecking: true);
+        if (_state.IsLinked)
+        {
+            var settingsError = TrySetSettingsConnectionState(isLinked: true);
+            if (!string.IsNullOrWhiteSpace(settingsError))
+            {
+                _state = _state with { ErrorMessage = settingsError };
+            }
+        }
     }
 
     public event EventHandler<GlobeConnectionStateChangedEventArgs>? StateChanged;
@@ -93,6 +144,12 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
     /// does not raise this warning event.
     /// </summary>
     public event EventHandler<GlobeLinkRevokedEventArgs>? LinkRevoked;
+
+    /// <summary>
+    /// Raised once per status-check outage. A successful validation resets the
+    /// warning so a later, distinct outage can be surfaced.
+    /// </summary>
+    public event EventHandler<GlobeServerUnavailableEventArgs>? ServerUnavailable;
 
     public GlobeConnectionState State
     {
@@ -114,6 +171,52 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                 return _token is not null;
             }
         }
+    }
+
+    /// <summary>
+    /// Returns a defensive copy of the last safely decoded avatar for this
+    /// exact profile URL. The cache is protected by the same current-user
+    /// DPAPI store as the token.
+    /// </summary>
+    public byte[]? GetCachedAvatar(string avatarUrl)
+    {
+        lock (_sync)
+        {
+            return _profileCache is { AvatarBytes.Length: > 0 } cache
+                   && string.Equals(
+                       cache.Profile.AvatarUrl,
+                       avatarUrl,
+                       StringComparison.Ordinal)
+                ? cache.AvatarBytes.ToArray()
+                : null;
+        }
+    }
+
+    public void CacheAvatar(GlobeProfile profile, byte[] avatarBytes)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(avatarBytes);
+        if (avatarBytes.Length is 0 or > MaximumCachedAvatarBytes)
+        {
+            return;
+        }
+
+        CachedGlobeProfile cache;
+        lock (_sync)
+        {
+            if (_state.Profile is not { } current
+                || !string.Equals(current.UsernameWithoutAt, profile.UsernameWithoutAt, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(current.AvatarUrl, profile.AvatarUrl, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            cache = new CachedGlobeProfile(current, avatarBytes.ToArray());
+            _profileCache = cache;
+        }
+
+        TryWriteProfileCache(cache);
     }
 
     /// <summary>
@@ -183,52 +286,148 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(openApprovalPage);
         if (!await _linkGate.WaitAsync(0, cancellationToken))
         {
-            throw new InvalidOperationException("A Globe linking attempt is already in progress.");
+            throw new InvalidOperationException("A globe linking attempt is already in progress.");
         }
 
         try
         {
             if (HasStoredToken)
             {
-                throw new InvalidOperationException("A Globe token is already stored. Unlink it before linking another account.");
+                throw new InvalidOperationException("A globe token is already stored. Unlink it before linking another account.");
             }
 
             PublishState(new GlobeConnectionState(GlobeConnectionStatus.Linking));
             var linkCode = CreateLinkCode();
+            var codeVerifier = CreateCodeVerifier();
+            var codeChallenge = CreateCodeChallenge(codeVerifier);
             var approvalUri = _apiClient.CreateApprovalUri(linkCode);
+
+            // Register a live desktop poll before opening the browser. Globe's
+            // approval endpoint deliberately rejects codes with no recent
+            // desktop listener, so a fast click cannot race the first poll.
+            var initialClaim = await _apiClient.RegisterLinkAsync(
+                linkCode,
+                codeChallenge,
+                cancellationToken);
+            if (initialClaim.Status != GlobeLinkClaimStatus.Pending)
+            {
+                throw new GlobeApiException("globe could not start a new account link.");
+            }
+
             openApprovalPage(approvalUri);
 
             var deadline = DateTimeOffset.UtcNow + _options.LinkTimeout;
             while (DateTimeOffset.UtcNow < deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var claim = await _apiClient.ClaimLinkAsync(linkCode, cancellationToken);
+                var claim = await _apiClient.ClaimLinkAsync(
+                    linkCode,
+                    codeVerifier,
+                    cancellationToken);
                 if (claim.Status == GlobeLinkClaimStatus.Claimed)
                 {
                     if (claim.Profile is null)
                     {
-                        throw new GlobeApiException("Globe approved the link but did not return profile information.");
+                        throw new GlobeApiException("globe approved the link but did not return profile information.");
                     }
 
-                    _credentialStore.Write(TokenCredentialKey, claim.Token);
+                    try
+                    {
+                        _credentialStore.Write(TokenCredentialKey, claim.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new GlobeApiException(
+                            "Mystral couldn't safely store the new account link. please try again.",
+                            innerException: ex);
+                    }
+
                     lock (_sync)
                     {
                         _token = claim.Token.Trim();
+                        _linkAcknowledgementPending = true;
                     }
 
+                    CacheProvisionalProfile(claim.Profile);
+                    try
+                    {
+                        _credentialStore.Write(LinkAckPendingCredentialKey, "pending");
+                    }
+                    catch (Exception ex)
+                    {
+                        MarkAcknowledgementPending(claim.Profile);
+                        throw new GlobeUnavailableException(
+                            "Mystral couldn't finish linking right now. it will keep trying automatically.",
+                            ex);
+                    }
+
+                    bool acknowledged;
+                    try
+                    {
+                        acknowledged = await TryAcknowledgeLinkAsync(
+                            claim.Token,
+                            cancellationToken);
+                    }
+                    catch (GlobeAuthenticationException ex)
+                    {
+                        ClearLocalLink(
+                            GlobeLinkRevocationSource.StatusCheck,
+                            string.Empty,
+                            notifyRevoked: false);
+                        throw new GlobeApiException(
+                            "Mystral couldn't finish linking your account. please try again.",
+                            innerException: ex);
+                    }
+                    catch (Exception ex) when (!IsServerUnavailable(ex)
+                                               && ex is not OperationCanceledException)
+                    {
+                        ClearLocalLink(
+                            GlobeLinkRevocationSource.StatusCheck,
+                            string.Empty,
+                            notifyRevoked: false);
+                        throw new GlobeApiException(
+                            "Mystral couldn't finish linking your account. please try again.",
+                            innerException: ex);
+                    }
+
+                    if (!acknowledged)
+                    {
+                        var confirmedProfile = await TryAcknowledgeViaStatusAsync(
+                            claim.Token,
+                            cancellationToken);
+                        if (confirmedProfile is not null)
+                        {
+                            CompleteLinkAcknowledgement();
+                            var confirmedSettingsError = TrySetSettingsConnectionState(isLinked: true);
+                            PublishLinkedProfile(confirmedProfile, confirmedSettingsError);
+                            return confirmedProfile;
+                        }
+
+                        MarkAcknowledgementPending(claim.Profile);
+                        throw new GlobeUnavailableException(
+                            "Mystral couldn't finish linking right now. it will keep trying automatically.");
+                    }
+
+                    CompleteLinkAcknowledgement();
+
                     var settingsError = TrySetSettingsConnectionState(isLinked: true);
-                    PublishState(new GlobeConnectionState(
-                        GlobeConnectionStatus.Linked,
-                        claim.Profile,
-                        ErrorMessage: settingsError));
+                    PublishLinkedProfile(claim.Profile, settingsError);
                     return claim.Profile;
+                }
+
+                if (claim.Status == GlobeLinkClaimStatus.Cancelled)
+                {
+                    throw new GlobeLinkCancelledException(
+                        string.IsNullOrWhiteSpace(claim.Message)
+                            ? "the globe account link was canceled."
+                            : claim.Message);
                 }
 
                 if (claim.Status == GlobeLinkClaimStatus.Expired)
                 {
                     throw new GlobeLinkExpiredException(
                         string.IsNullOrWhiteSpace(claim.Message)
-                            ? "The Globe link code expired. Start linking again."
+                            ? "the globe link request expired. start again from Mystral."
                             : claim.Message);
                 }
 
@@ -243,18 +442,65 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                     cancellationToken);
             }
 
-            throw new GlobeLinkExpiredException("The Globe link code expired. Start linking again.");
+            throw new GlobeLinkExpiredException("the globe link request expired. start again from Mystral.");
         }
         catch (OperationCanceledException)
         {
-            PublishState(new GlobeConnectionState(GlobeConnectionStatus.Unlinked));
+            if (HasStoredToken)
+            {
+                MarkAcknowledgementPending(_profileCache?.Profile);
+            }
+            else
+            {
+                PublishState(new GlobeConnectionState(GlobeConnectionStatus.Unlinked));
+            }
             throw;
+        }
+        catch (GlobeAuthenticationException ex)
+        {
+            if (HasStoredToken)
+            {
+                ClearLocalLink(
+                    GlobeLinkRevocationSource.StatusCheck,
+                    string.Empty,
+                    notifyRevoked: false);
+            }
+            else
+            {
+                PublishState(new GlobeConnectionState(
+                    GlobeConnectionStatus.Unlinked,
+                    ErrorMessage: ex.Message));
+            }
+
+            throw new GlobeApiException(
+                "Mystral couldn't finish linking your account. please try again.",
+                innerException: ex);
+        }
+        catch (GlobeApiException ex) when (HasStoredToken && !IsServerUnavailable(ex))
+        {
+            ClearLocalLink(
+                GlobeLinkRevocationSource.StatusCheck,
+                string.Empty,
+                notifyRevoked: false);
+            throw new GlobeApiException(
+                "Mystral couldn't finish linking your account. please try again.",
+                innerException: ex);
         }
         catch (Exception ex)
         {
-            PublishState(new GlobeConnectionState(
-                GlobeConnectionStatus.Unlinked,
-                ErrorMessage: ex.Message));
+            if (HasStoredToken)
+            {
+                if (State.Status == GlobeConnectionStatus.Linking)
+                {
+                    MarkAcknowledgementPending(_profileCache?.Profile);
+                }
+            }
+            else
+            {
+                PublishState(new GlobeConnectionState(
+                    GlobeConnectionStatus.Unlinked,
+                    ErrorMessage: ex.Message));
+            }
             throw;
         }
         finally
@@ -294,12 +540,32 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
 
             try
             {
+                if (IsLinkAcknowledgementPending())
+                {
+                    var acknowledged = await TryAcknowledgeLinkAsync(token, cancellationToken);
+                    if (!acknowledged)
+                    {
+                        var confirmedProfile = await TryAcknowledgeViaStatusAsync(
+                            token,
+                            cancellationToken);
+                        if (confirmedProfile is null)
+                        {
+                            MarkAcknowledgementPending(previous.Profile ?? _profileCache?.Profile);
+                            return false;
+                        }
+
+                        CompleteLinkAcknowledgement();
+                        var confirmedSettingsError = TrySetSettingsConnectionState(isLinked: true);
+                        PublishLinkedProfile(confirmedProfile, confirmedSettingsError);
+                        return true;
+                    }
+
+                    CompleteLinkAcknowledgement();
+                }
+
                 var profile = await _apiClient.GetStatusAsync(token, cancellationToken);
                 var settingsError = TrySetSettingsConnectionState(isLinked: true);
-                PublishState(new GlobeConnectionState(
-                    GlobeConnectionStatus.Linked,
-                    profile,
-                    ErrorMessage: settingsError));
+                PublishLinkedProfile(profile, settingsError);
                 return true;
             }
             catch (GlobeAuthenticationException ex)
@@ -310,19 +576,23 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                     notifyRevoked: true);
                 return false;
             }
-            catch (OperationCanceledException)
+            catch (GlobeApiException ex) when (IsLinkAcknowledgementPending()
+                                               && !IsServerUnavailable(ex))
+            {
+                ClearLocalLink(
+                    GlobeLinkRevocationSource.StatusCheck,
+                    string.Empty,
+                    notifyRevoked: true);
+                return false;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 PublishState(previous with { IsChecking = false });
                 throw;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                PublishState(previous.IsLinked
-                    ? previous with { IsChecking = false, ErrorMessage = ex.Message }
-                    : new GlobeConnectionState(
-                        GlobeConnectionStatus.Validating,
-                        previous.Profile,
-                        ErrorMessage: ex.Message));
+                MarkServerUnavailable(previous.Profile, notifyUser: true);
                 return false;
             }
         }
@@ -359,13 +629,19 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
             {
                 await _apiClient.RevokeAsync(token, cancellationToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 PublishState(previous with { IsChecking = false });
                 throw;
             }
             catch (Exception ex)
             {
+                if (IsServerUnavailable(ex))
+                {
+                    MarkServerUnavailable(previous.Profile, notifyUser: false);
+                    throw new GlobeUnavailableException(OfflineMessage, ex);
+                }
+
                 PublishState(previous with { IsChecking = false, ErrorMessage = ex.Message });
                 throw;
             }
@@ -384,7 +660,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Shares one immutable burn request. Retry with the same request instance
-    /// so its BurnId remains the same and Globe can deduplicate it.
+    /// so its BurnId remains the same and globe can deduplicate it.
     /// </summary>
     public async Task<GlobeBurnShareResult> ShareBurnAsync(
         GlobeBurnShareRequest burn,
@@ -392,15 +668,56 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(burn);
+        await _shareGate.WaitAsync(cancellationToken);
+        try
+        {
+            return await ShareBurnCoreAsync(burn, cancellationToken);
+        }
+        finally
+        {
+            _shareGate.Release();
+        }
+    }
+
+    private async Task<GlobeBurnShareResult> ShareBurnCoreAsync(
+        GlobeBurnShareRequest burn,
+        CancellationToken cancellationToken)
+    {
         var token = GetToken();
-        if (token is null || !State.IsLinked)
+        var state = State;
+        if (token is null || !state.IsLinked)
         {
             throw new GlobeNotLinkedException();
         }
 
+        if (state.IsOffline)
+        {
+            _ = await ValidateAsync(cancellationToken);
+            token = GetToken();
+            state = State;
+            if (token is null || !state.IsLinked)
+            {
+                throw new GlobeNotLinkedException();
+            }
+        }
+
+        if (!state.CanShare)
+        {
+            throw new GlobeUnavailableException(OfflineMessage);
+        }
+
         try
         {
-            return await _apiClient.ShareBurnAsync(token, burn, cancellationToken);
+            var result = await _apiClient.ShareBurnAsync(token, burn, cancellationToken);
+            if (result.Created)
+            {
+                IncrementCachedBurnCount();
+            }
+            else
+            {
+                await TryReconcileProfileAfterDuplicateShareAsync(token, cancellationToken);
+            }
+            return result;
         }
         catch (GlobeAuthenticationException ex)
         {
@@ -409,6 +726,33 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
                 ex.Message,
                 notifyRevoked: true);
             throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsServerUnavailable(ex))
+        {
+            MarkServerUnavailable(State.Profile, notifyUser: false);
+            throw new GlobeUnavailableException(OfflineMessage, ex);
+        }
+    }
+
+    private async Task TryReconcileProfileAfterDuplicateShareAsync(
+        string token,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var profile = await _apiClient.GetStatusAsync(token, cancellationToken);
+            var settingsError = TrySetSettingsConnectionState(isLinked: true);
+            PublishLinkedProfile(profile, settingsError);
+        }
+        catch
+        {
+            // The burn response is authoritative. A lost first response can
+            // make a retry return created:false, so refresh the live count when
+            // possible without ever turning that successful retry into failure.
         }
     }
 
@@ -477,6 +821,9 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         {
             hadToken = _token is not null;
             _token = null;
+            _profileCache = null;
+            _linkAcknowledgementPending = false;
+            _serverUnavailableRaised = false;
         }
 
         Exception? localError = null;
@@ -487,6 +834,25 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         catch (Exception ex)
         {
             localError = ex;
+        }
+
+        try
+        {
+            _credentialStore.Delete(ProfileCacheCredentialKey);
+        }
+        catch (Exception ex)
+        {
+            localError ??= ex;
+        }
+
+
+        try
+        {
+            _credentialStore.Delete(LinkAckPendingCredentialKey);
+        }
+        catch (Exception ex)
+        {
+            localError ??= ex;
         }
 
         var settingsError = TrySetSettingsConnectionState(isLinked: false);
@@ -502,7 +868,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
             RaiseLinkRevoked(new GlobeLinkRevokedEventArgs(
                 source,
                 string.IsNullOrWhiteSpace(message)
-                    ? "Your Globe account is no longer linked."
+                    ? "your globe account is no longer linked."
                     : message));
         }
 
@@ -520,7 +886,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         }
         catch (Exception ex)
         {
-            return "Mystral could not update Globe settings: " + ex.Message;
+            return "Mystral could not update globe settings: " + ex.Message;
         }
     }
 
@@ -530,6 +896,267 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         {
             return _token;
         }
+    }
+
+    private bool IsLinkAcknowledgementPending()
+    {
+        lock (_sync)
+        {
+            return _linkAcknowledgementPending;
+        }
+    }
+
+    private async Task<bool> TryAcknowledgeLinkAsync(
+        string token,
+        CancellationToken cancellationToken)
+    {
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            try
+            {
+                await _apiClient.AcknowledgeLinkAsync(token, cancellationToken);
+                return true;
+            }
+            catch (GlobeAuthenticationException)
+            {
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsServerUnavailable(ex))
+            {
+                if (attempt == maximumAttempts)
+                {
+                    return false;
+                }
+
+                await Task.Delay(_options.LinkPollInterval, cancellationToken);
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<GlobeProfile?> TryAcknowledgeViaStatusAsync(
+        string token,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _apiClient.GetStatusAsync(token, cancellationToken);
+        }
+        catch (GlobeAuthenticationException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsServerUnavailable(ex))
+        {
+            return null;
+        }
+    }
+
+    private void CacheProvisionalProfile(GlobeProfile profile)
+    {
+        CachedGlobeProfile cache;
+        lock (_sync)
+        {
+            var avatarBytes = _profileCache is { } existing
+                              && string.Equals(
+                                  existing.Profile.AvatarUrl,
+                                  profile.AvatarUrl,
+                                  StringComparison.Ordinal)
+                ? existing.AvatarBytes.ToArray()
+                : [];
+            cache = new CachedGlobeProfile(profile, avatarBytes);
+            _profileCache = cache;
+        }
+
+        TryWriteProfileCache(cache);
+    }
+
+    private void MarkAcknowledgementPending(GlobeProfile? profile)
+    {
+        if (profile is not null)
+        {
+            CacheProvisionalProfile(profile);
+        }
+
+        _ = TrySetSettingsConnectionState(isLinked: true);
+        PublishState(new GlobeConnectionState(
+            GlobeConnectionStatus.Offline,
+            profile ?? _profileCache?.Profile,
+            ErrorMessage: "Mystral is finishing your globe account link and will keep trying automatically."));
+    }
+
+    private void CompleteLinkAcknowledgement()
+    {
+        lock (_sync)
+        {
+            _linkAcknowledgementPending = false;
+        }
+
+        try
+        {
+            _credentialStore.Delete(LinkAckPendingCredentialKey);
+        }
+        catch
+        {
+            // Ack is idempotent. A stale protected marker only causes a safe
+            // repeat acknowledgement on the next launch.
+        }
+    }
+
+    private void PublishLinkedProfile(GlobeProfile profile, string settingsError)
+    {
+        CachedGlobeProfile cache;
+        lock (_sync)
+        {
+            var avatarBytes = _profileCache is { } existing
+                              && string.Equals(
+                                  existing.Profile.AvatarUrl,
+                                  profile.AvatarUrl,
+                                  StringComparison.Ordinal)
+                ? existing.AvatarBytes.ToArray()
+                : [];
+            cache = new CachedGlobeProfile(profile, avatarBytes);
+            _profileCache = cache;
+            _serverUnavailableRaised = false;
+        }
+
+        TryWriteProfileCache(cache);
+        PublishState(new GlobeConnectionState(
+            GlobeConnectionStatus.Linked,
+            profile,
+            ErrorMessage: settingsError));
+    }
+
+    private void IncrementCachedBurnCount()
+    {
+        var current = State;
+        if (current.Status != GlobeConnectionStatus.Linked || current.Profile is not { } profile)
+        {
+            return;
+        }
+
+        var updated = profile with { CdCount = profile.CdCount == int.MaxValue ? int.MaxValue : profile.CdCount + 1 };
+        CachedGlobeProfile cache;
+        lock (_sync)
+        {
+            var avatarBytes = _profileCache?.AvatarBytes.ToArray() ?? [];
+            cache = new CachedGlobeProfile(updated, avatarBytes);
+            _profileCache = cache;
+        }
+
+        TryWriteProfileCache(cache);
+        PublishState(current with { Profile = updated });
+    }
+
+    private void MarkServerUnavailable(GlobeProfile? profile, bool notifyUser)
+    {
+        _ = TrySetSettingsConnectionState(isLinked: true);
+        bool raiseUnavailable = false;
+        lock (_sync)
+        {
+            profile ??= _profileCache?.Profile;
+            if (notifyUser && !_serverUnavailableRaised)
+            {
+                _serverUnavailableRaised = true;
+                raiseUnavailable = true;
+            }
+        }
+
+        PublishState(new GlobeConnectionState(
+            GlobeConnectionStatus.Offline,
+            profile,
+            ErrorMessage: OfflineMessage));
+        if (raiseUnavailable)
+        {
+            RaiseServerUnavailable(new GlobeServerUnavailableEventArgs(OfflineMessage));
+        }
+    }
+
+    private CachedGlobeProfile? TryReadProfileCache()
+    {
+        var json = _credentialStore.Read(ProfileCacheCredentialKey);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+        if (json.Length > (MaximumCachedAvatarBytes * 2) + 16_384)
+        {
+            throw new InvalidDataException("The protected globe profile cache is too large.");
+        }
+
+        var value = JsonSerializer.Deserialize<CachedGlobeProfileData>(json)
+            ?? throw new InvalidDataException("The protected globe profile cache is invalid.");
+        var username = value.Username.Trim().TrimStart('@');
+        if (username.Length is 0 or > 80
+            || value.Name.Length > 160
+            || value.AvatarUrl.Length > 2048
+            || value.CdCount < 0
+            || value.AvatarBytes.Length > MaximumCachedAvatarBytes)
+        {
+            throw new InvalidDataException("The protected globe profile cache is invalid.");
+        }
+
+        return new CachedGlobeProfile(
+            new GlobeProfile(username, value.Name, value.AvatarUrl, value.CdCount),
+            value.AvatarBytes.ToArray());
+    }
+
+    private void TryWriteProfileCache(CachedGlobeProfile cache)
+    {
+        try
+        {
+            _credentialStore.Write(
+                ProfileCacheCredentialKey,
+                JsonSerializer.Serialize(new CachedGlobeProfileData
+                {
+                    Username = cache.Profile.UsernameWithoutAt,
+                    Name = cache.Profile.Name,
+                    AvatarUrl = cache.Profile.AvatarUrl,
+                    CdCount = cache.Profile.CdCount,
+                    AvatarBytes = cache.AvatarBytes
+                }));
+        }
+        catch
+        {
+            // The token remains authoritative. A presentation cache failure is
+            // safe to ignore and can be retried after the next status check.
+        }
+    }
+
+    private void TryDeleteProfileCache()
+    {
+        try
+        {
+            _credentialStore.Delete(ProfileCacheCredentialKey);
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool IsServerUnavailable(Exception exception)
+    {
+        return exception is HttpRequestException
+            or TimeoutException
+            or OperationCanceledException
+            or GlobeUnavailableException
+            || exception is GlobeApiException apiException
+               && (apiException.StatusCode is null
+                   || apiException.StatusCode is HttpStatusCode.RequestTimeout
+                       or HttpStatusCode.BadGateway
+                       or HttpStatusCode.ServiceUnavailable
+                       or HttpStatusCode.GatewayTimeout
+                   || (int)apiException.StatusCode.Value >= 500);
     }
 
     private void PublishState(GlobeConnectionState state)
@@ -575,20 +1202,74 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         }
     }
 
+    private void RaiseServerUnavailable(GlobeServerUnavailableEventArgs args)
+    {
+        foreach (EventHandler<GlobeServerUnavailableEventArgs> handler
+                 in ServerUnavailable?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch
+            {
+            }
+        }
+    }
+
     private static string CreateLinkCode()
     {
         var bytes = RandomNumberGenerator.GetBytes(32);
         try
         {
-            return Convert.ToBase64String(bytes)
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_');
+            return Base64UrlEncode(bytes);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(bytes);
         }
+    }
+
+    private static string CreateCodeVerifier()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            return Base64UrlEncode(bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    private static string CreateCodeChallenge(string codeVerifier)
+    {
+        var verifierBytes = Encoding.ASCII.GetBytes(codeVerifier);
+        try
+        {
+            var hash = SHA256.HashData(verifierBytes);
+            try
+            {
+                return Base64UrlEncode(hash);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(hash);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(verifierBytes);
+        }
+    }
+
+    private static string Base64UrlEncode(ReadOnlySpan<byte> bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     private static string? NormalizeStoredToken(string? token)
@@ -619,7 +1300,7 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         if (error is not null)
         {
             throw new GlobeApiException(
-                "Globe was unlinked, but Mystral could not clear all local connection data.",
+                "Mystral couldn't finish unlinking your account. please try again.",
                 innerException: error);
         }
     }
@@ -634,5 +1315,16 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         return !string.IsNullOrWhiteSpace(first)
             ? first
             : second ?? string.Empty;
+    }
+
+    private sealed record CachedGlobeProfile(GlobeProfile Profile, byte[] AvatarBytes);
+
+    private sealed class CachedGlobeProfileData
+    {
+        public string Username { get; init; } = string.Empty;
+        public string Name { get; init; } = string.Empty;
+        public string AvatarUrl { get; init; } = string.Empty;
+        public int CdCount { get; init; }
+        public byte[] AvatarBytes { get; init; } = [];
     }
 }

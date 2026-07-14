@@ -91,6 +91,16 @@ public sealed class AppSettingsService
             return;
         }
 
+        if (isLinked)
+        {
+            // The linked flag is intentionally runtime-only. Avoid rewriting
+            // settings.json (and the protected Last.fm bundle) for a status
+            // refresh that has no persistent setting changes.
+            Settings = Settings with { Social = social };
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         Save(Settings with { Social = social });
     }
 

@@ -16,6 +16,8 @@ namespace Mystral.Views;
 
 public partial class AppDialogWindow : Window
 {
+    private static readonly Brush WarningTitleBrush = new SolidColorBrush(Color.FromRgb(184, 134, 11));
+
     private AppDialogWindow(string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons)
         : this(title, icon, buttons)
     {
@@ -46,7 +48,14 @@ public partial class AppDialogWindow : Window
 
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
-        return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Warning), ContinueButtons(), "warning.wav");
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            FromSystemIcon(System.Drawing.SystemIcons.Warning),
+            ContinueButtons(),
+            "warning.wav",
+            WarningTitleBrush);
     }
 
     public static MessageBoxResult ShowError(Window owner, string title, string message)
@@ -54,20 +63,48 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Error), ContinueButtons(), "error.wav");
     }
 
+    public static MessageBoxResult ShowConfirmationWithBadge(
+        Window owner,
+        string title,
+        string message,
+        string primaryIconPath,
+        string badgeIconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadOverlayIcon(primaryIconPath, badgeIconPath),
+            ContinueButtons(),
+            "confirmation.wav");
+    }
+
     internal static bool ShowAction(
         Window owner,
         string title,
         string message,
         string actionCaption,
-        bool isError = false)
+        bool isError = false,
+        bool isWarning = false,
+        bool placeActionOnNewLine = false)
     {
         var actionSelected = false;
         var dialog = new AppDialogWindow(
             title,
-            FromSystemIcon(isError ? System.Drawing.SystemIcons.Error : System.Drawing.SystemIcons.Information),
+            FromSystemIcon(
+                isWarning
+                    ? System.Drawing.SystemIcons.Warning
+                    : isError
+                        ? System.Drawing.SystemIcons.Error
+                        : System.Drawing.SystemIcons.Information),
             ContinueButtons());
+        if (isWarning)
+        {
+            dialog.DialogTitleText.Foreground = WarningTitleBrush;
+        }
         dialog.DialogDescriptionText.Inlines.Add(new Run(message));
-        dialog.DialogDescriptionText.Inlines.Add(new Run(" "));
+        dialog.DialogDescriptionText.Inlines.Add(
+            placeActionOnNewLine ? new LineBreak() : new Run(" "));
         var action = new Hyperlink(new Run(actionCaption));
         action.Click += (_, _) =>
         {
@@ -76,7 +113,10 @@ public partial class AppDialogWindow : Window
             dialog.Close();
         };
         dialog.DialogDescriptionText.Inlines.Add(action);
-        ShowDialog(owner, dialog, isError ? "error.wav" : "confirmation.wav");
+        ShowDialog(
+            owner,
+            dialog,
+            isWarning ? "warning.wav" : isError ? "error.wav" : "confirmation.wav");
         return actionSelected;
     }
 
@@ -123,9 +163,20 @@ public partial class AppDialogWindow : Window
             "confirmation.wav");
     }
 
-    private static MessageBoxResult ShowDialog(Window owner, string title, string message, ImageSource icon, IReadOnlyList<DialogButtonSpec> buttons, string? soundFile = null)
+    private static MessageBoxResult ShowDialog(
+        Window owner,
+        string title,
+        string message,
+        ImageSource icon,
+        IReadOnlyList<DialogButtonSpec> buttons,
+        string? soundFile = null,
+        Brush? titleBrush = null)
     {
         var dialog = new AppDialogWindow(title, message, icon, buttons);
+        if (titleBrush is not null)
+        {
+            dialog.DialogTitleText.Foreground = titleBrush;
+        }
         return ShowDialog(owner, dialog, soundFile);
     }
 

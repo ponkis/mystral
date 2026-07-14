@@ -112,6 +112,12 @@ Development builds connect to `http://localhost:3000/` and register
 Globe server uses another origin. Production builds always use
 `https://chat.ponkis.xyz/` and `mystral://settings/social`.
 
+Avatar downloads are restricted to the configured globe origin. If production
+uses R2 or another image CDN, set the GitHub Actions repository variable
+`GLOBE_AVATAR_CDN_URL` to the exact public CDN base URL before creating a
+release; the release workflow embeds that allowlist with
+`GlobeAvatarCdnUrl`. Development can use `MYSTRAL_GLOBE_AVATAR_CDN_URL`.
+
 The development packaging script registers the published executable without
 opening a window. A regular Debug build also registers itself when launched,
 or it can be registered explicitly without starting the UI. Run this from the

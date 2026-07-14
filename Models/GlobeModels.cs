@@ -24,6 +24,7 @@ public enum GlobeConnectionStatus
     Unlinked,
     Linking,
     Validating,
+    Offline,
     Linked
 }
 
@@ -33,7 +34,18 @@ public sealed record GlobeConnectionState(
     bool IsChecking = false,
     string ErrorMessage = "")
 {
-    public bool IsLinked => Status == GlobeConnectionStatus.Linked;
+    /// <summary>
+    /// True when Mystral has a validated or cached account identity. An
+    /// offline account remains linked locally, but cannot share until the
+    /// server is reachable again.
+    /// </summary>
+    public bool IsLinked => Status is GlobeConnectionStatus.Linked
+        or GlobeConnectionStatus.Offline
+        || (Profile is not null && Status == GlobeConnectionStatus.Validating);
+
+    public bool CanShare => Status == GlobeConnectionStatus.Linked;
+
+    public bool IsOffline => Status == GlobeConnectionStatus.Offline;
 
     public bool IsBusy => Status is GlobeConnectionStatus.Linking or GlobeConnectionStatus.Validating
                           || IsChecking;
@@ -42,6 +54,11 @@ public sealed record GlobeConnectionState(
 public sealed class GlobeConnectionStateChangedEventArgs(GlobeConnectionState state) : EventArgs
 {
     public GlobeConnectionState State { get; } = state;
+}
+
+public sealed class GlobeServerUnavailableEventArgs(string message) : EventArgs
+{
+    public string Message { get; } = message;
 }
 
 public enum GlobeLinkRevocationSource
@@ -136,7 +153,8 @@ public sealed record class GlobeBurnShareRequest
 public sealed record GlobeBurnShareResult(
     string PostId,
     string CollectionEntryId,
-    string Message);
+    string Message,
+    bool Created = false);
 
 public sealed record class GlobeConnectionOptions
 {
@@ -151,6 +169,7 @@ internal enum GlobeLinkClaimStatus
 {
     Pending,
     Claimed,
+    Cancelled,
     Expired
 }
 

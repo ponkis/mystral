@@ -18,4 +18,9 @@
     <OutputPath>bin\$(Configuration)\$(AppEnvironment)\</OutputPath>
     <IntermediateOutputPath>obj\$(Configuration)\$(AppEnvironment)\</IntermediateOutputPath>
   </PropertyGroup>
+  <ItemGroup Condition="'$(GlobeAvatarCdnUrl)' != ''">
+    <!-- Embed the deployment's exact public R2/CDN origin so production
+         desktop builds never have to trust arbitrary avatar hosts. -->
+    <AssemblyMetadata Include="GlobeAvatarCdnUrl" Value="$(GlobeAvatarCdnUrl)" />
+  </ItemGroup>
 </Project>

@@ -40,10 +40,26 @@ public sealed class GlobeLinkExpiredException : GlobeApiException
     }
 }
 
+public sealed class GlobeLinkCancelledException : GlobeApiException
+{
+    public GlobeLinkCancelledException(string message)
+        : base(message, HttpStatusCode.Gone, "link_code_cancelled")
+    {
+    }
+}
+
+public sealed class GlobeUnavailableException : GlobeApiException
+{
+    public GlobeUnavailableException(string message, Exception? innerException = null)
+        : base(message, errorCode: "globe_unavailable", innerException: innerException)
+    {
+    }
+}
+
 public sealed class GlobeNotLinkedException : InvalidOperationException
 {
     public GlobeNotLinkedException()
-        : base("A Globe account is not linked.")
+        : base("A globe account is not linked.")
     {
     }
 }

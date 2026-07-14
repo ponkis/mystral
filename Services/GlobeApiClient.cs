@@ -18,6 +18,9 @@ namespace Mystral.Services;
 public sealed class GlobeApiClient : IDisposable
 {
     private const int MaximumCoverBytes = 5 * 1024 * 1024;
+    private const int MaximumUsernameLength = 80;
+    private const int MaximumDisplayNameLength = 160;
+    private const int MaximumAvatarUrlLength = 2048;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -45,7 +48,7 @@ public sealed class GlobeApiClient : IDisposable
         ArgumentNullException.ThrowIfNull(baseUri);
         if (!baseUri.IsAbsoluteUri)
         {
-            throw new ArgumentException("Globe base URI must be absolute.", nameof(baseUri));
+            throw new ArgumentException("globe base URI must be absolute.", nameof(baseUri));
         }
 
         _httpClient = httpClient;
@@ -69,15 +72,45 @@ public sealed class GlobeApiClient : IDisposable
         return builder.Uri;
     }
 
-    internal async Task<GlobeLinkClaimResult> ClaimLinkAsync(
+    internal Task<GlobeLinkClaimResult> RegisterLinkAsync(
         string linkCode,
+        string codeChallenge,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(linkCode);
+        ValidatePkceValue(codeChallenge, nameof(codeChallenge));
+        return SendLinkClaimAsync(
+            new LinkCodePayload
+            {
+                LinkCode = linkCode,
+                CodeChallenge = codeChallenge
+            },
+            cancellationToken);
+    }
+
+    internal Task<GlobeLinkClaimResult> ClaimLinkAsync(
+        string linkCode,
+        string codeVerifier,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePkceValue(codeVerifier, nameof(codeVerifier));
+        return SendLinkClaimAsync(
+            new LinkCodePayload
+            {
+                LinkCode = linkCode,
+                CodeVerifier = codeVerifier
+            },
+            cancellationToken);
+    }
+
+    private async Task<GlobeLinkClaimResult> SendLinkClaimAsync(
+        LinkCodePayload payload,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(payload.LinkCode);
         using var request = CreateJsonRequest(
             HttpMethod.Post,
             "api/mystral/link/claim",
-            new LinkCodePayload { LinkCode = linkCode });
+            payload);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -88,24 +121,26 @@ public sealed class GlobeApiClient : IDisposable
 
         if (response.StatusCode == HttpStatusCode.Gone)
         {
+            var errorCode = ReadErrorCode(body);
+            if (errorCode.Equals("link_code_cancelled", StringComparison.OrdinalIgnoreCase)
+                || errorCode.Equals("link_cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                return new GlobeLinkClaimResult(
+                    GlobeLinkClaimStatus.Cancelled,
+                    Message: ReadError(body, "the globe account link was canceled."));
+            }
+
             return new GlobeLinkClaimResult(
                 GlobeLinkClaimStatus.Expired,
-                Message: ReadError(body, "The Globe link code expired."));
-        }
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            // A not-yet-approved code is intentionally indistinguishable from
-            // an unknown code. The desktop timeout bounds these polls.
-            return new GlobeLinkClaimResult(GlobeLinkClaimStatus.Pending);
+                Message: ReadError(body, "the globe link request expired. start again from Mystral."));
         }
 
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateApiException(response, body, "Globe could not claim the link code.");
+            throw CreateApiException(response, body, "globe could not claim the link code.");
         }
 
-        using var document = ParseJson(body, "Globe returned an invalid link response.");
+        using var document = ParseJson(body, "globe returned an invalid link response.");
         var root = UnwrapData(document.RootElement);
         var status = ReadString(root, "status");
         if (ReadBoolean(root, "pending") || status.Equals("pending", StringComparison.OrdinalIgnoreCase))
@@ -120,16 +155,54 @@ public sealed class GlobeApiClient : IDisposable
                 Message: ReadString(root, "message"));
         }
 
+        if (ReadBoolean(root, "cancelled")
+            || ReadBoolean(root, "canceled")
+            || status.Equals("cancelled", StringComparison.OrdinalIgnoreCase)
+            || status.Equals("canceled", StringComparison.OrdinalIgnoreCase))
+        {
+            return new GlobeLinkClaimResult(
+                GlobeLinkClaimStatus.Cancelled,
+                Message: FirstNonEmpty(
+                    ReadString(root, "message"),
+                    "the globe account link was canceled."));
+        }
+
         var token = ReadString(root, "token");
         if (string.IsNullOrWhiteSpace(token))
         {
-            throw new GlobeApiException("Globe approved the link but did not return a token.");
+            throw new GlobeApiException("globe approved the link but did not return a token.");
         }
 
         return new GlobeLinkClaimResult(
             GlobeLinkClaimStatus.Claimed,
             token,
             ReadProfile(root));
+    }
+
+    internal async Task AcknowledgeLinkAsync(
+        string token,
+        CancellationToken cancellationToken = default)
+    {
+        using var request = CreateAuthorizedRequest(HttpMethod.Post, "api/mystral/link/ack", token);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        ThrowIfAuthenticationRejected(response, body);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException(response, body, "globe could not finish the account link.");
+        }
+
+        if (response.StatusCode == HttpStatusCode.NoContent)
+        {
+            return;
+        }
+
+        using var document = ParseJson(body, "globe returned an invalid link acknowledgement.");
+        var root = UnwrapData(document.RootElement);
+        if (!ReadBoolean(root, "linked") || !ReadBoolean(root, "acknowledged"))
+        {
+            throw new GlobeApiException("globe did not confirm the account link.");
+        }
     }
 
     internal async Task<GlobeProfile> GetStatusAsync(
@@ -142,14 +215,14 @@ public sealed class GlobeApiClient : IDisposable
         ThrowIfAuthenticationRejected(response, body);
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateApiException(response, body, "Globe could not validate the account link.");
+            throw CreateApiException(response, body, "globe could not validate the account link.");
         }
 
-        using var document = ParseJson(body, "Globe returned an invalid link status.");
+        using var document = ParseJson(body, "globe returned an invalid link status.");
         var root = UnwrapData(document.RootElement);
         if (TryReadBoolean(root, "linked", out var linked) && !linked)
         {
-            throw new GlobeAuthenticationException("Your Globe account is no longer linked.");
+            throw new GlobeAuthenticationException("your globe account is no longer linked.");
         }
 
         return ReadProfile(root);
@@ -164,14 +237,13 @@ public sealed class GlobeApiClient : IDisposable
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         if (response.IsSuccessStatusCode
             || response.StatusCode is HttpStatusCode.Unauthorized
-                or HttpStatusCode.Forbidden
-                or HttpStatusCode.NotFound)
+                or HttpStatusCode.Forbidden)
         {
             return;
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        throw CreateApiException(response, body, "Globe could not unlink the account.");
+        throw CreateApiException(response, body, "globe could not unlink the account.");
     }
 
     internal async Task<GlobeBurnShareResult> ShareBurnAsync(
@@ -205,16 +277,21 @@ public sealed class GlobeApiClient : IDisposable
         ThrowIfAuthenticationRejected(response, body);
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateApiException(response, body, "Globe could not share the burned CD.");
+            throw CreateApiException(response, body, "globe could not share the burned CD.");
         }
 
         if (string.IsNullOrWhiteSpace(body))
         {
-            return new GlobeBurnShareResult(string.Empty, string.Empty, "The burned CD was shared to Globe.");
+            throw new GlobeApiException("globe did not confirm that the burned CD was shared.");
         }
 
-        using var document = ParseJson(body, "Globe returned an invalid burn response.");
+        using var document = ParseJson(body, "globe returned an invalid burn response.");
         var root = UnwrapData(document.RootElement);
+        if (!ReadBoolean(root, "shared"))
+        {
+            throw new GlobeApiException("globe did not confirm that the burned CD was shared.");
+        }
+
         var postId = ReadString(root, "post_id", "postId");
         if (string.IsNullOrWhiteSpace(postId)
             && root.TryGetProperty("post", out var post)
@@ -230,10 +307,16 @@ public sealed class GlobeApiClient : IDisposable
             collectionEntryId = FirstNonEmpty(collectionEntryId, ReadString(savedBurn, "id"));
         }
 
+        if (string.IsNullOrWhiteSpace(postId) || string.IsNullOrWhiteSpace(collectionEntryId))
+        {
+            throw new GlobeApiException("globe returned an incomplete burned CD response.");
+        }
+
         return new GlobeBurnShareResult(
             postId,
             collectionEntryId,
-            FirstNonEmpty(ReadString(root, "message"), "The burned CD was shared to Globe."));
+            FirstNonEmpty(ReadString(root, "message"), "The burned CD was shared to globe."),
+            TryReadBoolean(root, "created", out var created) && created);
     }
 
     public void Dispose()
@@ -253,26 +336,43 @@ public sealed class GlobeApiClient : IDisposable
         }
 
         var username = ReadString(source, "username").Trim().TrimStart('@');
-        if (string.IsNullOrWhiteSpace(username))
+        if (string.IsNullOrWhiteSpace(username) || username.Length > MaximumUsernameLength)
         {
-            throw new GlobeApiException("Globe did not return the linked username.");
+            throw new GlobeApiException("globe did not return the linked username.");
         }
 
         var avatarUrl = ReadString(source, "avatar_url", "avatarUrl", "profile_picture", "profilePicture");
-        if (!string.IsNullOrWhiteSpace(avatarUrl)
-            && Uri.TryCreate(avatarUrl, UriKind.RelativeOrAbsolute, out var avatarUri))
+        if (avatarUrl.Length > MaximumAvatarUrlLength)
         {
-            avatarUri = avatarUri.IsAbsoluteUri
-                ? avatarUri
-                : new Uri(BaseUri, avatarUri);
-            avatarUrl = avatarUri.Scheme is "http" or "https"
-                ? avatarUri.AbsoluteUri
-                : string.Empty;
+            avatarUrl = string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(avatarUrl))
+        {
+            if (!Uri.TryCreate(avatarUrl, UriKind.RelativeOrAbsolute, out var avatarUri))
+            {
+                avatarUrl = string.Empty;
+            }
+            else
+            {
+                avatarUri = avatarUri.IsAbsoluteUri
+                    ? avatarUri
+                    : new Uri(BaseUri, avatarUri);
+                avatarUrl = AppMetadata.IsTrustedGlobeAvatarUri(avatarUri, BaseUri)
+                    ? avatarUri.AbsoluteUri
+                    : string.Empty;
+            }
+        }
+
+        var displayName = ReadString(source, "name", "display_name", "displayName").Trim();
+        if (displayName.Length > MaximumDisplayNameLength)
+        {
+            displayName = displayName[..MaximumDisplayNameLength];
         }
 
         return new GlobeProfile(
             username,
-            ReadString(source, "name", "display_name", "displayName"),
+            displayName,
             avatarUrl,
             ReadInteger(source, "cd_count", "burn_count", "cdCount", "burnCount"));
     }
@@ -298,12 +398,24 @@ public sealed class GlobeApiClient : IDisposable
         return token.Trim();
     }
 
+    private static void ValidatePkceValue(string value, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        if (value.Length is < 43 or > 128
+            || value.Any(character =>
+                !char.IsAsciiLetterOrDigit(character)
+                && character is not ('-' or '_' or '.' or '~')))
+        {
+            throw new ArgumentException("The PKCE value is invalid.", parameterName);
+        }
+    }
+
     private static void ThrowIfAuthenticationRejected(HttpResponseMessage response, string body)
     {
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             throw new GlobeAuthenticationException(
-                ReadError(body, "Your Globe account is no longer linked."),
+                ReadError(body, "your globe account is no longer linked."),
                 response.StatusCode);
         }
     }
@@ -518,7 +630,7 @@ public sealed class GlobeApiClient : IDisposable
         };
         if (mimeType is null)
         {
-            // Globe supplies its jewel-case placeholder when no supported
+            // globe supplies its jewel-case placeholder when no supported
             // cover is sent; an unusual local image must not fail the share.
             return null;
         }
@@ -537,6 +649,14 @@ public sealed class GlobeApiClient : IDisposable
     {
         [JsonPropertyName("link_code")]
         public required string LinkCode { get; init; }
+
+        [JsonPropertyName("code_challenge")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CodeChallenge { get; init; }
+
+        [JsonPropertyName("code_verifier")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CodeVerifier { get; init; }
     }
 
     private sealed class BurnPayload

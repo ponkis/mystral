@@ -20,7 +20,7 @@ internal sealed class ShareStatusWindow : Window
     internal ShareStatusWindow(Window owner, Func<CancellationToken, Task> shareAsync)
     {
         _shareAsync = shareAsync;
-        Title = "Share to Globe";
+        Title = "share to globe";
         Icon = IconImageSource.LoadBestFitFrame("Resources/globe.ico", 16);
         Width = 450;
         SizeToContent = SizeToContent.Height;
@@ -50,7 +50,7 @@ internal sealed class ShareStatusWindow : Window
         {
             Margin = new Thickness(0, 4, 0, 0),
             Foreground = Brushes.DimGray,
-            Text = "Sending the album details and cover art to Globe…",
+            Text = "Sending your CD over the internet...",
             TextWrapping = TextWrapping.Wrap
         };
         _progressBar = new ProgressBar
@@ -138,7 +138,7 @@ internal sealed class ShareStatusWindow : Window
         _isRunning = true;
         WasSuccessful = false;
         _headingText.Text = "Sharing your burned CD";
-        _detailText.Text = "Sending the album details and cover art to Globe…";
+        _detailText.Text = "Sending your CD over the internet...";
         _progressBar.Visibility = Visibility.Visible;
         _progressBar.IsIndeterminate = true;
         _retryButton.Visibility = Visibility.Collapsed;
@@ -148,15 +148,15 @@ internal sealed class ShareStatusWindow : Window
         {
             await _shareAsync(CancellationToken.None);
             WasSuccessful = true;
-            _headingText.Text = "Shared to Globe";
-            _detailText.Text = "Your burned CD was shared to your Globe profile.";
+            _headingText.Text = "shared to globe";
+            _detailText.Text = "Your burned CD was shared to your globe profile.";
             _progressBar.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
         {
-            _headingText.Text = "Couldn’t share to Globe";
+            _headingText.Text = "couldn't share to globe";
             _detailText.Text = string.IsNullOrWhiteSpace(ex.Message)
-                ? "Globe did not accept the share. Please try again."
+                ? "globe did not accept the share. Please try again."
                 : ex.Message;
             _progressBar.Visibility = Visibility.Collapsed;
             _retryButton.Visibility = Visibility.Visible;
