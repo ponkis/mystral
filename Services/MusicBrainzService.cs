@@ -12,13 +12,16 @@ namespace Mystral.Services;
 
 public sealed class MusicBrainzService : IDisposable
 {
+    private const int MaxArtworkRedirects = 8;
+    private const int MaxArtworkBytes = 20 * 1024 * 1024;
     private static readonly SemaphoreSlim MusicBrainzRateGate = new(1, 1);
     private static DateTimeOffset _nextMusicBrainzRequestAt = DateTimeOffset.MinValue;
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly bool _enforceTrustedArtworkHosts;
 
     public MusicBrainzService()
-        : this(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, ownsHttpClient: true)
+        : this(CreateHttpClient(), ownsHttpClient: true)
     {
     }
 
@@ -26,10 +29,31 @@ public sealed class MusicBrainzService : IDisposable
     {
         _httpClient = httpClient;
         _ownsHttpClient = ownsHttpClient;
+        // The injected client is used by the isolated service tests. The app-created
+        // client only follows artwork redirects to Cover Art Archive/Internet Archive.
+        _enforceTrustedArtworkHosts = ownsHttpClient;
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
         {
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
         }
+    }
+
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new HttpClientHandler
+        {
+            // Cover Art Archive can return an HTTP redirect target even when the
+            // original request used HTTPS. .NET correctly refuses that downgrade,
+            // so redirects are handled below and upgraded after host validation.
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.GZip
+                                     | DecompressionMethods.Deflate
+                                     | DecompressionMethods.Brotli
+        };
+        return new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
     }
 
     public async Task<MusicBrainzTrackData?> FetchTrackDataAsync(
@@ -121,9 +145,9 @@ public sealed class MusicBrainzService : IDisposable
         CoverArtResponse? payload = null;
         try
         {
-            using var response = await _httpClient.GetAsync(
-                $"https://coverartarchive.org/release/{release.Id}/",
-                HttpCompletionOption.ResponseHeadersRead,
+            using var response = await SendArtworkRequestAsync(
+                new Uri($"https://coverartarchive.org/release/{release.Id}/"),
+                "application/json",
                 cancellationToken);
             if (response.StatusCode != HttpStatusCode.NotFound)
             {
@@ -143,11 +167,7 @@ public sealed class MusicBrainzService : IDisposable
             ?? payload?.Images.FirstOrDefault(image => image.Approved && image.Types.Contains("Front", StringComparer.OrdinalIgnoreCase));
         var medium = payload?.Images.FirstOrDefault(image => image.Approved && image.Types.Contains("Medium", StringComparer.OrdinalIgnoreCase));
 
-        var coverTask = TryOptionalArtworkRequestAsync(
-            () => front is null
-                ? TryDownloadReleaseGroupFrontAsync(release.ReleaseGroup?.Id, cancellationToken)
-                : DownloadArtworkAsync(front, cancellationToken),
-            cancellationToken);
+        var coverTask = FetchCoverArtworkAsync(release, front, cancellationToken);
         var discTask = medium is null
             ? Task.FromResult<byte[]?>(null)
             : TryOptionalArtworkRequestAsync(
@@ -179,10 +199,40 @@ public sealed class MusicBrainzService : IDisposable
     {
         return exception is HttpRequestException
             or IOException
+            or InvalidDataException
             or JsonException
             or NotSupportedException
             or TaskCanceledException
             or TimeoutException;
+    }
+
+    private async Task<byte[]?> FetchCoverArtworkAsync(
+        ReleaseResult release,
+        CoverArtImage? front,
+        CancellationToken cancellationToken)
+    {
+        if (front is not null)
+        {
+            var indexedArtwork = await TryOptionalArtworkRequestAsync(
+                () => DownloadArtworkAsync(front, cancellationToken),
+                cancellationToken);
+            if (indexedArtwork is not null)
+            {
+                return indexedArtwork;
+            }
+        }
+
+        var releaseArtwork = await TryOptionalArtworkRequestAsync(
+            () => TryDownloadFrontAsync("release", release.Id, cancellationToken),
+            cancellationToken);
+        if (releaseArtwork is not null)
+        {
+            return releaseArtwork;
+        }
+
+        return await TryOptionalArtworkRequestAsync(
+            () => TryDownloadReleaseGroupFrontAsync(release.ReleaseGroup?.Id, cancellationToken),
+            cancellationToken);
     }
 
     private async Task<byte[]?> TryDownloadReleaseGroupFrontAsync(
@@ -194,9 +244,17 @@ public sealed class MusicBrainzService : IDisposable
             return null;
         }
 
-        using var response = await _httpClient.GetAsync(
-            $"https://coverartarchive.org/release-group/{releaseGroupId}/front-500",
-            HttpCompletionOption.ResponseHeadersRead,
+        return await TryDownloadFrontAsync("release-group", releaseGroupId, cancellationToken);
+    }
+
+    private async Task<byte[]?> TryDownloadFrontAsync(
+        string entity,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendArtworkRequestAsync(
+            new Uri($"https://coverartarchive.org/{entity}/{id}/front-500"),
+            "image/*",
             cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -204,25 +262,173 @@ public sealed class MusicBrainzService : IDisposable
         }
 
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        return await ReadArtworkBytesAsync(response, cancellationToken);
     }
 
     private async Task<byte[]?> DownloadArtworkAsync(CoverArtImage image, CancellationToken cancellationToken)
     {
-        var url = image.Thumbnails.GetValueOrDefault("1200")
-            ?? image.Thumbnails.GetValueOrDefault("500")
-            ?? image.Image;
-        if (string.IsNullOrWhiteSpace(url))
+        var candidates = new[]
         {
-            return null;
+            image.Thumbnails.GetValueOrDefault("1200"),
+            image.Thumbnails.GetValueOrDefault("500"),
+            image.Image
+        };
+        var attempted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)
+                || !attempted.Add(candidate)
+                || !Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var response = await SendArtworkRequestAsync(uri, "image/*", cancellationToken);
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    continue;
+                }
+
+                response.EnsureSuccessStatusCode();
+                return await ReadArtworkBytesAsync(response, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsOptionalArtworkFailure(ex))
+            {
+                // Try the next thumbnail/original URL before giving up on this image.
+            }
         }
 
-        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        return null;
+    }
+
+    private async Task<HttpResponseMessage> SendArtworkRequestAsync(
+        Uri uri,
+        string accept,
+        CancellationToken cancellationToken)
+    {
+        var current = NormalizeArtworkUri(uri);
+        for (var redirectCount = 0; redirectCount <= MaxArtworkRedirects; redirectCount++)
         {
-            url = "https://" + url[7..];
+            using var request = new HttpRequestMessage(HttpMethod.Get, current);
+            request.Headers.Accept.ParseAdd(accept);
+            var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            if (!IsRedirect(response.StatusCode))
+            {
+                return response;
+            }
+
+            var location = response.Headers.Location;
+            response.Dispose();
+            if (location is null)
+            {
+                throw new HttpRequestException("The artwork service returned an invalid redirect.");
+            }
+
+            var redirected = location.IsAbsoluteUri ? location : new Uri(current, location);
+            current = NormalizeArtworkUri(redirected);
         }
 
-        return await _httpClient.GetByteArrayAsync(url, cancellationToken);
+        throw new HttpRequestException("The artwork service returned too many redirects.");
+    }
+
+    private Uri NormalizeArtworkUri(Uri uri)
+    {
+        if (!uri.IsAbsoluteUri || !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw new HttpRequestException("The artwork service returned an invalid address.");
+        }
+
+        if (_enforceTrustedArtworkHosts && !IsTrustedArtworkHost(uri.IdnHost))
+        {
+            throw new HttpRequestException("The artwork service returned an untrusted address.");
+        }
+
+        if (uri.Scheme == Uri.UriSchemeHttp)
+        {
+            var builder = new UriBuilder(uri)
+            {
+                Scheme = Uri.UriSchemeHttps,
+                Port = -1
+            };
+            uri = builder.Uri;
+        }
+
+        if (uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new HttpRequestException("The artwork service returned an unsupported address.");
+        }
+
+        return uri;
+    }
+
+    private static bool IsTrustedArtworkHost(string host)
+    {
+        return string.Equals(host, "coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+               || host.EndsWith(".coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(host, "archive.org", StringComparison.OrdinalIgnoreCase)
+               || host.EndsWith(".archive.org", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRedirect(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.MovedPermanently
+            or HttpStatusCode.Found
+            or HttpStatusCode.SeeOther
+            or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+    }
+
+    private static async Task<byte[]> ReadArtworkBytesAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        if (response.Content.Headers.ContentLength is > MaxArtworkBytes)
+        {
+            throw new InvalidDataException("The artwork response is too large.");
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (!string.IsNullOrWhiteSpace(mediaType)
+            && !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(mediaType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The artwork service returned an invalid image.");
+        }
+
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (output.Length + read > MaxArtworkBytes)
+            {
+                throw new InvalidDataException("The artwork response is too large.");
+            }
+
+            output.Write(buffer, 0, read);
+        }
+
+        if (output.Length == 0)
+        {
+            throw new InvalidDataException("The artwork response is empty.");
+        }
+
+        return output.ToArray();
     }
 
     private async Task<HttpResponseMessage> SendMusicBrainzAsync(Uri uri, CancellationToken cancellationToken)

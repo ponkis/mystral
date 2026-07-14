@@ -1677,6 +1677,7 @@ static class MusicBrainzServiceTests
         Check.Equal(4, handler.Count);
 
         var survivingDiscBytes = new byte[] { 9, 8, 7, 6 };
+        var coverFallbackBytes = new byte[] { 5, 5, 5, 5 };
         var partialArtworkHandler = new FakeHttpMessageHandler(request =>
         {
             var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
@@ -1711,6 +1712,13 @@ static class MusicBrainzServiceTests
                 return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
             }
 
+            // When the indexed front thumbnail fails, the release/front-500 endpoint
+            // is the next fallback and can still recover the cover.
+            if (uri.AbsolutePath.Equals("/release/resilient-release/front-500", StringComparison.Ordinal))
+            {
+                return Bytes(coverFallbackBytes);
+            }
+
             if (uri.Equals(new Uri("https://assets.test/working-disc")))
             {
                 return Bytes(survivingDiscBytes);
@@ -1729,9 +1737,9 @@ static class MusicBrainzServiceTests
             .GetAwaiter()
             .GetResult();
         Check.NotNull(partialArtworkResult);
-        Check.Null(partialArtworkResult!.CoverArtwork);
+        Check.Sequence(coverFallbackBytes, partialArtworkResult!.CoverArtwork!);
         Check.Sequence(survivingDiscBytes, partialArtworkResult.DiscArtwork!);
-        Check.Equal(4, partialArtworkHandler.Count);
+        Check.Equal(5, partialArtworkHandler.Count);
 
         using var malformedClient = new HttpClient(new FakeHttpMessageHandler(_ => JsonText("{")));
         using var malformedService = new MusicBrainzService(malformedClient);
