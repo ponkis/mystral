@@ -1,13 +1,15 @@
 # Mystral Smoke Test
 
-Use this checklist before a release or after changes that touch WPF, media controls, settings, Last.fm, installer packaging, tray behavior, or startup behavior.
+Use this checklist before a release or after changes that touch WPF, media
+controls, settings, Last.fm, installer packaging, burn behavior, or startup
+behavior.
 
 ## Build
 
 ```powershell
-dotnet build .\mystral.csproj -c Debug /p:AppEnvironment=Development
+dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development
 dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj -c Debug --no-restore
-dotnet build .\mystral.csproj -c Release /p:AppEnvironment=Production --no-restore
+dotnet build .\Mystral.csproj -c Release /p:AppEnvironment=Production --no-restore
 dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj -c Release --no-restore
 ```
 
@@ -58,7 +60,8 @@ For packaged development builds:
 
 - Enable notifications in settings.
 - Change tracks and confirm one track notification appears.
-- Disable notifications and confirm no new notification appears.
+- Burn a "CD" and confirm the successful burn notification appears.
+- Disable notifications and confirm no new notifications appear.
 
 ## Settings
 
@@ -74,20 +77,10 @@ For packaged development builds:
 - If scrobbling is enabled, confirm now-playing/scrobble status does not report repeated failures.
 - Play an ad, podcast, very short clip, or idle state and confirm it is not treated as a scrobbleable song.
 
-## globe
+## Social Sharing
 
-- Run globe locally on port 3000, open Settings → Social, and link through the browser approval page.
-- Confirm the linked name, username, avatar, and CD count update without restarting Mystral.
-- Burn once with automatic sharing off: the completion popup must offer `Share to globe`, and its status modal must move from progress to success.
-- Burn once with automatic sharing on: the completion popup must say `Successfully burned and shared to your globe profile!` only after the server accepted it.
-- Stop globe or force the burn endpoint to fail, burn with automatic sharing on, and confirm the popup reports the failure and offers Retry.
-- Restore globe, click Retry, and confirm Mystral validates immediately and resends the same burn instead of waiting for the periodic check.
-- Unlink in Mystral and confirm globe rejects the old bearer token, local link state clears, auto-share turns off, and a confirmation appears.
-- Link again, unlink from globe's web settings, and confirm Mystral warns once on the next status check and disables globe controls.
-- Cancel a browser approval and confirm Mystral exits the waiting state and reports the cancellation.
-- Open globe's Mystral connection page while unlinked, click `open Mystral to link`, and confirm Settings → Social opens and linking starts automatically.
-- Open `mystral-dev://settings/social` and confirm an existing process is activated rather than starting a second instance.
-- Confirm globe shows the burned-CD wall post and jewel-case collection entry with the same metadata/card styling as Last.fm music posts.
+Social sharing depends on a proprietary backend and is validated separately as an
+internal step; it is not part of the contributor smoke test.
 
 ## Installer
 
@@ -96,7 +89,6 @@ For packaged development builds:
 - Install the generated setup executable.
 - Launch Mystral from the installed shortcut or install location.
 - Confirm resources load: icon, artwork placeholder, buttons, busy animation, and sounds.
-- Open `mystral://settings/social` and confirm the installed production app opens Settings → Social and begins linking when no account is linked.
 - Uninstall and confirm the app is removed cleanly.
 
 ## Pass Criteria

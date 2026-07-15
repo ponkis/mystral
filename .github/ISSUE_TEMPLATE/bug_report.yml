@@ -1,0 +1,86 @@
+name: "🐛 Bug report"
+description: Report a problem with Mystral
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        Please **do not** report security vulnerabilities here — see our
+        [Security Policy](https://github.com/ponkis/mystral/blob/main/SECURITY.md)
+        for private reporting.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I searched existing issues and this has not been reported yet.
+          required: true
+        - label: I am using the latest released version of Mystral (or can reproduce on it).
+          required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: When I do X, Mystral does Y, but I expected Z.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps someone else can follow to see the bug.
+      placeholder: |
+        1. Start playback in '...'
+        2. Open '...'
+        3. Click '...'
+        4. See error
+    validations:
+      required: true
+  - type: input
+    id: mystral-version
+    attributes:
+      label: Mystral version
+      description: See the About/Settings screen, or the installed app version.
+      placeholder: "2.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build type
+      options:
+        - Installed release (Production)
+        - Packaged dev build (Development)
+        - Built from source (Debug)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: Run `winver`, or check Settings → System → About.
+      placeholder: "Windows 11 23H2 (build 22631)"
+    validations:
+      required: true
+  - type: input
+    id: media-source
+    attributes:
+      label: Media app / source (if relevant)
+      description: Which app was providing the media session?
+      placeholder: "Spotify, a browser tab, foobar2000, ..."
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or crash details
+      description: |
+        Paste any error text, and attach screenshots if helpful. Artwork
+        diagnostics and crash details are especially useful.
+      render: text
+    validations:
+      required: false

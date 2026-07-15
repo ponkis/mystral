@@ -16,3 +16,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 /docs
+
+# Private coding-agent docs (not for contributors)
+/AGENTS.md
+/CLAUDE.md
