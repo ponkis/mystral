@@ -6,7 +6,10 @@ Windows media session and gives you playback controls, lyrics, Last.fm links and
 optional scrobbling, and a tray-based workflow for "burning" audio files
 (re-tagging them with cover/jewel-case artwork) and optionally sharing them.
 
-## Screenshots
+![Main screen](assets/screenshots/1.png)
+![Burning screen](assets/screenshots/2.png)
+![Lyrics](assets/screenshots/3.png)
+![Fullscreen view](assets/screenshots/4.png)
 
 <!--
   To add a screenshot: save the image to assets/screenshots/<name>.png and
@@ -247,7 +250,7 @@ tests/           Headless test runner (Mystral.Tests)
 ```
 ## Trailer
 
-
+[![Watch the trailer](assets/screenshots/trailer.png)](https://mystral.ponkis.xyz)
 
 ## Contributing & Community
 
