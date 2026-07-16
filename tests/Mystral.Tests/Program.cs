@@ -33,7 +33,7 @@ internal static class Program
             ("Globe missing claim and revoke endpoints fail safely", GlobeConnectionServiceTests.TreatsMissingEndpointsAsFailures),
             ("Globe avatar dimensions reject oversized and extreme inputs", GlobeConnectionServiceTests.ValidatesAvatarDimensions),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
-            ("lyrics service keys, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesBestLyricsAndCaches),
+            ("lyrics service exact-matches, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesExactOrBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
@@ -1236,52 +1236,152 @@ static class LocalScrobbleCacheServiceTests
 
 static class LyricsServiceTests
 {
-    public static void FetchesBestLyricsAndCaches()
+    public static void FetchesExactOrBestLyricsAndCaches()
     {
         Check.Equal("", LyricsService.CreateTrackKey(MediaSnapshot.Empty));
         Check.Equal("song|artist|album", LyricsService.CreateTrackKey(Snapshot(" Song ", " Artist ", " Album ")));
 
-        var handler = new FakeHttpMessageHandler(request =>
+        var exactGetCount = 0;
+        var exactSearchCount = 0;
+        var exactHandler = new FakeHttpMessageHandler(request =>
         {
             Check.Equal(HttpMethod.Get, request.Method);
-            Check.Contains("/api/search?", request.RequestUri!.PathAndQuery);
-            Check.Contains("track_name=Song", request.RequestUri!.Query);
-            Check.Contains("artist_name=Artist", request.RequestUri!.Query);
-            return Json(new[]
+            switch (request.RequestUri!.AbsolutePath)
             {
-                new { id = 1, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 120d, instrumental = false, plainLyrics = "plain", syncedLyrics = (string?)null },
-                new { id = 2, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 121d, instrumental = false, plainLyrics = "", syncedLyrics = (string?)"[00:01.00]Line" },
-                new { id = 3, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 119d, instrumental = false, plainLyrics = "", syncedLyrics = (string?)"" }
-            });
+                case "/api/get":
+                    exactGetCount++;
+                    var exactQuery = ParseQuery(request.RequestUri);
+                    Check.Equal("Song", exactQuery["track_name"]);
+                    Check.Equal("Artist", exactQuery["artist_name"]);
+                    Check.Equal("Album", exactQuery["album_name"]);
+                    Check.Equal("121", exactQuery["duration"]);
+                    return Json(new
+                    {
+                        id = 1,
+                        trackName = "Song",
+                        artistName = "Artist",
+                        albumName = "Album",
+                        duration = 121d,
+                        instrumental = false,
+                        plainLyrics = "",
+                        syncedLyrics = (string?)"[00:01.00]Exact line"
+                    });
+                case "/api/search":
+                    exactSearchCount++;
+                    throw new InvalidOperationException("search should not follow an exact hit");
+                default:
+                    throw new InvalidOperationException($"unexpected LRCLIB endpoint: {request.RequestUri.AbsolutePath}");
+            }
         });
 
-        using var service = new LyricsService(new HttpClient(handler));
+        using var service = new LyricsService(new HttpClient(exactHandler));
         var snapshot = Snapshot("Song - Official Video", "Artist", "Album", TimeSpan.FromSeconds(121));
         var result = service.GetLyricsAsync(snapshot, CancellationToken.None).GetAwaiter().GetResult();
         var cached = service.GetLyricsAsync(snapshot, CancellationToken.None).GetAwaiter().GetResult();
 
         Check.Same(result, cached);
-        Check.Equal(1, handler.Count);
+        Check.Equal(1, exactHandler.Count);
+        Check.Equal(1, exactGetCount);
+        Check.Equal(0, exactSearchCount);
         Check.Equal(LyricsStatus.Synced, result.Status);
-        Check.Equal("Line", result.SyncedLines.Single().Text);
+        Check.Equal("Exact line", result.SyncedLines.Single().Text);
         Check.Equal("LRCLIB", result.TrackInfo!.SourceName);
+
+        var fallbackGetCount = 0;
+        var fallbackSearchCount = 0;
+        var fallbackHandler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal(HttpMethod.Get, request.Method);
+            switch (request.RequestUri!.AbsolutePath)
+            {
+                case "/api/get":
+                    fallbackGetCount++;
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = new StringContent("{\"name\":\"TrackNotFound\"}", Encoding.UTF8, "application/json")
+                    };
+                case "/api/search":
+                    fallbackSearchCount++;
+                    var searchQuery = ParseQuery(request.RequestUri);
+                    Check.Equal("Song", searchQuery["track_name"]);
+                    Check.Equal("Artist", searchQuery["artist_name"]);
+                    return Json(new[]
+                    {
+                        new { id = 2, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 120d, instrumental = false, plainLyrics = "plain", syncedLyrics = (string?)null },
+                        new { id = 3, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 121d, instrumental = false, plainLyrics = "", syncedLyrics = (string?)"[00:01.00]Line" },
+                        new { id = 4, trackName = "Song", artistName = "Artist", albumName = "Album", duration = 119d, instrumental = false, plainLyrics = "", syncedLyrics = (string?)"" }
+                    });
+                default:
+                    throw new InvalidOperationException($"unexpected LRCLIB endpoint: {request.RequestUri.AbsolutePath}");
+            }
+        });
+
+        using var fallbackService = new LyricsService(new HttpClient(fallbackHandler));
+        var fallbackResult = fallbackService.GetLyricsAsync(snapshot, CancellationToken.None).GetAwaiter().GetResult();
+        var fallbackCached = fallbackService.GetLyricsAsync(snapshot, CancellationToken.None).GetAwaiter().GetResult();
+
+        Check.Same(fallbackResult, fallbackCached);
+        Check.Equal(2, fallbackHandler.Count);
+        Check.Equal(1, fallbackGetCount);
+        Check.Equal(1, fallbackSearchCount);
+        Check.Equal(LyricsStatus.Synced, fallbackResult.Status);
+        Check.Equal("Line", fallbackResult.SyncedLines.Single().Text);
 
         using var emptyService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(_ => throw new InvalidOperationException("should not call"))));
         Check.Equal(LyricsStatus.Empty, emptyService.GetLyricsAsync(MediaSnapshot.Empty, CancellationToken.None).GetAwaiter().GetResult().Status);
 
-        using var plainService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(_ => Json(new[]
+        var plainSearchCount = 0;
+        using var plainService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(request =>
         {
-            new { id = 4, trackName = "Song", artistName = "Artist", albumName = "", duration = 0d, instrumental = false, plainLyrics = "\r\n one \n\n two ", syncedLyrics = (string?)null }
-        }))));
-        var plain = plainService.GetLyricsAsync(Snapshot("Song", "Artist", "", TimeSpan.Zero), CancellationToken.None).GetAwaiter().GetResult();
+            Check.Equal("/api/search", request.RequestUri!.AbsolutePath);
+            plainSearchCount++;
+            return Json(new[]
+            {
+                new { id = 5, trackName = "Song", artistName = "Artist", albumName = "", duration = 0d, instrumental = false, plainLyrics = "\r\n one \n\n two ", syncedLyrics = (string?)null }
+            });
+        })));
+        var plain = plainService.GetLyricsAsync(Snapshot("Song", "Artist", "", TimeSpan.FromSeconds(121)), CancellationToken.None).GetAwaiter().GetResult();
+        Check.Equal(1, plainSearchCount);
         Check.Equal(LyricsStatus.Plain, plain.Status);
         Check.Sequence(["one", "two"], plain.PlainLines);
 
-        using var instrumentalService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(_ => Json(new[]
+        var instrumentalSearchCount = 0;
+        using var instrumentalService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(request =>
         {
-            new { id = 5, trackName = "Song", artistName = "Artist", albumName = "", duration = 0d, instrumental = true, plainLyrics = "", syncedLyrics = "" }
-        }))));
-        Check.Equal(LyricsStatus.Instrumental, instrumentalService.GetLyricsAsync(Snapshot("Song", "Artist", "", TimeSpan.Zero), CancellationToken.None).GetAwaiter().GetResult().Status);
+            Check.Equal("/api/search", request.RequestUri!.AbsolutePath);
+            instrumentalSearchCount++;
+            return Json(new[]
+            {
+                new { id = 6, trackName = "Song", artistName = "Artist", albumName = "", duration = 0d, instrumental = true, plainLyrics = "", syncedLyrics = "" }
+            });
+        })));
+        Check.Equal(LyricsStatus.Instrumental, instrumentalService.GetLyricsAsync(Snapshot("Song", "Artist", "Album", TimeSpan.Zero), CancellationToken.None).GetAwaiter().GetResult().Status);
+        Check.Equal(1, instrumentalSearchCount);
+
+        var missingArtistSearchCount = 0;
+        using var missingArtistService = new LyricsService(new HttpClient(new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/search", request.RequestUri!.AbsolutePath);
+            missingArtistSearchCount++;
+            return Json(Array.Empty<object>());
+        })));
+        var missingArtist = missingArtistService.GetLyricsAsync(
+            Snapshot("Song", "", "Album", TimeSpan.FromSeconds(121)),
+            CancellationToken.None).GetAwaiter().GetResult();
+        Check.Equal(LyricsStatus.NotFound, missingArtist.Status);
+        Check.Equal(1, missingArtistSearchCount);
+    }
+
+    private static Dictionary<string, string> ParseQuery(Uri uri)
+    {
+        return uri.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(pair => pair.Split('=', 2))
+            .ToDictionary(
+                pair => Uri.UnescapeDataString(pair[0]),
+                pair => Uri.UnescapeDataString(pair[1]),
+                StringComparer.Ordinal);
     }
 }
 

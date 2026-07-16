@@ -59,7 +59,7 @@ The test suite covers the vital headless app logic:
 
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
-- LRCLIB search ranking, parsing, and caching
+- LRCLIB exact lookup, fallback search ranking, parsing, and caching
 - settings persistence and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - model defaults and artwork tint edge cases
@@ -91,7 +91,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.0.0</VersionPrefix>
+<VersionPrefix>2.1.0</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

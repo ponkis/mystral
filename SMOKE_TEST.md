@@ -43,7 +43,8 @@ For packaged development builds:
 
 ## Lyrics
 
-- Play a normal song with lyrics and confirm synced or plain lyrics load.
+- Play a well-tagged song with the correct album and duration and confirm synced or plain lyrics load.
+- Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
 - Switch tracks and confirm old lyrics do not remain stuck.
 - Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
 - Play a track with no lyrics and confirm the empty/not-found state is readable.

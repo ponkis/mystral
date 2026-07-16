@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -64,13 +65,38 @@ public sealed class LyricsService : IDisposable
     private async Task<LyricsResult> FetchLyricsAsync(MediaSnapshot snapshot, CancellationToken cancellationToken)
     {
         var durationSeconds = Math.Max(0, (int)Math.Round(snapshot.Duration.TotalSeconds));
-        var searched = await SearchAsync(snapshot, durationSeconds, cancellationToken);
-        if (searched is not null)
+        var exact = await GetExactAsync(snapshot, durationSeconds, cancellationToken);
+        if (exact is not null)
         {
-            return ToResult(searched);
+            return ToResult(exact);
         }
 
-        return LyricsResult.NotFound;
+        var searched = await SearchAsync(snapshot, durationSeconds, cancellationToken);
+        return searched is not null ? ToResult(searched) : LyricsResult.NotFound;
+    }
+
+    private async Task<LrclibLyrics?> GetExactAsync(
+        MediaSnapshot snapshot,
+        int durationSeconds,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(snapshot.Artist)
+            || string.IsNullOrWhiteSpace(snapshot.Album)
+            || durationSeconds <= 0)
+        {
+            return null;
+        }
+
+        var query = new Dictionary<string, string>
+        {
+            ["track_name"] = CleanSearchTerm(snapshot.Title),
+            ["artist_name"] = CleanSearchTerm(snapshot.Artist),
+            ["album_name"] = CleanSearchTerm(snapshot.Album),
+            ["duration"] = durationSeconds.ToString(CultureInfo.InvariantCulture)
+        };
+
+        var exact = await GetJsonAsync<LrclibLyrics>("/api/get", query, cancellationToken);
+        return exact is not null && HasAnyLyrics(exact) ? exact : null;
     }
 
     private async Task<LrclibLyrics?> SearchAsync(
