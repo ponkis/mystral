@@ -1941,17 +1941,6 @@ public partial class MainWindow : Window
         panel.Children.Add(block);
     }
 
-    private void AddLyricWaitIndicatorIfNeeded(int lineIndex, TimeSpan previousLineTime, TimeSpan nextLineTime)
-    {
-        AddLyricWaitIndicatorIfNeeded(
-            lineIndex,
-            previousLineTime,
-            nextLineTime,
-            LyricsStackPanel,
-            _lyricWaitIndicators,
-            isFullscreen: false);
-    }
-
     private void AddLyricWaitIndicatorIfNeeded(
         int lineIndex,
         TimeSpan previousLineTime,
@@ -2021,9 +2010,9 @@ public partial class MainWindow : Window
         targetPanel.Children.Add(indicatorPanel);
     }
 
-    private bool UpdateLyricWaitIndicators(TimeSpan position)
+    private void UpdateLyricWaitIndicators(TimeSpan position)
     {
-        return UpdateLyricWaitIndicators(
+        UpdateLyricWaitIndicators(
             _lyricWaitIndicators,
             position,
             ref _activeLyricWaitIndicatorIndex,
@@ -2032,7 +2021,7 @@ public partial class MainWindow : Window
             isFullscreen: false);
     }
 
-    private bool UpdateLyricWaitIndicators(
+    private void UpdateLyricWaitIndicators(
         IReadOnlyList<LyricWaitIndicator> indicators,
         TimeSpan position,
         ref int activeWaitIndicatorIndex,
@@ -2042,7 +2031,7 @@ public partial class MainWindow : Window
     {
         if (indicators.Count == 0)
         {
-            return false;
+            return;
         }
 
         var activeIndex = -1;
@@ -2072,8 +2061,6 @@ public partial class MainWindow : Window
                 AnimateDouble(indicators[i].Element, OpacityProperty, targetOpacity, 220);
             }
         }
-
-        return changed;
     }
 
     private static double GetFullscreenWaitIndicatorOpacity(
@@ -2284,20 +2271,19 @@ public partial class MainWindow : Window
         }
 
         var stabilizedPosition = StabilizeLyricPosition(position);
-        var activeWaitChanged = isFullscreen
-            ? UpdateFullscreenLyricWaitIndicators(stabilizedPosition)
-            : UpdateLyricWaitIndicators(stabilizedPosition);
+        if (isFullscreen)
+        {
+            UpdateFullscreenLyricWaitIndicators(stabilizedPosition);
+        }
+        else
+        {
+            UpdateLyricWaitIndicators(stabilizedPosition);
+        }
+
         var activeIndex = FindActiveLyricIndex(Lyrics.SyncedLines, stabilizedPosition + LyricActivationLead);
 
         if (isFullscreen)
         {
-            if (activeWaitChanged && _activeFullscreenLyricWaitIndicatorIndex >= 0)
-            {
-                Dispatcher.BeginInvoke(
-                    () => CenterLyricsElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element, isFullscreen: true),
-                    DispatcherPriority.Loaded);
-            }
-
             if (activeIndex == _activeFullscreenLyricIndex)
             {
                 return;
@@ -2308,22 +2294,13 @@ public partial class MainWindow : Window
             _activeFullscreenLyricIndex = activeIndex;
             ApplyLyricBlockVisualState(activeIndex, isFullscreen: true);
 
-            if (_activeFullscreenLyricWaitIndicatorIndex < 0)
-            {
-                Dispatcher.BeginInvoke(() => CenterActiveLyric(activeIndex, isFullscreen: true), DispatcherPriority.Loaded);
-            }
+            Dispatcher.BeginInvoke(() => CenterActiveLyric(activeIndex, isFullscreen: true), DispatcherPriority.Loaded);
 
             return;
         }
 
         if (activeIndex == _activeLyricIndex)
         {
-            if (activeWaitChanged)
-            {
-                ApplyLyricBlockVisualState(activeIndex);
-                CenterActiveLyricWaitIndicator();
-            }
-
             return;
         }
 
@@ -2392,20 +2369,18 @@ public partial class MainWindow : Window
     {
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
         var isUserBrowsing = isFullscreen ? _isUserBrowsingFullscreenLyrics : _isUserBrowsingLyrics;
-        var activeWaitIndicatorIndex = isFullscreen ? _activeFullscreenLyricWaitIndicatorIndex : _activeLyricWaitIndicatorIndex;
         var shouldHidePreviousFinalLine = !isFullscreen && !isUserBrowsing && activeIndex == blocks.Count - 1;
-        var hasActiveWaitIndicator = !isUserBrowsing && activeWaitIndicatorIndex >= 0;
 
         for (var i = 0; i < blocks.Count; i++)
         {
             var block = blocks[i];
             var distance = activeIndex < 0 ? 4 : Math.Abs(i - activeIndex);
-            var isActive = (!hasActiveWaitIndicator || isFullscreen) && i == activeIndex;
+            var isActive = i == activeIndex;
             var targetOpacity = isFullscreen
                 ? isActive ? 1.0 : isUserBrowsing || i > activeIndex ? 0.35 : 0.0
                 : shouldHidePreviousFinalLine && i == activeIndex - 1
                     ? 0.0
-                    : isActive ? 1.0 : hasActiveWaitIndicator && i == activeIndex ? 0.44 : distance == 1 ? 0.48 : distance == 2 ? 0.28 : 0.18;
+                    : isActive ? 1.0 : distance == 1 ? 0.48 : distance == 2 ? 0.28 : 0.18;
             var targetColor = isFullscreen
                 ? isActive ? Color.FromRgb(255, 255, 255) : Color.FromRgb(180, 185, 185)
                 : isActive
@@ -2438,20 +2413,6 @@ public partial class MainWindow : Window
         }
 
         CenterLyricsElement(blocks[activeIndex], isFullscreen);
-    }
-
-    private void CenterActiveLyricWaitIndicator()
-    {
-        if (_isUserBrowsingLyrics ||
-            _activeLyricWaitIndicatorIndex < 0 ||
-            _activeLyricWaitIndicatorIndex >= _lyricWaitIndicators.Count)
-        {
-            return;
-        }
-
-        Dispatcher.BeginInvoke(
-            () => CenterLyricsElement(_lyricWaitIndicators[_activeLyricWaitIndicatorIndex].Element),
-            DispatcherPriority.Loaded);
     }
 
     private void CenterLyricsElement(FrameworkElement element, bool isFullscreen = false)
@@ -4824,9 +4785,9 @@ public partial class MainWindow : Window
         return spacer;
     }
 
-    private bool UpdateFullscreenLyricWaitIndicators(TimeSpan position)
+    private void UpdateFullscreenLyricWaitIndicators(TimeSpan position)
     {
-        return UpdateLyricWaitIndicators(
+        UpdateLyricWaitIndicators(
             _fullscreenLyricWaitIndicators,
             position,
             ref _activeFullscreenLyricWaitIndicatorIndex,
@@ -4853,11 +4814,7 @@ public partial class MainWindow : Window
 
             if (!_isUserBrowsingFullscreenLyrics)
             {
-                if (_activeFullscreenLyricWaitIndicatorIndex >= 0 && _fullscreenLyricWaitIndicators.Count > _activeFullscreenLyricWaitIndicatorIndex)
-                {
-                    CenterLyricsElement(_fullscreenLyricWaitIndicators[_activeFullscreenLyricWaitIndicatorIndex].Element, isFullscreen: true);
-                }
-                else if (_activeFullscreenLyricIndex >= 0 && _fullscreenLyricBlocks.Count > _activeFullscreenLyricIndex)
+                if (_activeFullscreenLyricIndex >= 0 && _fullscreenLyricBlocks.Count > _activeFullscreenLyricIndex)
                 {
                     CenterActiveLyric(_activeFullscreenLyricIndex, isFullscreen: true);
                 }

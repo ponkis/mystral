@@ -45,6 +45,7 @@ For packaged development builds:
 
 - Play a well-tagged song with the correct album and duration and confirm synced or plain lyrics load.
 - Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
+- During a long gap, confirm the three dots fill alongside the preceding highlighted lyric without recentering or advancing lyric synchronization early.
 - Switch tracks and confirm old lyrics do not remain stuck.
 - Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
 - Play a track with no lyrics and confirm the empty/not-found state is readable.
