@@ -110,9 +110,9 @@ dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj --source "$env:USERPRO
 ```
 
 The suite covers the headless application logic: LRC parsing, Last.fm metadata
-cleanup and API paths, LRCLIB search and caching, settings persistence and
-corrupt-file fallback, local scrobble history, artwork composition and tinting,
-MusicBrainz mapping and retries, and audio-tag burning.
+cleanup and API paths, LRCLIB exact lookup and fallback search, settings
+persistence and corrupt-file fallback, local scrobble history, artwork
+composition and tinting, MusicBrainz mapping and retries, and audio-tag burning.
 
 GitHub Actions runs the same build-and-test checks on every push and pull request
 (`.github\workflows\ci.yml`).
@@ -227,7 +227,7 @@ artifacts\installer\Mystral-<version>-win-x64-setup.exe
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.0.1</VersionPrefix>
+<VersionPrefix>2.1.0</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically append a
