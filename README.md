@@ -73,7 +73,9 @@ Fetched lyrics remain editable before the copy is saved.
 Mystral can check GitHub releases at startup or from the About dialog. Update
 downloads show progress and can be canceled; Mystral confirms that a canceled
 download did not launch the installer. If a download is interrupted or fails,
-the error dialog reports the underlying cause and offers Retry.
+the error dialog reports the underlying cause and offers Retry. After an update,
+the confirmation popup links to the GitHub comparison for the previous and new
+release.
 
 ## Testing
 
@@ -132,7 +134,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.1.0</VersionPrefix>
+<VersionPrefix>2.1.1</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

@@ -261,7 +261,23 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(previousVersion)
                 && SettingsWindow.IsNewerRelease(AppMetadata.Version, previousVersion))
             {
-                AppDialogWindow.ShowConfirmation(this, "Update installed", $"Mystral was updated to version {AppMetadata.Version}.");
+                var message = $"Mystral was updated to version {AppMetadata.Version}.";
+                var compareUri = GitHubReleaseLinks.CreateCompareUri(
+                    previousVersion,
+                    AppMetadata.Version);
+                if (compareUri is null)
+                {
+                    AppDialogWindow.ShowConfirmation(this, "Update installed", message);
+                }
+                else
+                {
+                    AppDialogWindow.ShowConfirmationWithLink(
+                        this,
+                        "Update installed",
+                        message,
+                        "What's new",
+                        compareUri);
+                }
             }
 
             File.WriteAllText(LastRunVersionPath, AppMetadata.Version);

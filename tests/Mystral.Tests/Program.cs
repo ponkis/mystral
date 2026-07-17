@@ -44,6 +44,7 @@ internal static class Program
             ("MusicBrainz retries transient artwork responses and gives up gracefully", MusicBrainzServiceTests.RetriesTransientArtworkResponses),
             ("MusicBrainz reports artwork outcomes and records failure diagnostics", MusicBrainzServiceTests.ReportsArtworkOutcomesAndDiagnostics),
             ("artwork diagnostics write a bounded, rotating, failure-tolerant log", ArtworkDiagnosticsTests.WritesAndRotatesBoundedLog),
+            ("GitHub update links compare valid release tags safely", GitHubReleaseLinksTests.BuildsSafeCompareUris),
             ("update downloads reject interrupted files and preserve useful failure causes", UpdateDownloadTests.ValidatesInterruptedDownloadsAndFailureMessages),
             ("burn lyric fetches replace definitive results and preserve service failures", BurnLyricsFetchTests.ReplacesDefinitiveResultsAndPreservesFailures),
             ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
@@ -2160,6 +2161,44 @@ static class ArtworkDiagnosticsTests
         File.WriteAllText(blocker, "x");
         var badDiagnostics = new Mystral.Services.FileArtworkDiagnostics(Path.Combine(blocker, "artwork.log"));
         badDiagnostics.RecordArtworkFailure("cover-indexed", null, null, null, "Exception");
+    }
+}
+
+static class GitHubReleaseLinksTests
+{
+    public static void BuildsSafeCompareUris()
+    {
+        var stableCompare = GitHubReleaseLinks.CreateCompareUri(
+            " v2.1.0 ",
+            "2.1.1");
+        Check.NotNull(stableCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.1.0...v2.1.1",
+            stableCompare!.AbsoluteUri);
+
+        var prereleaseCompare = GitHubReleaseLinks.CreateCompareUri(
+            "2.2.0-beta.2",
+            "v2.2.0-beta.10");
+        Check.NotNull(prereleaseCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.2.0-beta.2...v2.2.0-beta.10",
+            prereleaseCompare!.AbsoluteUri);
+
+        var stablePromotionCompare = GitHubReleaseLinks.CreateCompareUri(
+            "2.2.0-rc.1",
+            "2.2.0");
+        Check.NotNull(stablePromotionCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.2.0-rc.1...v2.2.0",
+            stablePromotionCompare!.AbsoluteUri);
+
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0-dev", "2.1.1"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "2.1.1-dev"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "not a version"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "2.1.0/../../main"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("v2.1.0", "2.1.0"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.1", "2.1.0"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.2.0", "2.2.0-rc.1"));
     }
 }
 

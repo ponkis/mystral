@@ -98,6 +98,7 @@ For packaged development builds:
 - Start the installer download, click Cancel, and confirm Mystral reports that the download was canceled and the installer was not launched.
 - Start the download again, disconnect the network, and confirm the failure dialog includes a cause plus Retry and Cancel buttons.
 - Restore the connection, click Retry, and confirm a new progress dialog completes the download and launches the installer.
+- After installing a newer release, confirm the `Update installed` popup includes a `What's new` link and opens the GitHub comparison from the previous release tag to the newly installed tag.
 
 ## Last.fm
 
