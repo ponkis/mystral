@@ -66,8 +66,27 @@ For packaged development builds:
 
 - Open settings from the app and tray menu.
 - Toggle behavior settings, save, restart, and confirm persistence.
+- Under Behavior, switch the Burn lyrics provider between `MusicBrainz-assisted (default)` and `LRCLIB (direct)`, save, restart, and confirm the selected provider persists.
 - Enter invalid Last.fm credentials and confirm validation fails gracefully.
 - If available, enter valid Last.fm credentials and confirm validation succeeds.
+
+## Burn Editor
+
+- Open an audio file that already contains plain and synchronized lyrics; confirm both fields appear in the Lyrics tab without changing the source file.
+- Add or edit plain lyrics and timestamped LRC lyrics such as `[00:12.34]First line`, save the burned copy, reopen that copy, and confirm both lyric forms round-trip.
+- Clear both lyric fields, save another copy, reopen it, and confirm the lyrics were removed while unrelated metadata remains intact.
+- Enter synchronized text without a valid LRC timestamp and confirm Save reports a readable validation error instead of creating the burned copy.
+- With `MusicBrainz-assisted (default)` selected, click `Fetch song + lyrics` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
+- With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song + lyrics`, and confirm lyrics are searched using the values currently in the editor.
+- If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
+- Confirm the original audio bytes and tags are unchanged after every burn.
+
+## Updates
+
+- From the About dialog, check for an update while running a version older than the latest release.
+- Start the installer download, click Cancel, and confirm Mystral reports that the download was canceled and the installer was not launched.
+- Start the download again, disconnect the network, and confirm the failure dialog includes a cause plus Retry and Cancel buttons.
+- Restore the connection, click Retry, and confirm a new progress dialog completes the download and launches the installer.
 
 ## Last.fm
 

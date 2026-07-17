@@ -156,6 +156,20 @@ public partial class AppDialogWindow : Window
             "confirmation.wav");
     }
 
+    internal static MessageBoxResult ShowRetryCancel(Window owner, string title, string message)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            FromSystemIcon(System.Drawing.SystemIcons.Warning),
+            [
+                new DialogButtonSpec("Retry", MessageBoxResult.Yes, IsDefault: true, IsCancel: false),
+                new DialogButtonSpec("Cancel", MessageBoxResult.Cancel, IsDefault: false, IsCancel: true)
+            ],
+            "warning.wav");
+    }
+
     private static MessageBoxResult ShowDialog(
         Window owner,
         string title,

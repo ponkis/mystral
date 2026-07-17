@@ -43,6 +43,13 @@ public sealed record class BehaviorSettings
     public bool AlwaysOnTop { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;
     public bool CheckForUpdatesOnStartup { get; set; } = true;
+    public BurnLyricsProvider BurnLyricsProvider { get; set; } = BurnLyricsProvider.MusicBrainzAssisted;
+}
+
+public enum BurnLyricsProvider
+{
+    MusicBrainzAssisted,
+    Lrclib
 }
 
 public sealed record class SocialSettings

@@ -36,6 +36,34 @@ Mystral is a Windows desktop music companion built with WPF. It reads the active
 
 The app validates Last.fm credentials when settings are saved. Scrobbling uses Last.fm `auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
 
+Under `Behavior`, choose how the burn editor looks up lyrics:
+
+- `MusicBrainz-assisted (default)` uses the MusicBrainz metadata match to refine
+  the LRCLIB lyric search.
+- `LRCLIB (direct)` searches LRCLIB with the title, artist, album, and duration
+  currently shown in the burn editor.
+
+Neither burn-lyrics mode requires an API key.
+
+## Burn Editor
+
+The burn editor always writes a separate copy of the selected audio file. It can
+edit track details, cover and disc artwork, plain lyrics, and synchronized lyrics
+in LRC format; the source audio is never modified. Synchronized lyrics use a
+native synchronized tag when the file's tagging format supports one and fall
+back to portable timestamped LRC text otherwise.
+
+`Fetch song + lyrics` retrieves metadata and artwork through MusicBrainz and the
+Cover Art Archive, and retrieves plain or synchronized lyrics through LRCLIB.
+Fetched lyrics remain editable before the copy is saved.
+
+## Updates
+
+Mystral can check GitHub releases at startup or from the About dialog. Update
+downloads show progress and can be canceled; Mystral confirms that a canceled
+download did not launch the installer. If a download is interrupted or fails,
+the error dialog reports the underlying cause and offers Retry.
+
 ## Testing
 
 The automated tests live in `tests\Mystral.Tests`. They use a small console runner instead of a test framework, so there are no extra test packages to restore.
@@ -60,9 +88,11 @@ The test suite covers the vital headless app logic:
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
 - LRCLIB exact lookup, fallback search ranking, parsing, and caching
-- settings persistence and corrupt JSON fallback
+- settings persistence, burn-lyrics provider defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - model defaults and artwork tint edge cases
+- burn metadata validation, lyric-tag round trips, and preservation of the source audio
+- interrupted update downloads, partial-file cleanup, and failure-message handling
 
 Before a release, also run the Windows-only checklist in `SMOKE_TEST.md`: WPF window states, tray behavior, media session controls, system volume controls, notifications, and installer output.
 

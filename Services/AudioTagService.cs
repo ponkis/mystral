@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using ATL.AudioData;
 using Mystral.Models;
+using Mystral.Parsing;
 
 namespace Mystral.Services;
 
@@ -167,6 +168,7 @@ public sealed class AudioTagService
                 cancellationToken,
                 out var coverPictureType);
             var disc = LoadDiscArtwork(track, cancellationToken);
+            var (unsynchronizedLyrics, synchronizedLyrics) = LoadLyrics(track);
             return new BurnTrackDraft
             {
                 SourcePath = path,
@@ -179,6 +181,8 @@ public sealed class AudioTagService
                     ?? track.TrackNumber?.ToString(CultureInfo.InvariantCulture)
                     ?? string.Empty,
                 TrackTotal = track.TrackTotal?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                UnsynchronizedLyrics = unsynchronizedLyrics,
+                SynchronizedLyrics = synchronizedLyrics,
                 Isrc = track.ISRC?.Trim() ?? string.Empty,
                 Duration = TimeSpan.FromMilliseconds(track.DurationMs),
                 CoverArtwork = cover,
@@ -307,6 +311,116 @@ public sealed class AudioTagService
         {
             WriteDiscArtwork(track, draft.DiscArtwork?.Data);
         }
+
+        if (draft.LyricsChanged)
+        {
+            WriteLyrics(track, draft);
+        }
+    }
+
+    private static (string Unsynchronized, string Synchronized) LoadLyrics(ATL.Track track)
+    {
+        var unsynchronized = new List<string>();
+        var synchronized = new List<string>();
+
+        foreach (var lyrics in track.Lyrics.Where(item =>
+            !item.IsMarkedForRemoval
+            && item.ContentType == ATL.LyricsInfo.LyricsType.LYRICS))
+        {
+            var rawText = NormalizeLyricsText(lyrics.UnsynchronizedLyrics);
+            var hasSynchronizedPhrases = lyrics.SynchronizedLyrics.Count > 0;
+            var rawTextIsLrc = LrcParser.Parse(rawText).Count > 0;
+
+            if (rawText.Length > 0)
+            {
+                if (rawTextIsLrc)
+                {
+                    synchronized.Add(rawText);
+                }
+                else
+                {
+                    unsynchronized.Add(rawText);
+                }
+            }
+
+            if (hasSynchronizedPhrases && !rawTextIsLrc)
+            {
+                var formatted = FormatSynchronizedLyrics(lyrics.SynchronizedLyrics);
+                if (formatted.Length > 0)
+                {
+                    synchronized.Add(formatted);
+                }
+            }
+        }
+
+        return (
+            string.Join("\n\n", unsynchronized),
+            string.Join("\n\n", synchronized));
+    }
+
+    private static void WriteLyrics(ATL.Track track, BurnTrackDraft draft)
+    {
+        // Editing the lyric text replaces lyrical entries but keeps unrelated
+        // timed metadata such as transcription, events, chords, or trivia.
+        var lyricsEntries = track.Lyrics
+            .Where(item => !item.IsMarkedForRemoval
+                && item.ContentType != ATL.LyricsInfo.LyricsType.LYRICS)
+            .Select(item => new ATL.LyricsInfo(item))
+            .ToList();
+        var unsynchronized = NormalizeLyricsText(draft.UnsynchronizedLyrics);
+        if (!string.IsNullOrWhiteSpace(unsynchronized))
+        {
+            lyricsEntries.Add(new ATL.LyricsInfo
+            {
+                ContentType = ATL.LyricsInfo.LyricsType.LYRICS,
+                Description = "Mystral unsynchronized lyrics",
+                LanguageCode = "und",
+                UnsynchronizedLyrics = unsynchronized
+            });
+        }
+
+        var synchronized = NormalizeLyricsText(draft.SynchronizedLyrics);
+        if (!string.IsNullOrWhiteSpace(synchronized))
+        {
+            var lyrics = new ATL.LyricsInfo
+            {
+                ContentType = ATL.LyricsInfo.LyricsType.LYRICS,
+                Description = "Mystral synchronized lyrics",
+                LanguageCode = "und",
+                Format = ATL.LyricsInfo.LyricsFormat.LRC
+            };
+            foreach (var line in LrcParser.Parse(synchronized))
+            {
+                var timestamp = (int)Math.Clamp(line.Time.TotalMilliseconds, 0, int.MaxValue);
+                lyrics.SynchronizedLyrics.Add(new ATL.LyricsInfo.LyricsPhrase(timestamp, line.Text));
+            }
+            lyricsEntries.Add(lyrics);
+        }
+
+        track.Lyrics = lyricsEntries;
+    }
+
+    private static string FormatSynchronizedLyrics(
+        IEnumerable<ATL.LyricsInfo.LyricsPhrase> phrases)
+    {
+        return string.Join("\n", phrases
+            .OrderBy(phrase => phrase.TimestampStart)
+            .Select(phrase =>
+            {
+                var time = TimeSpan.FromMilliseconds(Math.Max(0, phrase.TimestampStart));
+                var totalMinutes = (int)Math.Floor(time.TotalMinutes);
+                var seconds = time.TotalSeconds - (totalMinutes * 60);
+                return $"[{totalMinutes:00}:{seconds.ToString("00.00", CultureInfo.InvariantCulture)}]{phrase.Text}";
+            }));
+    }
+
+    private static string NormalizeLyricsText(string? value)
+    {
+        return string.IsNullOrEmpty(value)
+            ? string.Empty
+            : value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
     }
 
     private static void WriteDiscArtwork(ATL.Track track, byte[]? data)
@@ -403,6 +517,14 @@ public sealed class AudioTagService
         ValidateFieldLength("Year", draft.Year, BurnTrackDraft.MaxYearLength);
         ValidateFieldLength("Track number", draft.TrackNumber, BurnTrackDraft.MaxTrackNumberLength);
         ValidateFieldLength("Track count", draft.TrackTotal, BurnTrackDraft.MaxTrackTotalLength);
+        ValidateFieldLength("Unsynchronized lyrics", draft.UnsynchronizedLyrics, BurnTrackDraft.MaxLyricsLength);
+        ValidateFieldLength("Synchronized lyrics", draft.SynchronizedLyrics, BurnTrackDraft.MaxLyricsLength);
+        if (!string.IsNullOrWhiteSpace(draft.SynchronizedLyrics)
+            && LrcParser.Parse(draft.SynchronizedLyrics).Count == 0)
+        {
+            throw new InvalidDataException(
+                "Synchronized lyrics must use LRC timestamps such as [00:12.34].");
+        }
         _ = ParseYear(draft.Year);
         var trackNumber = ParseTrackNumber(draft.TrackNumber);
         _ = ParseTrackTotal(draft.TrackTotal, trackNumber);

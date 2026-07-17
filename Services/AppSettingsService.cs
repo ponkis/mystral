@@ -286,6 +286,10 @@ public sealed class AppSettingsService
         settings.LastFm.ApiKey = settings.LastFm.ApiKey.Trim();
         settings.LastFm.ApiSecret = settings.LastFm.ApiSecret.Trim();
         settings.LastFm.Username = settings.LastFm.Username.Trim();
+        if (!Enum.IsDefined(settings.Behavior.BurnLyricsProvider))
+        {
+            settings.Behavior.BurnLyricsProvider = BurnLyricsProvider.MusicBrainzAssisted;
+        }
         return settings;
     }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Windows;
@@ -32,6 +33,7 @@ public partial class BurningWindow : Window
     private readonly AppSettingsService _settingsService;
     private readonly GlobeConnectionService _globeConnectionService;
     private readonly MusicBrainzService _musicBrainzService = new();
+    private readonly LyricsService _lyricsService = new();
     private readonly BitmapSource _placeholderArtwork;
     private readonly BitmapSource _defaultDiscArtwork;
     private CancellationTokenSource? _operationCts;
@@ -303,6 +305,7 @@ public partial class BurningWindow : Window
         _operationCts?.Dispose();
         _operationCts = null;
         _musicBrainzService.Dispose();
+        _lyricsService.Dispose();
         Mouse.OverrideCursor = null;
     }
 
@@ -348,6 +351,14 @@ public partial class BurningWindow : Window
         UpdatePreviewText();
         UpdateDirtyState();
         PresentationChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void LyricsBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isInitialized)
+        {
+            UpdateDirtyState();
+        }
     }
 
     private void NumericTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
@@ -615,29 +626,44 @@ public partial class BurningWindow : Window
             AppDialogWindow.ShowWarning(
                 this,
                 "Title needed",
-                "Enter a song title before fetching data from MusicBrainz.");
+                "Enter a song title before fetching song data and lyrics.");
             TitleBox.Focus();
             return;
         }
+
+        var lookupTitle = _draft.Title;
+        var lookupArtist = _draft.Artist;
+        var lookupAlbum = _draft.Album;
+        var lyricsProvider = _settingsService.Settings.Behavior.BurnLyricsProvider;
 
         BeginOperation();
         var cancellationToken = _operationCts!.Token;
         SetBusy(true);
         MusicBrainzTrackData? result = null;
+        LyricsResult? lyricsResult = null;
         ArtworkAsset? fetchedCover = null;
         ArtworkAsset? fetchedDisc = null;
-        Exception? operationError = null;
+        Exception? metadataError = null;
+        Exception? lyricsError = null;
         var wasCanceled = false;
         var progressWindow = new OperationProgressWindow(
             this,
-            "Fetching song data",
-            "Fetching song data",
-            "Searching MusicBrainz and Cover Art Archive…",
+            "Fetching song and lyrics",
+            "Fetching song data and lyrics",
+            "Searching MusicBrainz, Cover Art Archive, and LRCLIB…",
             isIndeterminate: true,
             _operationCts.Cancel,
             progressBrush: Brushes.LightSeaGreen);
         progressWindow.ContentRendered += async (_, _) =>
         {
+            Task<LyricsResult>? directLyricsTask = lyricsProvider == BurnLyricsProvider.Lrclib
+                ? _lyricsService.GetLyricsAsync(
+                    lookupTitle,
+                    lookupArtist,
+                    lookupAlbum,
+                    _draft.Duration,
+                    cancellationToken)
+                : null;
             try
             {
                 result = await _musicBrainzService.FetchTrackDataAsync(
@@ -667,7 +693,36 @@ public partial class BurningWindow : Window
             }
             catch (Exception ex)
             {
-                operationError = ex;
+                metadataError = ex;
+            }
+
+            try
+            {
+                if (directLyricsTask is not null)
+                {
+                    lyricsResult = await directLyricsTask;
+                }
+                else if (!cancellationToken.IsCancellationRequested)
+                {
+                    lyricsResult = await _lyricsService.GetLyricsAsync(
+                        PreferFetched(result?.Title, lookupTitle),
+                        PreferFetched(result?.Artist, lookupArtist),
+                        PreferFetched(result?.Album, lookupAlbum),
+                        _draft.Duration,
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                wasCanceled = true;
+            }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                wasCanceled = true;
+            }
+            catch (Exception ex)
+            {
+                lyricsError = ex;
             }
             finally
             {
@@ -678,51 +733,68 @@ public partial class BurningWindow : Window
         try
         {
             progressWindow.ShowDialog();
-            operationError ??= progressWindow.CancellationError;
-            if (wasCanceled && operationError is null)
+            metadataError ??= progressWindow.CancellationError;
+            if (wasCanceled)
             {
                 return;
             }
 
-            if (operationError is not null)
+            var metadataApplied = result is not null;
+            if (result is not null)
             {
-                AppDialogWindow.ShowWarning(this, "Could not fetch song data", operationError.Message);
+                ApplyFetchedText(result);
+                if (fetchedCover is not null)
+                {
+                    _draft.CoverArtwork = fetchedCover;
+                    _coverArtworkHash = HashArtwork(fetchedCover);
+                }
+
+                if (fetchedDisc is not null)
+                {
+                    _draft.DiscArtwork = fetchedDisc;
+                    _discArtworkHash = HashArtwork(fetchedDisc);
+                }
+            }
+
+            var lyricsApplied = ApplyFetchedLyrics(lyricsResult);
+            if (!metadataApplied && !lyricsApplied)
+            {
+                ShowFetchNotFound(metadataError, lyricsError, lyricsResult);
                 return;
-            }
-
-            if (result is null)
-            {
-                AppDialogWindow.ShowWarning(
-                    this,
-                    "Song not found",
-                    "MusicBrainz could not find a confident match. Try adding or correcting the title, artist, or album.");
-                return;
-            }
-
-            ApplyFetchedText(result);
-            if (fetchedCover is not null)
-            {
-                _draft.CoverArtwork = fetchedCover;
-                _coverArtworkHash = HashArtwork(fetchedCover);
-            }
-
-            if (fetchedDisc is not null)
-            {
-                _draft.DiscArtwork = fetchedDisc;
-                _discArtworkHash = HashArtwork(fetchedDisc);
             }
 
             UpdateDirtyState();
             await RefreshArtworkUiAsync();
-            AppDialogWindow.ShowConfirmation(
-                this,
-                "Song data fetched",
-                "Song data was fetched from MusicBrainz.");
+            var confirmationMessage = (metadataApplied, lyricsApplied) switch
+            {
+                (true, true) => "Song data was fetched from MusicBrainz and lyrics were fetched from LRCLIB.",
+                (true, false) when lyricsResult?.Status == LyricsStatus.Instrumental =>
+                    "Song data was fetched from MusicBrainz. LRCLIB marks this track as instrumental.",
+                (true, false) => "Song data was fetched from MusicBrainz. LRCLIB did not return lyrics.",
+                _ => "Lyrics were fetched from LRCLIB. MusicBrainz did not return a confident metadata match."
+            };
+            AppDialogWindow.ShowConfirmation(this, "Fetch complete", confirmationMessage);
+
+            if (metadataError is not null)
+            {
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "MusicBrainz fetch incomplete",
+                    metadataError.Message);
+            }
+
+            if (lyricsError is not null)
+            {
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "Could not fetch lyrics",
+                    lyricsError.Message);
+            }
 
             // Warn when no cover ended up on the draft, distinguishing a temporary
             // download failure from artwork that genuinely does not exist — mirroring
             // the CD-artwork messaging below.
-            if (_draft.CoverArtwork is null)
+            if (result is not null && _draft.CoverArtwork is null)
             {
                 if (result.CoverOutcome == ArtworkFetchOutcome.Failed)
                 {
@@ -740,7 +812,7 @@ public partial class BurningWindow : Window
                 }
             }
 
-            if (fetchedDisc is null && _draft.DiscArtwork is null)
+            if (result is not null && fetchedDisc is null && _draft.DiscArtwork is null)
             {
                 if (result.DiscOutcome == ArtworkFetchOutcome.Failed)
                 {
@@ -892,6 +964,7 @@ public partial class BurningWindow : Window
             _hasUnsavedChanges = false;
             _draft.CoverArtworkChanged = false;
             _draft.DiscArtworkChanged = false;
+            _draft.LyricsChanged = false;
             UpdateDirtyStatus();
             var shareRequest = GlobeBurnShareRequest.FromDraft(_draft);
             await HandleBurnCompletionAsync(shareRequest, showSuccess);
@@ -1035,6 +1108,96 @@ public partial class BurningWindow : Window
         SyncDraftFromForm();
     }
 
+    private bool ApplyFetchedLyrics(LyricsResult? result)
+    {
+        if (result?.Status is not (LyricsStatus.Synced or LyricsStatus.Plain))
+        {
+            return false;
+        }
+
+        var applied = false;
+        var unsynchronized = NormalizeLyricsText(result.PlainText);
+        if (unsynchronized.Length == 0 && result.Status == LyricsStatus.Plain)
+        {
+            unsynchronized = string.Join("\n", result.PlainLines);
+        }
+
+        if (!string.IsNullOrWhiteSpace(unsynchronized))
+        {
+            UnsynchronizedLyricsBox.Text = LimitForTextBox(
+                UnsynchronizedLyricsBox,
+                unsynchronized);
+            applied = true;
+        }
+
+        var synchronized = NormalizeLyricsText(result.SyncedText);
+        if (synchronized.Length == 0 && result.Status == LyricsStatus.Synced)
+        {
+            synchronized = FormatLrc(result.SyncedLines);
+        }
+
+        if (!string.IsNullOrWhiteSpace(synchronized))
+        {
+            SynchronizedLyricsBox.Text = LimitForTextBox(
+                SynchronizedLyricsBox,
+                synchronized);
+            applied = true;
+        }
+
+        if (applied)
+        {
+            SyncDraftFromForm();
+        }
+
+        return applied;
+    }
+
+    private static string FormatLrc(IEnumerable<LyricLine> lines)
+    {
+        return string.Join("\n", lines.Select(line =>
+        {
+            var totalMinutes = Math.Max(0, (int)Math.Floor(line.Time.TotalMinutes));
+            var seconds = Math.Max(0, line.Time.TotalSeconds - (totalMinutes * 60));
+            return $"[{totalMinutes:00}:{seconds.ToString("00.00", CultureInfo.InvariantCulture)}]{line.Text}";
+        }));
+    }
+
+    private void ShowFetchNotFound(
+        Exception? metadataError,
+        Exception? lyricsError,
+        LyricsResult? lyricsResult)
+    {
+        var messages = new List<string>
+        {
+            metadataError is null
+                ? "MusicBrainz could not find a confident metadata match."
+                : $"MusicBrainz: {metadataError.Message}"
+        };
+
+        if (lyricsError is not null)
+        {
+            messages.Add($"LRCLIB: {lyricsError.Message}");
+        }
+        else if (lyricsResult?.Status == LyricsStatus.Instrumental)
+        {
+            messages.Add("LRCLIB marks this track as instrumental.");
+        }
+        else
+        {
+            messages.Add("LRCLIB did not find lyrics for this track.");
+        }
+
+        AppDialogWindow.ShowWarning(
+            this,
+            "Song data and lyrics not found",
+            string.Join(Environment.NewLine, messages));
+    }
+
+    private static string PreferFetched(string? fetched, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(fetched) ? fallback : fetched;
+    }
+
     private static void SetIfPresent(TextBox textBox, string value)
     {
         if (!string.IsNullOrWhiteSpace(value))
@@ -1054,6 +1217,12 @@ public partial class BurningWindow : Window
         YearBox.Text = LimitForTextBox(YearBox, draft.Year);
         TrackNumberBox.Text = LimitForTextBox(TrackNumberBox, draft.TrackNumber);
         TrackTotalBox.Text = LimitForTextBox(TrackTotalBox, draft.TrackTotal);
+        UnsynchronizedLyricsBox.Text = LimitForTextBox(
+            UnsynchronizedLyricsBox,
+            NormalizeLyricsText(draft.UnsynchronizedLyrics));
+        SynchronizedLyricsBox.Text = LimitForTextBox(
+            SynchronizedLyricsBox,
+            NormalizeLyricsText(draft.SynchronizedLyrics));
         _coverArtworkHash = HashArtwork(draft.CoverArtwork);
         _discArtworkHash = HashArtwork(draft.DiscArtwork);
         _isInitialized = true;
@@ -1081,6 +1250,8 @@ public partial class BurningWindow : Window
         _draft.Year = YearBox.Text.Trim();
         _draft.TrackNumber = TrackNumberBox.Text.Trim();
         _draft.TrackTotal = TrackTotalBox.Text.Trim();
+        _draft.UnsynchronizedLyrics = NormalizeLyricsText(UnsynchronizedLyricsBox.Text);
+        _draft.SynchronizedLyrics = NormalizeLyricsText(SynchronizedLyricsBox.Text);
     }
 
     private void UpdatePreviewText()
@@ -1128,6 +1299,14 @@ public partial class BurningWindow : Window
             current.DiscArtworkHash,
             _baselineState.DiscArtworkHash,
             StringComparison.Ordinal);
+        _draft.LyricsChanged = !string.Equals(
+                current.UnsynchronizedLyrics,
+                _baselineState.UnsynchronizedLyrics,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                current.SynchronizedLyrics,
+                _baselineState.SynchronizedLyrics,
+                StringComparison.Ordinal);
         UpdateDirtyStatus();
     }
 
@@ -1141,8 +1320,19 @@ public partial class BurningWindow : Window
             YearBox.Text.Trim(),
             TrackNumberBox.Text.Trim(),
             TrackTotalBox.Text.Trim(),
+            NormalizeLyricsText(UnsynchronizedLyricsBox.Text),
+            NormalizeLyricsText(SynchronizedLyricsBox.Text),
             _coverArtworkHash,
             _discArtworkHash);
+    }
+
+    private static string NormalizeLyricsText(string? value)
+    {
+        return string.IsNullOrEmpty(value)
+            ? string.Empty
+            : value
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
     }
 
     private void UpdateDirtyStatus()
@@ -1341,6 +1531,8 @@ public partial class BurningWindow : Window
         string Year,
         string TrackNumber,
         string TrackTotal,
+        string UnsynchronizedLyrics,
+        string SynchronizedLyrics,
         string? CoverArtworkHash,
         string? DiscArtworkHash);
 }

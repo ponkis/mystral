@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
-using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -106,6 +105,9 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
+        BurnLyricsProviderComboBox.SelectedIndex = settings.Behavior.BurnLyricsProvider == BurnLyricsProvider.Lrclib
+            ? 1
+            : 0;
         var globeState = _globeConnectionService.State;
         _isSocialAccountLinked = globeState.IsLinked;
         _isSocialSharingAvailable = globeState.CanShare;
@@ -264,7 +266,10 @@ public partial class SettingsWindow : Window
                 EnableNotifications = EnableNotificationsCheckBox.IsChecked == true,
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
-                CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true
+                CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true,
+                BurnLyricsProvider = BurnLyricsProviderComboBox.SelectedIndex == 1
+                    ? BurnLyricsProvider.Lrclib
+                    : BurnLyricsProvider.MusicBrainzAssisted
             },
             Social = new SocialSettings
             {
@@ -1111,7 +1116,6 @@ public partial class SettingsWindow : Window
 
         try
         {
-            using var downloadCancellation = new CancellationTokenSource();
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
 
@@ -1150,41 +1154,67 @@ public partial class SettingsWindow : Window
             }
 
             string? installerPath = null;
-            Exception? downloadError = null;
-            progressWindow = new OperationProgressWindow(
-                owner,
-                "Downloading update",
-                "Downloading update",
-                $"Mystral {latestVersion}",
-                isIndeterminate: false,
-                downloadCancellation.Cancel,
-                iconPath: "Resources/ico.ico");
-            progressWindow.ContentRendered += async (_, _) =>
+            while (installerPath is null)
             {
-                try
+                using var downloadCancellation = new CancellationTokenSource();
+                Exception? downloadError = null;
+                var activeProgressWindow = new OperationProgressWindow(
+                    owner,
+                    "Downloading update",
+                    "Downloading update",
+                    $"Mystral {latestVersion}",
+                    isIndeterminate: false,
+                    downloadCancellation.Cancel,
+                    iconPath: "Resources/ico.ico");
+                progressWindow = activeProgressWindow;
+                activeProgressWindow.ContentRendered += async (_, _) =>
                 {
-                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetByteProgress, downloadCancellation.Token);
-                }
-                catch (Exception ex)
-                {
-                    downloadError = ex;
-                }
-                finally
-                {
-                    progressWindow.CloseOperationWindow();
-                }
-            };
-            progressWindow.ShowDialog();
-            progressWindow = null;
+                    try
+                    {
+                        installerPath = await DownloadInstallerAsync(
+                            client,
+                            installerUrl,
+                            installerName,
+                            activeProgressWindow.SetByteProgress,
+                            downloadCancellation.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        downloadError = ex;
+                    }
+                    finally
+                    {
+                        activeProgressWindow.CloseOperationWindow();
+                    }
+                };
+                activeProgressWindow.ShowDialog();
+                progressWindow = null;
 
-            if (downloadError is not null)
-            {
-                ExceptionDispatchInfo.Capture(downloadError).Throw();
-            }
+                if (downloadCancellation.IsCancellationRequested)
+                {
+                    DeleteDownloadedInstaller(installerPath);
+                    AppDialogWindow.ShowInformation(
+                        owner,
+                        "Update canceled",
+                        "The update download was canceled successfully. The installer was not launched, and Mystral was not changed.");
+                    return;
+                }
 
-            if (installerPath is null)
-            {
-                return;
+                downloadError ??= activeProgressWindow.CancellationError;
+                if (downloadError is null && installerPath is not null)
+                {
+                    break;
+                }
+
+                downloadError ??= new IOException("The update download ended without producing an installer.");
+                var retry = AppDialogWindow.ShowRetryCancel(
+                    owner,
+                    "Update download failed",
+                    $"Mystral couldn't download version {latestVersion}.\n\nCause: {DescribeUpdateDownloadFailure(downloadError)}\n\nCheck your connection, then choose Retry to try again.");
+                if (retry != MessageBoxResult.Yes)
+                {
+                    return;
+                }
             }
 
             if (sourceButton is not null)
@@ -1242,7 +1272,7 @@ public partial class SettingsWindow : Window
         throw new InvalidOperationException("No win-x64 installer was attached to the latest GitHub release.");
     }
 
-    private static async Task<string> DownloadInstallerAsync(HttpClient client, string url, string assetName, Action<long, long?> progress, CancellationToken cancellationToken)
+    internal static async Task<string> DownloadInstallerAsync(HttpClient client, string url, string assetName, Action<long, long?> progress, CancellationToken cancellationToken)
     {
         var fileName = Path.GetFileName(assetName);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -1276,6 +1306,16 @@ public partial class SettingsWindow : Window
                 progress(downloadedBytes, totalBytes);
             }
 
+            if (downloadedBytes == 0)
+            {
+                throw new IOException("The update server returned an empty installer.");
+            }
+
+            if (totalBytes is > 0 && downloadedBytes != totalBytes.Value)
+            {
+                throw new IOException("The connection closed before the installer finished downloading.");
+            }
+
             progress(downloadedBytes, totalBytes ?? downloadedBytes);
             return path;
         }
@@ -1290,6 +1330,45 @@ public partial class SettingsWindow : Window
             }
 
             throw;
+        }
+    }
+
+    internal static string DescribeUpdateDownloadFailure(Exception exception)
+    {
+        if (exception is TaskCanceledException)
+        {
+            return "The download timed out.";
+        }
+
+        var cause = exception;
+        while (cause.InnerException is not null)
+        {
+            cause = cause.InnerException;
+        }
+
+        if (cause is TaskCanceledException)
+        {
+            return "The download timed out.";
+        }
+
+        return string.IsNullOrWhiteSpace(cause.Message)
+            ? "The connection was interrupted before the download completed."
+            : cause.Message.Trim();
+    }
+
+    private static void DeleteDownloadedInstaller(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
         }
     }
 

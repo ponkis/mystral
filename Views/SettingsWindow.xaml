@@ -211,6 +211,23 @@
                               Margin="0,8,0,0"
                               Content="Check for updates on startup"
                               Click="SettingsControl_Changed" />
+                    <TextBlock Margin="0,18,0,0"
+                               FontWeight="Bold"
+                               Text="Burn lyrics" />
+                    <TextBlock Margin="0,7,0,4"
+                               Text="Lyrics provider" />
+                    <ComboBox x:Name="BurnLyricsProviderComboBox"
+                              Width="245"
+                              Height="23"
+                              HorizontalAlignment="Left"
+                              SelectionChanged="SettingsControl_Changed">
+                        <ComboBoxItem Content="MusicBrainz-assisted (default)" />
+                        <ComboBoxItem Content="LRCLIB (direct)" />
+                    </ComboBox>
+                    <TextBlock Margin="0,6,0,0"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="MusicBrainz-assisted uses the matched song metadata for a more precise LRCLIB lyric search. Direct mode searches LRCLIB with the fields in the burn editor." />
                 </StackPanel>
 
                 <StackPanel x:Name="SocialPanel"
