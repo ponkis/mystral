@@ -58,10 +58,14 @@ the right, and center the app icon and name where that identity is shown. In
 fullscreen, Close is hidden and the Fullscreen action becomes the exit control.
 
 The playback timeline uses the media session's own update timestamp so Spotify
-and browser sessions do not rewind when Windows repeats a stale position. Each
-progress bar supports click-to-jump and drag seeking; hovering labels it `Seek`,
-while an active seek shows the target time briefly after release. Progress and
-volume bars use their full surface as a hand-cursor interaction target.
+and browser sessions do not rewind when Windows repeats a stale position.
+Progress and volume bars use their full hand-cursor surface for click-to-jump or
+dragging, with an immediate tooltip that lingers after release. Volume applies
+continuously; progress previews the target and commits the seek on release.
+
+For Apple Music's Windows media session, lyric lookup separates a combined
+`Artist — Album` value when the session omits its album field, and uses the
+session's album artist when its primary artist field is empty.
 
 ## Burn Editor
 
@@ -107,7 +111,7 @@ The test suite covers the vital headless app logic:
 
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
-- LRCLIB exact lookup, fallback search ranking, parsing, and caching
+- LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - media-session timestamp projection, stale-position filtering, and seek reconciliation

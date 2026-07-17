@@ -36,6 +36,7 @@ internal static class Program
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
             ("media timeline projects source anchors and reconciles stale seeks", PlaybackTimelineStabilizerTests.StabilizesSourceUpdatesAndSeeks),
             ("lyrics service exact-matches, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesExactOrBestLyricsAndCaches),
+            ("lyrics service normalizes Apple Music media-session metadata", LyricsServiceTests.NormalizesAppleMusicMetadata),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
@@ -1602,6 +1603,86 @@ static class LyricsServiceTests
             CancellationToken.None).GetAwaiter().GetResult();
         Check.Equal(LyricsStatus.NotFound, missingArtist.Status);
         Check.Equal(1, missingArtistSearchCount);
+    }
+
+    public static void NormalizesAppleMusicMetadata()
+    {
+        const string appleMusicSource = "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App";
+        var appleSnapshot = Snapshot(
+                "Potholderz (feat. Count Bass D)",
+                "MF DOOM \u2014 MM..FOOD (Deluxe Edition)",
+                "",
+                TimeSpan.FromSeconds(200)) with
+            {
+                SourceApp = appleMusicSource
+            };
+
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/get", request.RequestUri!.AbsolutePath);
+            var query = ParseQuery(request.RequestUri);
+            Check.Equal("Potholderz (feat. Count Bass D)", query["track_name"]);
+            Check.Equal("MF DOOM", query["artist_name"]);
+            Check.Equal("MM..FOOD (Deluxe Edition)", query["album_name"]);
+            Check.Equal("200", query["duration"]);
+            return Json(new
+            {
+                id = 7,
+                trackName = "Potholderz (feat. Count Bass D)",
+                artistName = "MF DOOM",
+                albumName = "MM..FOOD (Deluxe Edition)",
+                duration = 200d,
+                instrumental = false,
+                plainLyrics = "Apple plain line",
+                syncedLyrics = (string?)"[00:01.00]Apple line"
+            });
+        });
+
+        using var service = new LyricsService(new HttpClient(handler));
+        var result = service.GetLyricsAsync(appleSnapshot, CancellationToken.None).GetAwaiter().GetResult();
+        Check.Equal(1, handler.Count);
+        Check.Equal(LyricsStatus.Synced, result.Status);
+        Check.Equal("Apple line", result.SyncedLines.Single().Text);
+
+        var normalized = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot);
+        Check.Equal("MF DOOM", normalized.Artist);
+        Check.Equal("MM..FOOD (Deluxe Edition)", normalized.Album);
+        Check.Equal(
+            "potholderz (feat. count bass d)|mf doom|mm..food (deluxe edition)",
+            LyricsService.CreateTrackKey(appleSnapshot));
+
+        var appleWithAlbum = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot with
+        {
+            Artist = "MF DOOM \u2014 Should remain artist text",
+            Album = "Published Album"
+        });
+        Check.Equal("MF DOOM \u2014 Should remain artist text", appleWithAlbum.Artist);
+        Check.Equal("Published Album", appleWithAlbum.Album);
+
+        var enDash = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot with
+        {
+            Artist = "MF DOOM \u2013 MM..FOOD (Deluxe Edition)"
+        });
+        Check.Equal("MF DOOM", enDash.Artist);
+        Check.Equal("MM..FOOD (Deluxe Edition)", enDash.Album);
+
+        var nonAppleSnapshot = appleSnapshot with { SourceApp = "chrome.exe" };
+        var nonAppleNormalized = AppleMusicMediaMetadata.NormalizeLyricsLookup(nonAppleSnapshot);
+        Check.Equal("MF DOOM \u2014 MM..FOOD (Deluxe Edition)", nonAppleNormalized.Artist);
+        Check.Equal("", nonAppleNormalized.Album);
+        Check.Equal(
+            "potholderz (feat. count bass d)|mf doom \u2014 mm..food (deluxe edition)|",
+            LyricsService.CreateTrackKey(nonAppleSnapshot));
+
+        Check.Equal(
+            "Album Artist",
+            AppleMusicMediaMetadata.ResolveArtist("", " Album Artist ", appleMusicSource));
+        Check.Equal(
+            "Primary Artist",
+            AppleMusicMediaMetadata.ResolveArtist(" Primary Artist ", "Album Artist", appleMusicSource));
+        Check.Equal(
+            "",
+            AppleMusicMediaMetadata.ResolveArtist("", "Album Artist", "chrome.exe"));
     }
 
     private static Dictionary<string, string> ParseQuery(Uri uri)

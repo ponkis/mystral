@@ -163,10 +163,13 @@ public sealed class MediaSessionService : IDisposable
         var status = playback.PlaybackStatus;
         var isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
-        var title = Clean(properties.Title, "Unknown track");
-        var artist = Clean(properties.Artist, string.Empty);
-        var album = Clean(properties.AlbumTitle, string.Empty);
         var app = Clean(session.SourceAppUserModelId, "Media app");
+        var title = Clean(properties.Title, "Unknown track");
+        var artist = AppleMusicMediaMetadata.ResolveArtist(
+            properties.Artist,
+            properties.AlbumArtist,
+            app);
+        var album = Clean(properties.AlbumTitle, string.Empty);
         var description = BuildDescription(artist, album, app);
         var duration = timeline.EndTime > timeline.StartTime
             ? timeline.EndTime - timeline.StartTime

@@ -54,6 +54,7 @@ For packaged development builds:
 ## Lyrics
 
 - Play a well-tagged song with the correct album and duration and confirm synced or plain lyrics load.
+- In Apple Music for Windows, play a known track and confirm lyrics load when its media session combines `Artist — Album` instead of publishing a separate album.
 - Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
 - During a long gap, confirm the three dots fill alongside the preceding highlighted lyric without recentering or advancing lyric synchronization early.
 - Switch tracks and confirm old lyrics do not remain stuck.
@@ -64,7 +65,8 @@ For packaged development builds:
 
 - Adjust volume using Mystral and confirm Windows output volume changes.
 - Toggle mute and confirm the icon/state updates.
-- Drag the volume slider and confirm tooltip values are reasonable.
+- Click an empty point on each volume bar, then drag from both the track and thumb; confirm volume follows continuously in every player mode.
+- Confirm the volume tooltip appears immediately, stays visible briefly after release, and a lost mouse capture does not leave the slider in its dragging state.
 
 ## Notifications
 

@@ -41,11 +41,13 @@ public sealed class LyricsService : IDisposable
             return string.Empty;
         }
 
+        snapshot = AppleMusicMediaMetadata.NormalizeLyricsLookup(snapshot);
         return $"{NormalizeKey(snapshot.Title)}|{NormalizeKey(snapshot.Artist)}|{NormalizeKey(snapshot.Album)}";
     }
 
     public async Task<LyricsResult> GetLyricsAsync(MediaSnapshot snapshot, CancellationToken cancellationToken)
     {
+        snapshot = AppleMusicMediaMetadata.NormalizeLyricsLookup(snapshot);
         var key = CreateTrackKey(snapshot);
         if (string.IsNullOrWhiteSpace(key) || !snapshot.HasSession || string.IsNullOrWhiteSpace(snapshot.Title))
         {

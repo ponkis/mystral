@@ -22,6 +22,26 @@ namespace Mystral.Views;
 
 public partial class MainWindow : Window
 {
+    private enum SliderInteractionKind
+    {
+        Seek,
+        Volume
+    }
+
+    private sealed class SliderPointerInteraction
+    {
+        public SliderPointerInteraction(SliderInteractionKind kind)
+        {
+            Kind = kind;
+        }
+
+        public SliderInteractionKind Kind { get; }
+        public Slider? ActiveSlider { get; set; }
+        public bool IsPointerDown { get; set; }
+        public bool IsThumbDrag { get; set; }
+        public bool OwnsMouseCapture { get; set; }
+    }
+
     private readonly MediaSessionService _mediaService;
     private readonly LyricsService _lyricsService;
     private readonly VolumeService _volumeService;
@@ -33,6 +53,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _seekToolTipHideTimer;
     private readonly DispatcherTimer _volumeToolTipHideTimer;
     private readonly PlaybackTimelineStabilizer _timelineStabilizer = new();
+    private readonly SliderPointerInteraction _seekSliderInteraction = new(SliderInteractionKind.Seek);
+    private readonly SliderPointerInteraction _volumeSliderInteraction = new(SliderInteractionKind.Volume);
+    private readonly Dictionary<Slider, SliderPointerInteraction> _sliderPointerInteractions = [];
     private readonly CancellationTokenSource _burnDiscArtworkCts = new();
     private readonly List<TextBlock> _lyricBlocks = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
@@ -46,8 +69,6 @@ public partial class MainWindow : Window
     private string _scrobblingStatusText = "Scrobbling: disabled";
     private string _trayNowPlayingTrackName = string.Empty;
     private ScrobblePlaybackState? _scrobbleState;
-    private bool _isSeeking;
-    private bool _isProgressThumbDragging;
     private bool _isExpanded;
     private bool _isLyricsMode;
     private bool _restoreExpandedAfterLyrics;
@@ -68,7 +89,6 @@ public partial class MainWindow : Window
     private bool _isMinimizing;
     private bool _isClosing;
     private bool _allowClose;
-    private bool _isVolumeDragging;
     private bool _progressSliderUpdating;
     private bool _isBurnDiscPointerDown;
     private bool _isBurnDiscDragging;
@@ -101,8 +121,6 @@ public partial class MainWindow : Window
     private bool _isUserBrowsingFullscreenLyrics;
     private bool _isLyricsScrollAnimating;
     private readonly DispatcherTimer _fullscreenLyricsInactivityTimer;
-    private Slider? _activeProgressSlider;
-    private Slider? _activeVolumeSlider;
     private FrameworkElement? _lyricsFooterPanel;
     private FrameworkElement? _fullscreenLyricsFooterPanel;
     private Border? _fullscreenLyricsTopSpacer;
@@ -195,9 +213,9 @@ public partial class MainWindow : Window
         _loadingIconTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(65) };
         _loadingIconTimer.Tick += (_, _) => AdvanceLoadingIconFrame();
         _seekToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
-        _seekToolTipHideTimer.Tick += (_, _) => HideSeekToolTip();
+        _seekToolTipHideTimer.Tick += (_, _) => HideSliderToolTip(_seekSliderInteraction);
         _volumeToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
-        _volumeToolTipHideTimer.Tick += (_, _) => HideVolumeToolTip();
+        _volumeToolTipHideTimer.Tick += (_, _) => HideSliderToolTip(_volumeSliderInteraction);
         LoadLoadingIconFrames();
         _ = LoadCompactBurnDiscArtworkAsync();
 
@@ -299,35 +317,14 @@ public partial class MainWindow : Window
         AlbumArtSurface.ToolTip = null;
         LyricsBackButton.ToolTip = "Back";
 
-        foreach (var slider in ProgressSliders)
-        {
-            slider.ToolTip = CreateSeekToolTip(slider);
-            ToolTipService.SetInitialShowDelay(slider, 250);
-            ToolTipService.SetShowDuration(slider, 60000);
-            slider.AddHandler(
-                UIElement.PreviewMouseLeftButtonDownEvent,
-                new MouseButtonEventHandler(ProgressSlider_PreviewMouseLeftButtonDown),
-                handledEventsToo: true);
-            slider.AddHandler(
-                UIElement.PreviewMouseLeftButtonUpEvent,
-                new MouseButtonEventHandler(ProgressSlider_PreviewMouseLeftButtonUp),
-                handledEventsToo: true);
-            slider.MouseMove += ProgressSlider_MouseMove;
-            slider.MouseLeave += ProgressSlider_MouseLeave;
-            slider.LostMouseCapture += ProgressSlider_LostMouseCapture;
-        }
-
-        foreach (var slider in VolumeSliders)
-        {
-            slider.ToolTip = CreateVolumeToolTip(slider);
-            ToolTipService.SetInitialShowDelay(slider, 0);
-            ToolTipService.SetShowDuration(slider, 60000);
-            slider.PreviewMouseLeftButtonDown += VolumeSlider_PreviewMouseLeftButtonDown;
-            slider.PreviewMouseLeftButtonUp += VolumeSlider_PreviewMouseLeftButtonUp;
-            slider.MouseMove += VolumeSlider_MouseMove;
-            slider.MouseLeave += VolumeSlider_MouseLeave;
-            slider.LostMouseCapture += VolumeSlider_LostMouseCapture;
-        }
+        RegisterInteractiveSliders(
+            ProgressSliders,
+            _seekSliderInteraction,
+            CreateSeekToolTip);
+        RegisterInteractiveSliders(
+            VolumeSliders,
+            _volumeSliderInteraction,
+            CreateVolumeToolTip);
     }
 
     private Button[] PreviousButtons => [PreviousButton, ExpandedPreviousButton, LyricsPreviousButton, FullscreenPreviousButton];
@@ -341,63 +338,259 @@ public partial class MainWindow : Window
     private TextBlock[] ElapsedTexts => [ElapsedText, ExpandedElapsedText, LyricsElapsedText, FullscreenElapsedText];
     private TextBlock[] DurationTexts => [DurationText, ExpandedDurationText, LyricsDurationText, FullscreenDurationText];
 
-    private void ProgressSlider_MouseMove(object sender, MouseEventArgs e)
+    private void RegisterInteractiveSliders(
+        IEnumerable<Slider> sliders,
+        SliderPointerInteraction interaction,
+        Func<Slider, ToolTip> createToolTip)
     {
-        if (!_isSeeking
-            || sender is not Slider slider
-            || !ReferenceEquals(_activeProgressSlider, slider)
+        foreach (var slider in sliders)
+        {
+            _sliderPointerInteractions.Add(slider, interaction);
+            slider.ToolTip = createToolTip(slider);
+            ToolTipService.SetInitialShowDelay(slider, 0);
+            ToolTipService.SetBetweenShowDelay(slider, 0);
+            ToolTipService.SetShowDuration(slider, 60000);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonDownEvent,
+                new MouseButtonEventHandler(InteractiveSlider_PreviewMouseLeftButtonDown),
+                handledEventsToo: true);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonUpEvent,
+                new MouseButtonEventHandler(InteractiveSlider_PreviewMouseLeftButtonUp),
+                handledEventsToo: true);
+            slider.AddHandler(
+                UIElement.MouseMoveEvent,
+                new MouseEventHandler(InteractiveSlider_MouseMove),
+                handledEventsToo: true);
+            slider.MouseLeave += InteractiveSlider_MouseLeave;
+            slider.LostMouseCapture += InteractiveSlider_LostMouseCapture;
+        }
+    }
+
+    private void InteractiveSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction))
+        {
+            return;
+        }
+
+        if (IsControlDisabled(slider))
+        {
+            CancelSliderPointerInteraction(interaction);
+            e.Handled = true;
+            return;
+        }
+
+        BeginSliderPointerInteraction(interaction, slider, e);
+    }
+
+    private async void InteractiveSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction))
+        {
+            return;
+        }
+
+        if (IsControlDisabled(slider))
+        {
+            CancelSliderPointerInteraction(interaction);
+            e.Handled = true;
+            return;
+        }
+
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            return;
+        }
+
+        if (!interaction.IsThumbDrag)
+        {
+            SetSliderValueFromPointer(slider, e);
+            e.Handled = true;
+        }
+
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            await CompleteSeekAsync(slider);
+        }
+        else
+        {
+            CompleteVolumeInteraction(slider);
+        }
+    }
+
+    private void InteractiveSlider_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            || !interaction.IsPointerDown
+            || !ReferenceEquals(interaction.ActiveSlider, slider)
             || IsControlDisabled(slider))
         {
             return;
         }
 
-        if (e.LeftButton == MouseButtonState.Pressed && !_isProgressThumbDragging)
+        if (e.LeftButton == MouseButtonState.Pressed && !interaction.IsThumbDrag)
         {
-            SetProgressSliderValueFromPointer(slider, e);
+            SetSliderValueFromPointer(slider, e);
         }
 
-        ShowSeekToolTip(slider, includePosition: true);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
     }
 
-    private void ProgressSlider_MouseLeave(object sender, MouseEventArgs e)
+    private void InteractiveSlider_MouseLeave(object sender, MouseEventArgs e)
     {
-        if (!_isSeeking && ReferenceEquals(_activeProgressSlider, sender))
+        if (sender is Slider slider
+            && _sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            && !interaction.IsPointerDown
+            && ReferenceEquals(interaction.ActiveSlider, slider))
         {
-            BeginSeekToolTipLinger();
+            BeginSliderToolTipLinger(interaction);
         }
     }
 
-    private async void ProgressSlider_LostMouseCapture(object sender, MouseEventArgs e)
+    private async void InteractiveSlider_LostMouseCapture(object sender, MouseEventArgs e)
     {
-        if (!ReferenceEquals(_activeProgressSlider, sender))
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            || !ReferenceEquals(interaction.ActiveSlider, slider))
         {
             return;
         }
 
-        if (_isSeeking && sender is Slider slider)
+        interaction.OwnsMouseCapture = false;
+        if (interaction.IsPointerDown)
         {
             if (Mouse.LeftButton != MouseButtonState.Pressed)
             {
-                await CompleteSeekAsync(slider);
+                if (interaction.Kind == SliderInteractionKind.Seek)
+                {
+                    await CompleteSeekAsync(slider);
+                }
+                else
+                {
+                    CompleteVolumeInteraction(slider);
+                }
+
                 return;
             }
 
             _ = Dispatcher.BeginInvoke(() =>
             {
-                if (_isSeeking
-                    && ReferenceEquals(_activeProgressSlider, slider)
+                if (interaction.IsPointerDown
+                    && ReferenceEquals(interaction.ActiveSlider, slider)
                     && !slider.IsMouseCaptureWithin)
                 {
-                    CancelSeekInteraction();
+                    CancelSliderPointerInteraction(interaction);
                 }
             }, DispatcherPriority.Input);
             return;
         }
 
-        if (!_isSeeking)
+        BeginSliderToolTipLinger(interaction);
+    }
+
+    private void BeginSliderPointerInteraction(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        MouseButtonEventArgs e)
+    {
+        if (interaction.IsPointerDown && !ReferenceEquals(interaction.ActiveSlider, slider))
         {
-            BeginSeekToolTipLinger();
+            CancelSliderPointerInteraction(interaction);
         }
+
+        if (interaction.ActiveSlider is { } previous
+            && !ReferenceEquals(previous, slider))
+        {
+            CloseSliderToolTip(interaction, previous);
+        }
+
+        GetSliderToolTipTimer(interaction).Stop();
+        interaction.ActiveSlider = slider;
+        interaction.IsPointerDown = true;
+        interaction.IsThumbDrag = IsPointerOverSliderThumb(e, slider);
+        interaction.OwnsMouseCapture = false;
+
+        if (!interaction.IsThumbDrag)
+        {
+            SetSliderValueFromPointer(slider, e);
+            interaction.OwnsMouseCapture = slider.CaptureMouse();
+            e.Handled = true;
+        }
+
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+    }
+
+    private void CompleteVolumeInteraction(Slider slider)
+    {
+        var interaction = _volumeSliderInteraction;
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            return;
+        }
+
+        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: false);
+        BeginSliderToolTipLinger(interaction);
+    }
+
+    private void CancelSliderPointerInteraction(SliderPointerInteraction interaction)
+    {
+        var slider = interaction.ActiveSlider;
+        interaction.IsPointerDown = false;
+        interaction.IsThumbDrag = false;
+        if (slider is not null)
+        {
+            ReleaseSliderMouseCapture(interaction, slider, releaseNativeCapture: true);
+        }
+
+        HideSliderToolTip(interaction);
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            UpdateTimelineUi();
+        }
+    }
+
+    private static void EndSliderPointerInteraction(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool releaseNativeCapture)
+    {
+        interaction.IsPointerDown = false;
+        interaction.IsThumbDrag = false;
+        ReleaseSliderMouseCapture(interaction, slider, releaseNativeCapture);
+    }
+
+    private static void ReleaseSliderMouseCapture(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool releaseNativeCapture)
+    {
+        var ownsMouseCapture = interaction.OwnsMouseCapture;
+        interaction.OwnsMouseCapture = false;
+        if (ownsMouseCapture && slider.IsMouseCaptured)
+        {
+            slider.ReleaseMouseCapture();
+            return;
+        }
+
+        if (releaseNativeCapture && IsMouseCaptureWithinSlider(slider))
+        {
+            Mouse.Capture(null);
+        }
+    }
+
+    private static bool IsMouseCaptureWithinSlider(Slider slider)
+    {
+        if (Mouse.Captured is not DependencyObject captured)
+        {
+            return false;
+        }
+
+        return ReferenceEquals(captured, slider) || IsVisualDescendantOf(captured, slider);
     }
 
     private async Task LoadCompactBurnDiscArtworkAsync()
@@ -1288,26 +1481,6 @@ public partial class MainWindow : Window
         };
     }
 
-    private void ShowSeekToolTip(Slider slider, bool includePosition)
-    {
-        _seekToolTipHideTimer.Stop();
-        if (_activeProgressSlider is { } previous
-            && !ReferenceEquals(previous, slider)
-            && previous.ToolTip is ToolTip previousToolTip)
-        {
-            previousToolTip.IsOpen = false;
-            previousToolTip.Content = "Seek";
-        }
-
-        _activeProgressSlider = slider;
-        UpdateSeekToolTip(slider, includePosition);
-        if (slider.ToolTip is ToolTip toolTip)
-        {
-            toolTip.PlacementTarget = slider;
-            toolTip.IsOpen = true;
-        }
-    }
-
     private static void UpdateSeekToolTip(Slider slider, bool includePosition)
     {
         if (slider.ToolTip is not ToolTip toolTip)
@@ -1318,27 +1491,6 @@ public partial class MainWindow : Window
         toolTip.Content = includePosition
             ? $"Seek: {FormatTime(TimeSpan.FromSeconds(slider.Value))}"
             : "Seek";
-    }
-
-    private void BeginSeekToolTipLinger()
-    {
-        _seekToolTipHideTimer.Stop();
-        _seekToolTipHideTimer.Start();
-    }
-
-    private void HideSeekToolTip()
-    {
-        _seekToolTipHideTimer.Stop();
-        if (_activeProgressSlider?.ToolTip is ToolTip toolTip)
-        {
-            toolTip.IsOpen = false;
-            toolTip.Content = "Seek";
-        }
-
-        if (!_isSeeking)
-        {
-            _activeProgressSlider = null;
-        }
     }
 
     private ToolTip CreateVolumeToolTip(Slider slider)
@@ -1352,63 +1504,6 @@ public partial class MainWindow : Window
         };
     }
 
-    private void VolumeSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || IsControlDisabled(slider))
-        {
-            return;
-        }
-
-        _isVolumeDragging = true;
-        _activeVolumeSlider = slider;
-        ShowVolumeToolTip(slider);
-    }
-
-    private void VolumeSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is Slider slider)
-        {
-            ShowVolumeToolTip(slider);
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void VolumeSlider_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (_isVolumeDragging && sender is Slider slider)
-        {
-            ShowVolumeToolTip(slider);
-        }
-    }
-
-    private void VolumeSlider_MouseLeave(object sender, MouseEventArgs e)
-    {
-        if (!_isVolumeDragging)
-        {
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void VolumeSlider_LostMouseCapture(object sender, MouseEventArgs e)
-    {
-        if (_activeVolumeSlider == sender)
-        {
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void ShowVolumeToolTip(Slider slider)
-    {
-        _volumeToolTipHideTimer.Stop();
-        UpdateVolumeToolTip(slider);
-
-        if (slider.ToolTip is ToolTip toolTip)
-        {
-            toolTip.PlacementTarget = slider;
-            toolTip.IsOpen = true;
-        }
-    }
-
     private void UpdateVolumeToolTip(Slider slider)
     {
         if (slider.ToolTip is not ToolTip toolTip)
@@ -1419,23 +1514,82 @@ public partial class MainWindow : Window
         toolTip.Content = FormatVolume(GetVolumeTitleValue(slider));
     }
 
-    private void BeginVolumeToolTipLinger()
+    private void ShowSliderToolTip(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool includeSeekPosition)
     {
-        _isVolumeDragging = false;
-        _volumeToolTipHideTimer.Stop();
-        _volumeToolTipHideTimer.Start();
-    }
-
-    private void HideVolumeToolTip()
-    {
-        _volumeToolTipHideTimer.Stop();
-
-        if (_activeVolumeSlider?.ToolTip is ToolTip toolTip)
+        GetSliderToolTipTimer(interaction).Stop();
+        if (interaction.ActiveSlider is { } previous
+            && !ReferenceEquals(previous, slider))
         {
-            toolTip.IsOpen = false;
+            CloseSliderToolTip(interaction, previous);
         }
 
-        _activeVolumeSlider = null;
+        interaction.ActiveSlider = slider;
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            UpdateSeekToolTip(slider, includeSeekPosition);
+        }
+        else
+        {
+            UpdateVolumeToolTip(slider);
+        }
+
+        if (slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.PlacementTarget = slider;
+            toolTip.IsOpen = true;
+        }
+    }
+
+    private void BeginSliderToolTipLinger(SliderPointerInteraction interaction)
+    {
+        var timer = GetSliderToolTipTimer(interaction);
+        timer.Stop();
+        timer.Start();
+    }
+
+    private void HideSliderToolTip(SliderPointerInteraction interaction)
+    {
+        GetSliderToolTipTimer(interaction).Stop();
+        if (interaction.ActiveSlider is { } activeSlider)
+        {
+            CloseSliderToolTip(interaction, activeSlider);
+        }
+
+        if (!interaction.IsPointerDown)
+        {
+            interaction.ActiveSlider = null;
+        }
+    }
+
+    private DispatcherTimer GetSliderToolTipTimer(SliderPointerInteraction interaction)
+    {
+        return interaction.Kind == SliderInteractionKind.Seek
+            ? _seekToolTipHideTimer
+            : _volumeToolTipHideTimer;
+    }
+
+    private static void ResetSliderToolTipContent(
+        SliderPointerInteraction interaction,
+        ToolTip toolTip)
+    {
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            toolTip.Content = "Seek";
+        }
+    }
+
+    private static void CloseSliderToolTip(
+        SliderPointerInteraction interaction,
+        Slider slider)
+    {
+        if (slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.IsOpen = false;
+            ResetSliderToolTipContent(interaction, toolTip);
+        }
     }
 
     private static string FormatVolume(double value)
@@ -1813,11 +1967,12 @@ public partial class MainWindow : Window
     {
         var playbackPosition = GetCurrentPosition();
         var duration = Snapshot.Duration;
-        var position = _isSeeking && _activeProgressSlider is { } activeSlider
+        var position = _seekSliderInteraction.IsPointerDown
+            && _seekSliderInteraction.ActiveSlider is { } activeSlider
             ? TimeSpan.FromSeconds(activeSlider.Value)
             : playbackPosition;
 
-        if (!_isSeeking)
+        if (!_seekSliderInteraction.IsPointerDown)
         {
             var progressValue = duration > TimeSpan.Zero
                 ? Math.Clamp(position.TotalSeconds, 0, Math.Max(1, duration.TotalSeconds))
@@ -3475,67 +3630,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProgressSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || IsControlDisabled(slider))
-        {
-            e.Handled = true;
-            return;
-        }
-
-        _seekToolTipHideTimer.Stop();
-        _isSeeking = true;
-        _activeProgressSlider = slider;
-        _isProgressThumbDragging = IsPointerOverSliderThumb(e, slider);
-        if (!_isProgressThumbDragging)
-        {
-            SetProgressSliderValueFromPointer(slider, e);
-            slider.CaptureMouse();
-            e.Handled = true;
-        }
-
-        ShowSeekToolTip(slider, includePosition: true);
-    }
-
-    private async void ProgressSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || IsControlDisabled(slider))
-        {
-            _isSeeking = false;
-            _isProgressThumbDragging = false;
-            if (sender is Slider disabledSlider)
-            {
-                ReleaseProgressMouseCapture(disabledSlider);
-            }
-
-            e.Handled = true;
-            HideSeekToolTip();
-            UpdateTimelineUi();
-            return;
-        }
-
-        if (!_isSeeking || !ReferenceEquals(_activeProgressSlider, slider))
-        {
-            return;
-        }
-
-        var wasThumbDrag = _isProgressThumbDragging;
-        _isProgressThumbDragging = false;
-        if (!wasThumbDrag)
-        {
-            SetProgressSliderValueFromPointer(slider, e);
-            e.Handled = true;
-        }
-
-        await CompleteSeekAsync(slider);
-    }
-
     private void ProgressSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_progressSliderUpdating
-            || !_isSeeking
+            || !_seekSliderInteraction.IsPointerDown
             || sender is not Slider slider
-            || !ReferenceEquals(_activeProgressSlider, slider))
+            || !ReferenceEquals(_seekSliderInteraction.ActiveSlider, slider))
         {
             return;
         }
@@ -3556,11 +3656,11 @@ public partial class MainWindow : Window
             _progressSliderUpdating = false;
         }
 
-        ShowSeekToolTip(slider, includePosition: true);
+        ShowSliderToolTip(_seekSliderInteraction, slider, includeSeekPosition: true);
         UpdateTimelineUi();
     }
 
-    private void SetProgressSliderValueFromPointer(Slider slider, MouseEventArgs e)
+    private static void SetSliderValueFromPointer(Slider slider, MouseEventArgs e)
     {
         slider.ApplyTemplate();
         double value;
@@ -3606,9 +3706,26 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private static bool IsVisualDescendantOf(DependencyObject descendant, DependencyObject ancestor)
+    {
+        var current = descendant;
+        while (current is Visual or Visual3D)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
     private async Task CompleteSeekAsync(Slider slider)
     {
-        if (!_isSeeking || !ReferenceEquals(_activeProgressSlider, slider))
+        var interaction = _seekSliderInteraction;
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
         {
             return;
         }
@@ -3621,15 +3738,9 @@ public partial class MainWindow : Window
             Snapshot.Duration,
             Snapshot.IsPlaying,
             DateTimeOffset.Now);
-        _isSeeking = false;
-        _isProgressThumbDragging = false;
-        if (slider.IsMouseCaptured)
-        {
-            slider.ReleaseMouseCapture();
-        }
-
-        ShowSeekToolTip(slider, includePosition: true);
-        BeginSeekToolTipLinger();
+        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+        BeginSliderToolTipLinger(interaction);
         UpdateTimelineUi();
 
         var accepted = false;
@@ -3649,31 +3760,6 @@ public partial class MainWindow : Window
 
         _timelineStabilizer.RejectPendingSeek(DateTimeOffset.Now);
         UpdateTimelineUi();
-    }
-
-    private void CancelSeekInteraction()
-    {
-        _isSeeking = false;
-        _isProgressThumbDragging = false;
-        if (_activeProgressSlider is { } slider)
-        {
-            ReleaseProgressMouseCapture(slider);
-        }
-
-        HideSeekToolTip();
-        UpdateTimelineUi();
-    }
-
-    private static void ReleaseProgressMouseCapture(Slider slider)
-    {
-        if (slider.IsMouseCaptured)
-        {
-            slider.ReleaseMouseCapture();
-        }
-        else if (slider.IsMouseCaptureWithin)
-        {
-            Mouse.Capture(null);
-        }
     }
 
     private void SetTransportEnabled(bool isEnabled)
@@ -3810,9 +3896,11 @@ public partial class MainWindow : Window
         _volumeUpdating = false;
         UpdateVolumeIcon();
         RefreshAllVolumeToolTips();
-        if (_isVolumeDragging && sender is Slider activeSlider)
+        if (_volumeSliderInteraction.IsPointerDown
+            && sender is Slider activeSlider
+            && ReferenceEquals(_volumeSliderInteraction.ActiveSlider, activeSlider))
         {
-            ShowVolumeToolTip(activeSlider);
+            ShowSliderToolTip(_volumeSliderInteraction, activeSlider, includeSeekPosition: false);
         }
     }
 
