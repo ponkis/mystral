@@ -204,27 +204,8 @@
                           Grid.Row="0"
                           Background="#12000000"
                           MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Image Width="16"
-                               Height="16"
-                               Margin="10,0,0,0"
-                               VerticalAlignment="Center"
-                               Source="pack://siteoforigin:,,,/Resources/ico.ico"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
-                        <TextBlock Grid.Column="1"
-                                   Margin="7,0,0,0"
-                                   VerticalAlignment="Center"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   Foreground="#FCFEFC"
-                                   Effect="{StaticResource TextShadow}"
-                                   Text="Mystral" />
                         <Button x:Name="CloseButton"
-                                Grid.Column="2"
+                                HorizontalAlignment="Left"
                                 Style="{StaticResource ChromeButtonStyle}"
                                 Click="CloseButton_Click"
                                 ToolTip="Close">
@@ -235,6 +216,24 @@
                                   StrokeThickness="1.8"
                                   Data="M 1,1 L 10,10 M 10,1 L 1,10" />
                         </Button>
+
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    IsHitTestVisible="False">
+                            <Image Width="16"
+                                   Height="16"
+                                   VerticalAlignment="Center"
+                                   Source="pack://siteoforigin:,,,/Resources/ico.ico"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock Margin="7,0,0,0"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="#FCFEFC"
+                                       Effect="{StaticResource TextShadow}"
+                                       Text="Mystral" />
+                        </StackPanel>
                     </Grid>
 
                     <Border Grid.Row="1"
@@ -476,6 +475,57 @@
                                 </Grid>
                             </Border>
                         </TabItem>
+
+                        <TabItem Header="Lyrics">
+                            <Grid Margin="14,10,14,12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Margin="2,0,2,8"
+                                           Foreground="#5B646A"
+                                           TextWrapping="Wrap"
+                                           Text="Add plain lyrics or timestamped LRC lyrics. Timestamped text is saved as native SYLT when the audio tag supports it, or as LRC otherwise." />
+
+                                <TabControl Grid.Row="1">
+                                    <TabItem Header="Unsynced (USLT)">
+                                        <TextBox x:Name="UnsynchronizedLyricsBox"
+                                                 MaxLength="{x:Static models:BurnTrackDraft.MaxLyricsLength}"
+                                                 Margin="7"
+                                                 Padding="7,5"
+                                                 AcceptsReturn="True"
+                                                 TextWrapping="Wrap"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 HorizontalScrollBarVisibility="Disabled"
+                                                 TextChanged="LyricsBox_TextChanged"
+                                                 ToolTip="Plain, untimed lyrics" />
+                                    </TabItem>
+                                    <TabItem Header="Synced (SYLT / LRC)">
+                                        <Grid Margin="7">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Margin="1,0,0,5"
+                                                       Foreground="#69737A"
+                                                       Text="Use LRC timestamps, for example: [00:12.34]First line" />
+                                            <TextBox x:Name="SynchronizedLyricsBox"
+                                                     Grid.Row="1"
+                                                     MaxLength="{x:Static models:BurnTrackDraft.MaxLyricsLength}"
+                                                     Padding="7,5"
+                                                     AcceptsReturn="True"
+                                                     FontFamily="Consolas"
+                                                     TextWrapping="NoWrap"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     HorizontalScrollBarVisibility="Auto"
+                                                     TextChanged="LyricsBox_TextChanged"
+                                                     ToolTip="Timestamped lyrics in LRC format" />
+                                        </Grid>
+                                    </TabItem>
+                                </TabControl>
+                            </Grid>
+                        </TabItem>
                     </TabControl>
 
                     <Border Grid.Row="3"
@@ -497,7 +547,7 @@
                                         Click="ReplaceSongButton_Click"
                                         Content="Replace song" />
                                 <Button x:Name="FetchButton"
-                                        MinWidth="100"
+                                        MinWidth="118"
                                         Height="23"
                                         Click="FetchButton_Click"
                                         Content="Fetch song data" />

@@ -93,6 +93,47 @@ Settings are stored per build environment:
 
 Sensitive values (Last.fm credentials and the sharing token) live in a separate, per-user encrypted credential store next to the settings file.
 
+Under `Behavior`, choose how the burn editor looks up lyrics:
+
+- `MusicBrainz-assisted (default)` uses the MusicBrainz metadata match to refine
+  the LRCLIB lyric search.
+- `LRCLIB (direct)` searches LRCLIB with the title, artist, album, and duration
+  currently shown in the burn editor.
+
+Neither burn-lyrics mode requires an API key.
+
+Under `Appearance`, the player theme can follow each track's artwork automatically
+or use a color chosen from the theme color picker. A custom color becomes the
+fixed tint for the main player and removes its cover-derived background artwork;
+the burn editor and track notifications continue using their own automatic
+artwork tint. Returning the theme to automatic restores the artwork tint and
+backgrounds.
+
+Mystral's custom title bars place the available Close and Minimize controls on
+the left, keep window-specific actions such as Always on top and Fullscreen on
+the right, and center the app icon and name where that identity is shown.
+
+## Burn Editor
+
+The burn editor always writes a separate copy of the selected audio file. It can
+edit track details, cover and disc artwork, plain lyrics, and synchronized lyrics
+in LRC format; the source audio is never modified. Synchronized lyrics use a
+native synchronized tag when the file's tagging format supports one and fall
+back to portable timestamped LRC text otherwise.
+
+`Fetch song data` retrieves metadata and artwork through MusicBrainz and the
+Cover Art Archive, and retrieves plain or synchronized lyrics through LRCLIB.
+Fetched lyrics remain editable before the copy is saved.
+
+## Updates
+
+Mystral can check GitHub releases at startup or from the About dialog. Update
+downloads show progress and can be canceled; Mystral confirms that a canceled
+download did not launch the installer. If a download is interrupted or fails,
+the error dialog reports the underlying cause and offers Retry. After an update,
+the confirmation popup links to the GitHub comparison for the previous and new
+release.
+
 ## Testing
 
 The automated tests live in `tests\Mystral.Tests`. Run the core suite:
@@ -116,6 +157,17 @@ composition and tinting, MusicBrainz mapping and retries, and audio-tag burning.
 
 GitHub Actions runs the same build-and-test checks on every push and pull request
 (`.github\workflows\ci.yml`).
+
+### Test coverage
+
+- LRC parsing and lyric result handling
+- Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
+- LRCLIB exact lookup, fallback search ranking, parsing, and caching
+- settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
+- local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
+- model defaults and artwork tint edge cases
+- burn metadata validation, lyric-tag round trips, and preservation of the source audio
+- interrupted update downloads, partial-file cleanup, and failure-message handling
 
 Before a release, also run the Windows-only checklist in
 [`SMOKE_TEST.md`](SMOKE_TEST.md): window and tray states, media-session controls,
@@ -227,7 +279,7 @@ artifacts\installer\Mystral-<version>-win-x64-setup.exe
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.1.0</VersionPrefix>
+<VersionPrefix>2.2.0</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically append a
@@ -264,6 +316,89 @@ tests/           Headless test runner (Mystral.Tests)
 Mystral's source code is licensed under the **Mozilla Public License 2.0** — see
 [`LICENSE`](LICENSE).
 
+Mystral's source code is licensed under the **Mozilla Public License 2.0** — see
+[`LICENSE`](LICENSE).
+
 > **Note:** some bundled assets (for example the Windows 7-style busy animation)
 > are Microsoft-owned and are **not** covered by the MPL-2.0 grant. If you
 > redistribute Mystral, read [`NOTICE.md`](NOTICE.md) first.
+
+## Building & Releasing
+
+```text
+work on dev -> build locally -> commit and push dev -> merge dev into main -> vX.Y.Z tag -> GitHub Release
+```
+
+After testing locally, you can merge `dev` into `main` and push with:
+
+```powershell
+.\scripts\Promote-DevToMain.ps1
+```
+
+To merge, push `main`, and create the production release tag in one step:
+
+```powershell
+.\scripts\Promote-DevToMain.ps1 -Release
+```
+
+For local release builds, run these commands from the repository root.
+
+Load the project version:
+
+```powershell
+$version = dotnet msbuild .\Mystral.csproj -nologo -getProperty:Version -p:Configuration=Release
+```
+
+Clean old release artifacts:
+
+```powershell
+Remove-Item .\artifacts -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+Debug verification build:
+
+```powershell
+dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development
+```
+
+Self-contained single-file build:
+
+```powershell
+dotnet publish .\Mystral.csproj -c Release -r win-x64 --self-contained true -o ".\artifacts\publish\Mystral-$version-win-x64-single" /p:AppEnvironment=Production /p:PublishSingleFile=true /p:IncludeAllContentForSelfExtract=true /p:EnableCompressionInSingleFile=true /p:UseAppHost=true /p:DebugType=None /p:DebugSymbols=false
+```
+
+Self-contained folder build:
+
+```powershell
+dotnet publish .\Mystral.csproj -c Release -r win-x64 --self-contained true -o ".\artifacts\publish\Mystral-$version-win-x64-folder" /p:AppEnvironment=Production /p:PublishSingleFile=false /p:UseAppHost=true /p:DebugType=None /p:DebugSymbols=false
+```
+
+The folder build is what the installer script packages.
+
+## Installer
+
+Install Inno Setup:
+
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+Build the folder publish first, then run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
+```
+
+The build script resolves the version from MSBuild and uses `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` when `ISCC.exe` is not on `PATH`.
+
+The installer is written to:
+
+```text
+artifacts\installer\Mystral-<version>-win-x64-setup.exe
+```
+
+## Runtime Assets
+
+All runtime assets are inside this project under `Resources`.
+Licenses for the Appearance color-picker dependencies are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).

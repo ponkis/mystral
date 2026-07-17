@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using Mystral.Models;
 using Mystral.Parsing;
 using Mystral.Services;
+using Mystral.Views;
 using static Mystral.Tests.Samples;
 
 namespace Mystral.Tests;
@@ -43,6 +44,9 @@ internal static class Program
             ("MusicBrainz retries transient artwork responses and gives up gracefully", MusicBrainzServiceTests.RetriesTransientArtworkResponses),
             ("MusicBrainz reports artwork outcomes and records failure diagnostics", MusicBrainzServiceTests.ReportsArtworkOutcomesAndDiagnostics),
             ("artwork diagnostics write a bounded, rotating, failure-tolerant log", ArtworkDiagnosticsTests.WritesAndRotatesBoundedLog),
+            ("GitHub update links compare valid release tags safely", GitHubReleaseLinksTests.BuildsSafeCompareUris),
+            ("update downloads reject interrupted files and preserve useful failure causes", UpdateDownloadTests.ValidatesInterruptedDownloadsAndFailureMessages),
+            ("burn lyric fetches replace definitive results and preserve service failures", BurnLyricsFetchTests.ReplacesDefinitiveResultsAndPreservesFailures),
             ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
             ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
@@ -235,7 +239,15 @@ static class AppSettingsServiceTests
                 Password = " pass ",
                 ScrobblingEnabled = true
             },
-            Behavior = new BehaviorSettings { AlwaysOnTop = false },
+            Behavior = new BehaviorSettings
+            {
+                AlwaysOnTop = false,
+                BurnLyricsProvider = BurnLyricsProvider.Lrclib
+            },
+            Appearance = new AppearanceSettings
+            {
+                PlayerThemeColor = "  #a1b2c3  "
+            },
             Social = new SocialSettings
             {
                 IsAccountLinked = true,
@@ -249,6 +261,8 @@ static class AppSettingsServiceTests
         Check.Equal("user", service.Settings.LastFm.Username);
         Check.Equal(" pass ", service.Settings.LastFm.Password);
         Check.False(service.Settings.Behavior.AlwaysOnTop);
+        Check.Equal(BurnLyricsProvider.Lrclib, service.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal("#A1B2C3", service.Settings.Appearance.PlayerThemeColor);
         Check.True(service.Settings.Social.IsAccountLinked);
         Check.True(service.Settings.Social.AutomaticallyShareBurns);
 
@@ -263,6 +277,8 @@ static class AppSettingsServiceTests
         var reloaded = new AppSettingsService(path, credentialStore);
         Check.True(reloaded.Settings.LastFm.IsConfigured);
         Check.False(reloaded.Settings.Behavior.AlwaysOnTop);
+        Check.Equal(BurnLyricsProvider.Lrclib, reloaded.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal("#A1B2C3", reloaded.Settings.Appearance.PlayerThemeColor);
         Check.False(reloaded.Settings.Social.IsAccountLinked);
         Check.True(reloaded.Settings.Social.AutomaticallyShareBurns);
 
@@ -270,11 +286,30 @@ static class AppSettingsServiceTests
         Check.False(reloaded.Settings.Social.AutomaticallyShareBurns);
 
         var nullPath = Path.Combine(temp.Path, "null-settings.json");
-        File.WriteAllText(nullPath, """{"LastFm":null,"Behavior":null,"Social":null}""");
+        File.WriteAllText(
+            nullPath,
+            """{"LastFm":null,"Behavior":null,"Appearance":null,"Social":null}""");
         var nullNested = new AppSettingsService(nullPath, new MemorySecureCredentialStore());
         Check.NotNull(nullNested.Settings.LastFm);
         Check.NotNull(nullNested.Settings.Behavior);
+        Check.NotNull(nullNested.Settings.Appearance);
+        Check.Equal(string.Empty, nullNested.Settings.Appearance.PlayerThemeColor);
         Check.NotNull(nullNested.Settings.Social);
+        Check.Equal(
+            BurnLyricsProvider.MusicBrainzAssisted,
+            nullNested.Settings.Behavior.BurnLyricsProvider);
+
+        var invalidProviderPath = Path.Combine(temp.Path, "invalid-provider-settings.json");
+        File.WriteAllText(
+            invalidProviderPath,
+            """{"Behavior":{"BurnLyricsProvider":999},"Appearance":{"PlayerThemeColor":"#12345678"}}""");
+        var invalidProvider = new AppSettingsService(
+            invalidProviderPath,
+            new MemorySecureCredentialStore());
+        Check.Equal(
+            BurnLyricsProvider.MusicBrainzAssisted,
+            invalidProvider.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal(string.Empty, invalidProvider.Settings.Appearance.PlayerThemeColor);
 
         var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
         var legacyStore = new MemorySecureCredentialStore();
@@ -1263,7 +1298,7 @@ static class LyricsServiceTests
                         albumName = "Album",
                         duration = 121d,
                         instrumental = false,
-                        plainLyrics = "",
+                        plainLyrics = "Exact plain line",
                         syncedLyrics = (string?)"[00:01.00]Exact line"
                     });
                 case "/api/search":
@@ -1285,6 +1320,8 @@ static class LyricsServiceTests
         Check.Equal(0, exactSearchCount);
         Check.Equal(LyricsStatus.Synced, result.Status);
         Check.Equal("Exact line", result.SyncedLines.Single().Text);
+        Check.Equal("[00:01.00]Exact line", result.SyncedText);
+        Check.Equal("Exact plain line", result.PlainText);
         Check.Equal("LRCLIB", result.TrackInfo!.SourceName);
 
         var fallbackGetCount = 0;
@@ -1486,6 +1523,33 @@ static class ModelTests
         Check.False(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u" }.IsConfigured);
         Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p" }.IsConfigured);
         Check.True(new BehaviorSettings().CloseToTray);
+        Check.Equal(
+            BurnLyricsProvider.MusicBrainzAssisted,
+            new BehaviorSettings().BurnLyricsProvider);
+        Check.Equal("#4A5258", AppearanceSettings.DefaultPlayerThemeColor);
+        Check.Equal(string.Empty, new AppearanceSettings().PlayerThemeColor);
+        Check.Equal(
+            "#0A7FFF",
+            AppearanceSettings.FormatPlayerThemeColor(0x0A, 0x7F, 0xFF));
+        Check.Equal(
+            "#A1B2C3",
+            AppearanceSettings.NormalizePlayerThemeColor("  #a1b2c3 "));
+        Check.Equal(
+            string.Empty,
+            AppearanceSettings.NormalizePlayerThemeColor("#A1B2C3FF"));
+        Check.True(AppearanceSettings.TryParsePlayerThemeColor(
+            "#0A7FFF",
+            out var themeRed,
+            out var themeGreen,
+            out var themeBlue));
+        Check.Equal((byte)0x0A, themeRed);
+        Check.Equal((byte)0x7F, themeGreen);
+        Check.Equal((byte)0xFF, themeBlue);
+        Check.False(AppearanceSettings.TryParsePlayerThemeColor(
+            "not-a-color",
+            out _,
+            out _,
+            out _));
         Check.Equal("No active track", MediaSnapshot.Empty.Title);
         Check.False(MediaSnapshot.Empty.HasSession);
         Check.Equal(DateTimeOffset.FromUnixTimeSeconds(0).LocalDateTime.ToString("yyyy-MM-dd"), new ScrobbleRecord { Timestamp = 0 }.FormattedTime[..10]);
@@ -1531,6 +1595,20 @@ static class ArtworkTintTests
         Check.NotNull(tint);
         Check.True(tint!.Value.R > tint.Value.G);
         Check.True(tint.Value.G > tint.Value.B);
+
+        var defaultTint = Color.FromRgb(74, 82, 88);
+        Check.Equal(
+            Color.FromRgb(0x12, 0x34, 0x56),
+            MainWindow.ResolvePlayerTint("#123456", Colors.Red, defaultTint));
+        Check.Equal(
+            Colors.Red,
+            MainWindow.ResolvePlayerTint(string.Empty, Colors.Red, defaultTint));
+        Check.Equal(
+            defaultTint,
+            MainWindow.ResolvePlayerTint("not-a-color", null, defaultTint));
+        Check.False(MainWindow.ShouldShowPlayerArtworkBackdrops("#123456"));
+        Check.True(MainWindow.ShouldShowPlayerArtworkBackdrops(string.Empty));
+        Check.True(MainWindow.ShouldShowPlayerArtworkBackdrops("not-a-color"));
     }
 }
 
@@ -2086,6 +2164,115 @@ static class ArtworkDiagnosticsTests
     }
 }
 
+static class GitHubReleaseLinksTests
+{
+    public static void BuildsSafeCompareUris()
+    {
+        var stableCompare = GitHubReleaseLinks.CreateCompareUri(
+            " v2.1.0 ",
+            "2.1.1");
+        Check.NotNull(stableCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.1.0...v2.1.1",
+            stableCompare!.AbsoluteUri);
+
+        var prereleaseCompare = GitHubReleaseLinks.CreateCompareUri(
+            "2.2.0-beta.2",
+            "v2.2.0-beta.10");
+        Check.NotNull(prereleaseCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.2.0-beta.2...v2.2.0-beta.10",
+            prereleaseCompare!.AbsoluteUri);
+
+        var stablePromotionCompare = GitHubReleaseLinks.CreateCompareUri(
+            "2.2.0-rc.1",
+            "2.2.0");
+        Check.NotNull(stablePromotionCompare);
+        Check.Equal(
+            "https://github.com/ponkis/mystral/compare/v2.2.0-rc.1...v2.2.0",
+            stablePromotionCompare!.AbsoluteUri);
+
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0-dev", "2.1.1"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "2.1.1-dev"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "not a version"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.0", "2.1.0/../../main"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("v2.1.0", "2.1.0"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.1.1", "2.1.0"));
+        Check.Null(GitHubReleaseLinks.CreateCompareUri("2.2.0", "2.2.0-rc.1"));
+    }
+}
+
+static class UpdateDownloadTests
+{
+    public static void ValidatesInterruptedDownloadsAndFailureMessages()
+    {
+        var assetName = $"mystral-update-test-{Guid.NewGuid():N}.exe";
+        var expectedPath = Path.Combine(Path.GetTempPath(), assetName);
+        var response = Samples.Bytes([1, 2, 3]);
+        response.Content.Headers.ContentLength = 10;
+        using var client = new HttpClient(new FakeHttpMessageHandler(_ => response));
+
+        IOException? interrupted = null;
+        try
+        {
+            _ = SettingsWindow.DownloadInstallerAsync(
+                    client,
+                    "https://example.test/update.exe",
+                    assetName,
+                    (_, _) => { },
+                    CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (IOException ex)
+        {
+            interrupted = ex;
+        }
+
+        Check.NotNull(interrupted);
+        Check.Contains("connection closed", interrupted!.Message);
+        Check.False(File.Exists(expectedPath));
+        Check.Equal(
+            "The download timed out.",
+            SettingsWindow.DescribeUpdateDownloadFailure(new TaskCanceledException()));
+        Check.Equal(
+            "connection reset by peer",
+            SettingsWindow.DescribeUpdateDownloadFailure(
+                new HttpRequestException("Request failed.", new IOException("connection reset by peer"))));
+    }
+}
+
+static class BurnLyricsFetchTests
+{
+    public static void ReplacesDefinitiveResultsAndPreservesFailures()
+    {
+        var plain = BurningWindow.CreateFetchedLyricsReplacement(
+            LyricsResult.Plain(["New plain line"], sourceText: "New plain line"));
+        Check.True(plain.ShouldReplace);
+        Check.Equal("New plain line", plain.Unsynchronized);
+        Check.Equal(string.Empty, plain.Synchronized);
+
+        var synced = BurningWindow.CreateFetchedLyricsReplacement(
+            LyricsResult.Synced([new LyricLine(TimeSpan.FromSeconds(1.25), "New synced line")]));
+        Check.True(synced.ShouldReplace);
+        Check.Equal(string.Empty, synced.Unsynchronized);
+        Check.Equal("[00:01.25]New synced line", synced.Synchronized);
+
+        var notFound = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.NotFound);
+        Check.True(notFound.ShouldReplace);
+        Check.Equal(string.Empty, notFound.Unsynchronized);
+        Check.Equal(string.Empty, notFound.Synchronized);
+
+        var instrumental = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.Instrumental);
+        Check.True(instrumental.ShouldReplace);
+        Check.Equal(string.Empty, instrumental.Unsynchronized);
+        Check.Equal(string.Empty, instrumental.Synchronized);
+
+        var failed = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.Error("Unavailable"));
+        Check.False(failed.ShouldReplace);
+    }
+}
+
 static class BurnMetadataValidationTests
 {
     public static void ValidatesFieldsAndSuggestedFileNames()
@@ -2135,6 +2322,17 @@ static class BurnMetadataValidationTests
         draft.TrackNumber = "7";
         draft.TrackTotal = "12";
         AudioTagService.ValidateDraft(draft);
+
+        draft.SynchronizedLyrics = "A line without an LRC timestamp";
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.SynchronizedLyrics = "[00:01.25]A timestamped line";
+        AudioTagService.ValidateDraft(draft);
+        draft.SynchronizedLyrics = string.Empty;
+
+        draft.UnsynchronizedLyrics = new string('L', BurnTrackDraft.MaxLyricsLength + 1);
+        Check.Throws<InvalidDataException>(() => AudioTagService.ValidateDraft(draft));
+        draft.UnsynchronizedLyrics = string.Empty;
+
         Check.Equal("AC_DC_ Live_.flac", AudioTagService.CreateSuggestedOutputFileName(draft));
 
         draft.Title = "CON";
@@ -2173,6 +2371,8 @@ static class AudioTagServiceTests
         draft.Album = "Burned album";
         draft.TrackNumber = "7";
         draft.TrackTotal = "12";
+        draft.UnsynchronizedLyrics = "Plain line one\nPlain line two";
+        draft.SynchronizedLyrics = "[00:00.25]Synced line one\n[00:00.75]Synced line two";
         var artworkLoader = new ImageArtworkLoader();
         var coverPng = Png(1, 1, [10, 20, 30, 255]);
         var discPng = Png(1, 1, [40, 50, 60, 255]);
@@ -2180,6 +2380,7 @@ static class AudioTagServiceTests
         draft.DiscArtwork = artworkLoader.LoadAsync(discPng).GetAwaiter().GetResult();
         draft.CoverArtworkChanged = true;
         draft.DiscArtworkChanged = true;
+        draft.LyricsChanged = true;
         var destinationPath = Path.Combine(temp.Path, "burned.wav");
 
         service.SaveCopyAsync(draft, destinationPath).GetAwaiter().GetResult();
@@ -2194,6 +2395,9 @@ static class AudioTagServiceTests
         Check.Equal("Burned album", saved.Album);
         Check.Equal("7", saved.TrackNumber);
         Check.Equal("12", saved.TrackTotal);
+        Check.Equal("Plain line one\nPlain line two", saved.UnsynchronizedLyrics);
+        Check.Contains("[00:00.25]Synced line one", saved.SynchronizedLyrics);
+        Check.Contains("[00:00.75]Synced line two", saved.SynchronizedLyrics);
         Check.NotNull(saved.CoverArtwork);
         Check.NotNull(saved.DiscArtwork);
 
@@ -2205,6 +2409,20 @@ static class AudioTagServiceTests
         Check.Equal(ATL.PictureInfo.PIC_TYPE.Front, savedTrack.EmbeddedPictures[0].PicType);
         Check.False(savedTrack.EmbeddedPictures.Any(picture =>
             picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
+        Check.True(savedTrack.Lyrics.Any(lyrics =>
+            lyrics.UnsynchronizedLyrics.Contains("Plain line one", StringComparison.Ordinal)));
+        Check.True(savedTrack.Lyrics.Any(lyrics => lyrics.SynchronizedLyrics.Count >= 2));
+        var transcriptionEntry = new ATL.LyricsInfo
+        {
+            ContentType = ATL.LyricsInfo.LyricsType.TRANSCRIPTION,
+            LanguageCode = "und",
+            Description = "Preserve this entry",
+            Format = ATL.LyricsInfo.LyricsFormat.SYNCHRONIZED
+        };
+        transcriptionEntry.SynchronizedLyrics.Add(
+            new ATL.LyricsInfo.LyricsPhrase(500, "Non-lyrical timed metadata"));
+        savedTrack.Lyrics.Add(transcriptionEntry);
+        Check.True(savedTrack.Save());
         var discField = savedTrack.AdditionalFields
             .FirstOrDefault(field => field.Key.Contains("MYSTRAL_DISC_ART", StringComparison.OrdinalIgnoreCase))
             .Value;
@@ -2227,6 +2445,29 @@ static class AudioTagServiceTests
             picture.PicType == ATL.PictureInfo.PIC_TYPE.CD));
         var coverReplacedReadback = service.ReadAsync(coverReplacedPath).GetAwaiter().GetResult();
         Check.NotNull(coverReplacedReadback.DiscArtwork);
+        Check.Equal("Plain line one\nPlain line two", coverReplacedReadback.UnsynchronizedLyrics);
+        Check.Contains("Synced line one", coverReplacedReadback.SynchronizedLyrics);
+
+        // Clearing both editors explicitly removes lyrical entries, while an
+        // unchanged draft leaves the source file's original lyric frames alone.
+        saved.UnsynchronizedLyrics = string.Empty;
+        saved.SynchronizedLyrics = string.Empty;
+        saved.LyricsChanged = true;
+        var lyricsRemovedPath = Path.Combine(temp.Path, "lyrics-removed.wav");
+        service.SaveCopyAsync(saved, lyricsRemovedPath).GetAwaiter().GetResult();
+        var lyricsRemoved = service.ReadAsync(lyricsRemovedPath).GetAwaiter().GetResult();
+        Check.Equal(string.Empty, lyricsRemoved.UnsynchronizedLyrics);
+        Check.Equal(string.Empty, lyricsRemoved.SynchronizedLyrics);
+        var lyricsRemovedTrack = new ATL.Track(lyricsRemovedPath);
+        Check.False(lyricsRemovedTrack.Lyrics.Any(lyrics =>
+            lyrics.ContentType == ATL.LyricsInfo.LyricsType.LYRICS
+            && (!string.IsNullOrEmpty(lyrics.UnsynchronizedLyrics)
+                || lyrics.SynchronizedLyrics.Count > 0)));
+        Check.True(lyricsRemovedTrack.Lyrics.Any(lyrics =>
+            lyrics.ContentType == ATL.LyricsInfo.LyricsType.TRANSCRIPTION
+            && lyrics.SynchronizedLyrics.Any(phrase => phrase.Text.Contains(
+                "Non-lyrical timed metadata",
+                StringComparison.Ordinal))));
 
         // Backward compatibility: a legacy file that stored the disc art as a CD
         // picture must still be read as disc art (not as the cover).

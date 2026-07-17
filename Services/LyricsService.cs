@@ -62,6 +62,24 @@ public sealed class LyricsService : IDisposable
         return result;
     }
 
+    public Task<LyricsResult> GetLyricsAsync(
+        string title,
+        string artist,
+        string album,
+        TimeSpan duration,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = MediaSnapshot.Empty with
+        {
+            HasSession = true,
+            Title = title,
+            Artist = artist,
+            Album = album,
+            Duration = duration
+        };
+        return GetLyricsAsync(snapshot, cancellationToken);
+    }
+
     private async Task<LyricsResult> FetchLyricsAsync(MediaSnapshot snapshot, CancellationToken cancellationToken)
     {
         var durationSeconds = Math.Max(0, (int)Math.Round(snapshot.Duration.TotalSeconds));
@@ -174,11 +192,17 @@ public sealed class LyricsService : IDisposable
         var syncedLines = LrcParser.Parse(lyrics.SyncedLyrics);
         if (syncedLines.Count > 0)
         {
-            return LyricsResult.Synced(syncedLines, trackInfo);
+            return LyricsResult.Synced(
+                syncedLines,
+                trackInfo,
+                lyrics.SyncedLyrics,
+                lyrics.PlainLyrics);
         }
 
         var plainLines = SplitPlainLyrics(lyrics.PlainLyrics);
-        return plainLines.Count > 0 ? LyricsResult.Plain(plainLines, trackInfo) : LyricsResult.NotFound;
+        return plainLines.Count > 0
+            ? LyricsResult.Plain(plainLines, trackInfo, lyrics.PlainLyrics)
+            : LyricsResult.NotFound;
     }
 
     private static List<string> SplitPlainLyrics(string? lyrics)

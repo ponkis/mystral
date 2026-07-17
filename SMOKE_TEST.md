@@ -28,6 +28,8 @@ For packaged development builds:
 
 ## Window And Tray
 
+- Confirm each custom title bar places its available Close and Minimize controls on the left, while main-window actions such as Always on top and Fullscreen remain on the right.
+- Confirm the Mystral icon and name are visually centered in custom title bars where they are shown, including the burn editor and track notification.
 - Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
 - Toggle always-on-top and confirm the setting sticks after restart.
 - Minimize the app and confirm restore works.
@@ -64,13 +66,42 @@ For packaged development builds:
 - Change tracks and confirm one track notification appears.
 - Burn a "CD" and confirm the successful burn notification appears.
 - Disable notifications and confirm no new notifications appear.
+- With a custom player theme selected, confirm track notifications still derive their tint from the track artwork rather than the custom player color.
 
 ## Settings
 
 - Open settings from the app and tray menu.
 - Toggle behavior settings, save, restart, and confirm persistence.
+- Under Behavior, switch the Burn lyrics provider between `MusicBrainz-assisted (default)` and `LRCLIB (direct)`, save, restart, and confirm the selected provider persists.
+- Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker.
+- While a track is visible, choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.
+- Check the compact, expanded-artwork, lyrics, and fullscreen player modes; confirm cover-derived background artwork is hidden in each mode while foreground cover artwork remains visible.
+- Return Theme to automatic and save; confirm artwork-derived tinting and all player background artwork return immediately.
+- Open the burn editor with artwork and confirm its tint remains artwork-derived rather than using the custom main-player theme.
 - Enter invalid Last.fm credentials and confirm validation fails gracefully.
 - If available, enter valid Last.fm credentials and confirm validation succeeds.
+
+## Burn Editor
+
+- Open an audio file that already contains plain and synchronized lyrics; confirm both fields appear in the Lyrics tab without changing the source file.
+- Add or edit plain lyrics and timestamped LRC lyrics such as `[00:12.34]First line`, save the burned copy, reopen that copy, and confirm both lyric forms round-trip.
+- Clear both lyric fields, save another copy, reopen it, and confirm the lyrics were removed while unrelated metadata remains intact.
+- Enter synchronized text without a valid LRC timestamp and confirm Save reports a readable validation error instead of creating the burned copy.
+- With `MusicBrainz-assisted (default)` selected, click `Fetch song data` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
+- With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song data`, and confirm lyrics are searched using the values currently in the editor.
+- Fetch a song with lyrics, then fetch a song that has no lyrics; confirm both lyric editors clear instead of retaining the previous song's text.
+- While a fetch is running, confirm the progress window uses the search icon and concise song-search wording; when cover or disc artwork is not found, confirm the notice uses the artwork icon.
+- Fetch tracks that LRCLIB marks as instrumental both with and without a confident MusicBrainz match; confirm the completion or warning popup uses the instrumental icon.
+- If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
+- Confirm the original audio bytes and tags are unchanged after every burn.
+
+## Updates
+
+- From the About dialog, check for an update while running a version older than the latest release.
+- Start the installer download, click Cancel, and confirm Mystral reports that the download was canceled and the installer was not launched.
+- Start the download again, disconnect the network, and confirm the failure dialog includes a cause plus Retry and Cancel buttons.
+- Restore the connection, click Retry, and confirm a new progress dialog completes the download and launches the installer.
+- After installing a newer release, confirm the `Update installed` popup includes a `What's new?` link and opens the GitHub comparison from the previous release tag to the newly installed tag.
 
 ## Last.fm
 

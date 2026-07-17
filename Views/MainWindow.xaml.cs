@@ -198,7 +198,7 @@ public partial class MainWindow : Window
         WindowScale.ScaleX = 0.96;
         WindowScale.ScaleY = 0.96;
         InitializeInteractiveToolTips();
-        ApplyArtworkTint(null);
+        ApplyPlayerAppearance();
         ShowInfoButtons();
         InitializeTrayIcon();
     }
@@ -261,7 +261,23 @@ public partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(previousVersion)
                 && SettingsWindow.IsNewerRelease(AppMetadata.Version, previousVersion))
             {
-                AppDialogWindow.ShowConfirmation(this, "Update installed", $"Mystral was updated to version {AppMetadata.Version}.");
+                var message = $"Mystral was updated to version {AppMetadata.Version}.";
+                var compareUri = GitHubReleaseLinks.CreateCompareUri(
+                    previousVersion,
+                    AppMetadata.Version);
+                if (compareUri is null)
+                {
+                    AppDialogWindow.ShowConfirmation(this, "Update installed", message);
+                }
+                else
+                {
+                    AppDialogWindow.ShowConfirmationWithLink(
+                        this,
+                        "Update installed",
+                        message,
+                        "What's new?",
+                        compareUri);
+                }
             }
 
             File.WriteAllText(LastRunVersionPath, AppMetadata.Version);
@@ -2962,7 +2978,10 @@ public partial class MainWindow : Window
 
         _hasAppliedArtworkTint = true;
         _lastArtworkTintSource = coverArt;
-        var tint = ExtractDominantTint(coverArt) ?? DefaultTint;
+        var tint = ResolvePlayerTint(
+            _settingsService.Settings.Appearance.PlayerThemeColor,
+            ExtractDominantTint(coverArt),
+            DefaultTint);
 
         AnimateColor(CardTopStop, WithAlpha(Blend(tint, Colors.White, 0.20), 0x90));
         AnimateColor(CardUpperStop, WithAlpha(Blend(tint, Colors.White, 0.04), 0x82));
@@ -2997,6 +3016,47 @@ public partial class MainWindow : Window
         AnimateColor(FullscreenTintMidStop, WithAlpha(Blend(tint, Colors.Black, 0.85), 0xFF));
         AnimateColor(FullscreenTintBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.95), 0xFF));
         AnimateColor(FullscreenGlowStop, WithAlpha(Blend(tint, Colors.White, 0.40), 0xFF));
+    }
+
+    internal static Color ResolvePlayerTint(
+        string? playerThemeColor,
+        Color? artworkTint,
+        Color defaultTint)
+    {
+        return AppearanceSettings.TryParsePlayerThemeColor(
+            playerThemeColor,
+            out var red,
+            out var green,
+            out var blue)
+            ? Color.FromRgb(red, green, blue)
+            : artworkTint ?? defaultTint;
+    }
+
+    internal static bool ShouldShowPlayerArtworkBackdrops(string? playerThemeColor)
+    {
+        return !AppearanceSettings.TryParsePlayerThemeColor(
+            playerThemeColor,
+            out _,
+            out _,
+            out _);
+    }
+
+    private void ApplyPlayerAppearance()
+    {
+        var playerThemeColor = _settingsService.Settings.Appearance.PlayerThemeColor;
+        var backdropVisibility = ShouldShowPlayerArtworkBackdrops(playerThemeColor)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        BlurredArtImage.Visibility = backdropVisibility;
+        ExpandedArtImage.Visibility = backdropVisibility;
+        LyricsArtImage.Visibility = backdropVisibility;
+        FullscreenBlurredArtImage.Visibility = backdropVisibility;
+
+        var currentTintSource = _lastArtworkTintSource ?? Snapshot.CoverArt;
+        _hasAppliedArtworkTint = false;
+        _lastArtworkTintSource = null;
+        ApplyArtworkTint(currentTintSource);
     }
 
     private void AnimateColor(GradientStop stop, Color color)
@@ -3990,6 +4050,7 @@ public partial class MainWindow : Window
         ResetScrobblingState();
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
+        ApplyPlayerAppearance();
         var alwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop;
         if (_openDialogCount > 0)
         {

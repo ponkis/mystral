@@ -14,21 +14,43 @@ public sealed record LyricsResult(
     IReadOnlyList<LyricLine> SyncedLines,
     IReadOnlyList<string> PlainLines,
     string Message,
-    LyricsTrackInfo? TrackInfo = null)
+    LyricsTrackInfo? TrackInfo = null,
+    string? SyncedText = null,
+    string? PlainText = null)
 {
     public static LyricsResult Empty { get; } = new(LyricsStatus.Empty, [], [], "Lyrics will appear when a track is playing");
     public static LyricsResult Loading { get; } = new(LyricsStatus.Loading, [], [], "Looking for lyrics");
     public static LyricsResult Instrumental { get; } = new(LyricsStatus.Instrumental, [], [], "Instrumental track");
     public static LyricsResult NotFound { get; } = new(LyricsStatus.NotFound, [], [], "No lyrics found");
 
-    public static LyricsResult Synced(IReadOnlyList<LyricLine> lines, LyricsTrackInfo? trackInfo = null)
+    public static LyricsResult Synced(
+        IReadOnlyList<LyricLine> lines,
+        LyricsTrackInfo? trackInfo = null,
+        string? sourceText = null,
+        string? plainText = null)
     {
-        return new LyricsResult(LyricsStatus.Synced, lines, [], "Synced lyrics", trackInfo);
+        return new LyricsResult(
+            LyricsStatus.Synced,
+            lines,
+            [],
+            "Synced lyrics",
+            trackInfo,
+            SyncedText: sourceText,
+            PlainText: plainText);
     }
 
-    public static LyricsResult Plain(IReadOnlyList<string> lines, LyricsTrackInfo? trackInfo = null)
+    public static LyricsResult Plain(
+        IReadOnlyList<string> lines,
+        LyricsTrackInfo? trackInfo = null,
+        string? sourceText = null)
     {
-        return new LyricsResult(LyricsStatus.Plain, [], lines, "Unsynced lyrics", trackInfo);
+        return new LyricsResult(
+            LyricsStatus.Plain,
+            [],
+            lines,
+            "Unsynced lyrics",
+            trackInfo,
+            PlainText: sourceText);
     }
 
     public static LyricsResult InstrumentalWithInfo(LyricsTrackInfo? trackInfo)

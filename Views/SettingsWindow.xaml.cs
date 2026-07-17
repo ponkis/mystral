@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
-using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,6 +16,7 @@ namespace Mystral.Views;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly Color DefaultPlayerThemeColorValue = Color.FromRgb(0x4A, 0x52, 0x58);
     private const int MaximumSocialAvatarDownloadBytes = 5 * 1024 * 1024;
     private const int MaximumSocialAvatarSourceDimension = 8192;
     private const long MaximumSocialAvatarSourcePixels = 32L * 1024 * 1024;
@@ -26,6 +26,7 @@ public partial class SettingsWindow : Window
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
     private bool _isLoadingSettings;
+    private bool _isUpdatingThemeControls;
     private bool _hasUnsavedChanges;
     private bool _isClosingConfirmed;
     private bool _isSaving;
@@ -42,6 +43,7 @@ public partial class SettingsWindow : Window
     private GlobeProfile? _socialProfile;
     private ImageSource? _socialProfileImage;
     private int _socialAvatarGeneration;
+    private Color _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
 
     internal event EventHandler? CloseRequestCanceled;
 
@@ -106,6 +108,24 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
+        BurnLyricsProviderComboBox.SelectedIndex = settings.Behavior.BurnLyricsProvider == BurnLyricsProvider.Lrclib
+            ? 1
+            : 0;
+        if (AppearanceSettings.TryParsePlayerThemeColor(
+                settings.Appearance.PlayerThemeColor,
+                out var themeRed,
+                out var themeGreen,
+                out var themeBlue))
+        {
+            _selectedPlayerThemeColor = Color.FromRgb(themeRed, themeGreen, themeBlue);
+            PlayerThemeComboBox.SelectedIndex = 1;
+        }
+        else
+        {
+            _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+            PlayerThemeComboBox.SelectedIndex = 0;
+        }
+        UpdatePlayerThemeControls();
         var globeState = _globeConnectionService.State;
         _isSocialAccountLinked = globeState.IsLinked;
         _isSocialSharingAvailable = globeState.CanShare;
@@ -130,6 +150,7 @@ public partial class SettingsWindow : Window
         
         LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        AppearancePanel.Visibility = selectedItem == AppearanceCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         SocialPanel.Visibility = selectedItem == SocialCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
 
@@ -142,6 +163,11 @@ public partial class SettingsWindow : Window
         {
             SettingsTitleText.Text = "Behavior";
             SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
+        }
+        else if (selectedItem == AppearanceCategoryItem)
+        {
+            SettingsTitleText.Text = "Appearance";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/appearance.ico", 16);
         }
         else if (selectedItem == SocialCategoryItem)
         {
@@ -163,6 +189,84 @@ public partial class SettingsWindow : Window
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
         RefreshDirtyState();
+    }
+
+    private void PlayerThemeComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isLoadingSettings || _isUpdatingThemeControls)
+        {
+            return;
+        }
+
+        if (PlayerThemeComboBox.SelectedIndex == 1)
+        {
+            if (!TryChoosePlayerThemeColor())
+            {
+                _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+                SetPlayerThemeMode(0);
+            }
+        }
+        else
+        {
+            _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+        }
+
+        UpdatePlayerThemeControls();
+        RefreshDirtyState();
+    }
+
+    private void ChoosePlayerThemeColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryChoosePlayerThemeColor())
+        {
+            return;
+        }
+
+        SetPlayerThemeMode(1);
+        UpdatePlayerThemeControls();
+        RefreshDirtyState();
+    }
+
+    private bool TryChoosePlayerThemeColor()
+    {
+        var picker = new ThemeColorPickerWindow(_selectedPlayerThemeColor)
+        {
+            Owner = this
+        };
+        if (picker.ShowDialog() != true)
+        {
+            return false;
+        }
+
+        _selectedPlayerThemeColor = Color.FromRgb(
+            picker.SelectedColor.R,
+            picker.SelectedColor.G,
+            picker.SelectedColor.B);
+        return true;
+    }
+
+    private void SetPlayerThemeMode(int selectedIndex)
+    {
+        _isUpdatingThemeControls = true;
+        try
+        {
+            PlayerThemeComboBox.SelectedIndex = selectedIndex;
+        }
+        finally
+        {
+            _isUpdatingThemeControls = false;
+        }
+    }
+
+    private void UpdatePlayerThemeControls()
+    {
+        PlayerThemeColorSwatch.Background = new SolidColorBrush(_selectedPlayerThemeColor);
+        PlayerThemeColorText.Text = AppearanceSettings.FormatPlayerThemeColor(
+            _selectedPlayerThemeColor.R,
+            _selectedPlayerThemeColor.G,
+            _selectedPlayerThemeColor.B);
     }
 
     private void RefreshDirtyState()
@@ -264,7 +368,19 @@ public partial class SettingsWindow : Window
                 EnableNotifications = EnableNotificationsCheckBox.IsChecked == true,
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
-                CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true
+                CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true,
+                BurnLyricsProvider = BurnLyricsProviderComboBox.SelectedIndex == 1
+                    ? BurnLyricsProvider.Lrclib
+                    : BurnLyricsProvider.MusicBrainzAssisted
+            },
+            Appearance = new AppearanceSettings
+            {
+                PlayerThemeColor = PlayerThemeComboBox.SelectedIndex == 1
+                    ? AppearanceSettings.FormatPlayerThemeColor(
+                        _selectedPlayerThemeColor.R,
+                        _selectedPlayerThemeColor.G,
+                        _selectedPlayerThemeColor.B)
+                    : string.Empty
             },
             Social = new SocialSettings
             {
@@ -1111,7 +1227,6 @@ public partial class SettingsWindow : Window
 
         try
         {
-            using var downloadCancellation = new CancellationTokenSource();
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             client.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
 
@@ -1150,41 +1265,67 @@ public partial class SettingsWindow : Window
             }
 
             string? installerPath = null;
-            Exception? downloadError = null;
-            progressWindow = new OperationProgressWindow(
-                owner,
-                "Downloading update",
-                "Downloading update",
-                $"Mystral {latestVersion}",
-                isIndeterminate: false,
-                downloadCancellation.Cancel,
-                iconPath: "Resources/ico.ico");
-            progressWindow.ContentRendered += async (_, _) =>
+            while (installerPath is null)
             {
-                try
+                using var downloadCancellation = new CancellationTokenSource();
+                Exception? downloadError = null;
+                var activeProgressWindow = new OperationProgressWindow(
+                    owner,
+                    "Downloading update",
+                    "Downloading update",
+                    $"Mystral {latestVersion}",
+                    isIndeterminate: false,
+                    downloadCancellation.Cancel,
+                    iconPath: "Resources/ico.ico");
+                progressWindow = activeProgressWindow;
+                activeProgressWindow.ContentRendered += async (_, _) =>
                 {
-                    installerPath = await DownloadInstallerAsync(client, installerUrl, installerName, progressWindow.SetByteProgress, downloadCancellation.Token);
-                }
-                catch (Exception ex)
-                {
-                    downloadError = ex;
-                }
-                finally
-                {
-                    progressWindow.CloseOperationWindow();
-                }
-            };
-            progressWindow.ShowDialog();
-            progressWindow = null;
+                    try
+                    {
+                        installerPath = await DownloadInstallerAsync(
+                            client,
+                            installerUrl,
+                            installerName,
+                            activeProgressWindow.SetByteProgress,
+                            downloadCancellation.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        downloadError = ex;
+                    }
+                    finally
+                    {
+                        activeProgressWindow.CloseOperationWindow();
+                    }
+                };
+                activeProgressWindow.ShowDialog();
+                progressWindow = null;
 
-            if (downloadError is not null)
-            {
-                ExceptionDispatchInfo.Capture(downloadError).Throw();
-            }
+                if (downloadCancellation.IsCancellationRequested)
+                {
+                    DeleteDownloadedInstaller(installerPath);
+                    AppDialogWindow.ShowInformation(
+                        owner,
+                        "Update canceled",
+                        "The update download was canceled successfully. The installer was not launched, and Mystral was not changed.");
+                    return;
+                }
 
-            if (installerPath is null)
-            {
-                return;
+                downloadError ??= activeProgressWindow.CancellationError;
+                if (downloadError is null && installerPath is not null)
+                {
+                    break;
+                }
+
+                downloadError ??= new IOException("The update download ended without producing an installer.");
+                var retry = AppDialogWindow.ShowRetryCancel(
+                    owner,
+                    "Update download failed",
+                    $"Mystral couldn't download version {latestVersion}.\n\nCause: {DescribeUpdateDownloadFailure(downloadError)}\n\nCheck your connection, then choose Retry to try again.");
+                if (retry != MessageBoxResult.Yes)
+                {
+                    return;
+                }
             }
 
             if (sourceButton is not null)
@@ -1242,7 +1383,7 @@ public partial class SettingsWindow : Window
         throw new InvalidOperationException("No win-x64 installer was attached to the latest GitHub release.");
     }
 
-    private static async Task<string> DownloadInstallerAsync(HttpClient client, string url, string assetName, Action<long, long?> progress, CancellationToken cancellationToken)
+    internal static async Task<string> DownloadInstallerAsync(HttpClient client, string url, string assetName, Action<long, long?> progress, CancellationToken cancellationToken)
     {
         var fileName = Path.GetFileName(assetName);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -1276,6 +1417,16 @@ public partial class SettingsWindow : Window
                 progress(downloadedBytes, totalBytes);
             }
 
+            if (downloadedBytes == 0)
+            {
+                throw new IOException("The update server returned an empty installer.");
+            }
+
+            if (totalBytes is > 0 && downloadedBytes != totalBytes.Value)
+            {
+                throw new IOException("The connection closed before the installer finished downloading.");
+            }
+
             progress(downloadedBytes, totalBytes ?? downloadedBytes);
             return path;
         }
@@ -1290,6 +1441,45 @@ public partial class SettingsWindow : Window
             }
 
             throw;
+        }
+    }
+
+    internal static string DescribeUpdateDownloadFailure(Exception exception)
+    {
+        if (exception is TaskCanceledException)
+        {
+            return "The download timed out.";
+        }
+
+        var cause = exception;
+        while (cause.InnerException is not null)
+        {
+            cause = cause.InnerException;
+        }
+
+        if (cause is TaskCanceledException)
+        {
+            return "The download timed out.";
+        }
+
+        return string.IsNullOrWhiteSpace(cause.Message)
+            ? "The connection was interrupted before the download completed."
+            : cause.Message.Trim();
+    }
+
+    private static void DeleteDownloadedInstaller(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(path);
+        }
+        catch
+        {
         }
     }
 

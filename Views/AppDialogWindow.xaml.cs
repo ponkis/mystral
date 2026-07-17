@@ -44,6 +44,45 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Information), ContinueButtons(), "confirmation.wav");
     }
 
+    internal static MessageBoxResult ShowConfirmationWithLink(
+        Window owner,
+        string title,
+        string message,
+        string linkCaption,
+        Uri linkUri)
+    {
+        ArgumentNullException.ThrowIfNull(linkUri);
+
+        var dialog = new AppDialogWindow(
+            title,
+            FromSystemIcon(System.Drawing.SystemIcons.Information),
+            ContinueButtons());
+        dialog.DialogDescriptionText.Inlines.Add(new Run(message));
+        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
+        var link = new Hyperlink(new Run(linkCaption))
+        {
+            NavigateUri = linkUri
+        };
+        link.RequestNavigate += dialog.Hyperlink_RequestNavigate;
+        dialog.DialogDescriptionText.Inlines.Add(link);
+        return ShowDialog(owner, dialog, "confirmation.wav");
+    }
+
+    internal static MessageBoxResult ShowConfirmationWithIcon(
+        Window owner,
+        string title,
+        string message,
+        string iconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadBestFitFrame(iconPath, 32),
+            ContinueButtons(),
+            "confirmation.wav");
+    }
+
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
         return ShowDialog(
@@ -156,6 +195,35 @@ public partial class AppDialogWindow : Window
             "confirmation.wav");
     }
 
+    internal static MessageBoxResult ShowRetryCancel(Window owner, string title, string message)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            FromSystemIcon(System.Drawing.SystemIcons.Warning),
+            [
+                new DialogButtonSpec("Retry", MessageBoxResult.Yes, IsDefault: true, IsCancel: false),
+                new DialogButtonSpec("Cancel", MessageBoxResult.Cancel, IsDefault: false, IsCancel: true)
+            ],
+            "warning.wav");
+    }
+
+    internal static MessageBoxResult ShowWarningWithIcon(
+        Window owner,
+        string title,
+        string message,
+        string iconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadBestFitFrame(iconPath, 32),
+            ContinueButtons(),
+            "warning.wav");
+    }
+
     private static MessageBoxResult ShowDialog(
         Window owner,
         string title,
@@ -201,17 +269,30 @@ public partial class AppDialogWindow : Window
 
     private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {
-        OpenExternalUrl(e.Uri.AbsoluteUri);
-        e.Handled = true;
+        try
+        {
+            OpenExternalUrl(e.Uri.AbsoluteUri);
+        }
+        catch (Exception ex)
+        {
+            ShowWarning(this, "Could not open link", ex.Message);
+        }
+        finally
+        {
+            e.Handled = true;
+        }
     }
 
     private static void OpenExternalUrl(string url)
     {
-        Process.Start(new ProcessStartInfo
+        if (Process.Start(new ProcessStartInfo
         {
             FileName = url,
             UseShellExecute = true
-        });
+        }) is null)
+        {
+            throw new InvalidOperationException("Windows did not open the link.");
+        }
     }
 
     private static void PlayDialogSound(string? fileName)

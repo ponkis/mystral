@@ -488,75 +488,75 @@
                   Panel.ZIndex="100"
                   Margin="0"
                   MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+                <Grid x:Name="ChromeButtons">
+                    <StackPanel HorizontalAlignment="Left"
+                                Orientation="Horizontal">
+                        <Button x:Name="CloseButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="CloseButton_Click"
+                                ToolTip="Close">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.8"
+                                  Data="M 1,1 L 10,10 M 10,1 L 1,10" />
+                        </Button>
+                        <Button x:Name="MinimizeButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="MinimizeButton_Click"
+                                ToolTip="Minimize">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.7"
+                                  Data="M 1,9 L 10,9" />
+                        </Button>
+                    </StackPanel>
 
-                <StackPanel x:Name="ChromeButtons"
-                            Grid.Column="1"
-                            Orientation="Horizontal">
-                    <Button x:Name="CollapseExpandedButton"
-                            Style="{StaticResource ChromeButtonStyle}"
-                            Click="CollapseExpandedButton_Click"
-                            ToolTip="Collapse"
-                            Visibility="Collapsed">
-                        <Path Width="12"
-                              Height="12"
-                              Stretch="Uniform"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.8"
-                              StrokeStartLineCap="Round"
-                              StrokeEndLineCap="Round"
-                              Data="M 1,5 L 5,5 L 5,1 M 5,5 L 1,1 M 11,7 L 7,7 L 7,11 M 7,7 L 11,11" />
-                    </Button>
-                    <Button x:Name="TopmostButton"
-                            Style="{StaticResource ChromeButtonStyle}"
-                            Click="TopmostButton_Click"
-                            ToolTip="Always on top">
-                        <Path Width="11"
-                              Height="11"
-                              Stretch="Uniform"
-                              Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
-                    </Button>
-                    <Button x:Name="FullscreenButton"
-                            Style="{StaticResource ChromeButtonStyle}"
-                            Click="FullscreenButton_Click"
-                            ToolTip="Fullscreen">
-                        <Path x:Name="FullscreenButtonPath"
-                              Width="11"
-                              Height="11"
-                              Stretch="Uniform"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.8"
-                              StrokeStartLineCap="Round"
-                              StrokeEndLineCap="Round"
-                              Data="M 1,6 L 1,1 L 6,1 M 1,1 L 7,7 M 14,9 L 14,14 L 9,14 M 14,14 L 8,8" />
-                    </Button>
-                    <Button x:Name="MinimizeButton"
-                            Style="{StaticResource ChromeButtonStyle}"
-                            Click="MinimizeButton_Click"
-                            ToolTip="Minimize">
-                        <Path Width="11"
-                              Height="11"
-                              Stretch="Uniform"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.7"
-                              Data="M 1,9 L 10,9" />
-                    </Button>
-                    <Button x:Name="CloseButton"
-                            Style="{StaticResource ChromeButtonStyle}"
-                            Click="CloseButton_Click"
-                            ToolTip="Close">
-                        <Path Width="11"
-                              Height="11"
-                              Stretch="Uniform"
-                              Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                              StrokeThickness="1.8"
-                              Data="M 1,1 L 10,10 M 10,1 L 1,10" />
-                    </Button>
-                </StackPanel>
+                    <StackPanel HorizontalAlignment="Right"
+                                Orientation="Horizontal">
+                        <Button x:Name="CollapseExpandedButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="CollapseExpandedButton_Click"
+                                ToolTip="Collapse"
+                                Visibility="Collapsed">
+                            <Path Width="12"
+                                  Height="12"
+                                  Stretch="Uniform"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  Data="M 1,5 L 5,5 L 5,1 M 5,5 L 1,1 M 11,7 L 7,7 L 7,11 M 7,7 L 11,11" />
+                        </Button>
+                        <Button x:Name="TopmostButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="TopmostButton_Click"
+                                ToolTip="Always on top">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
+                        </Button>
+                        <Button x:Name="FullscreenButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="FullscreenButton_Click"
+                                ToolTip="Fullscreen">
+                            <Path x:Name="FullscreenButtonPath"
+                                  Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.8"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  Data="M 1,6 L 1,1 L 6,1 M 1,1 L 7,7 M 14,9 L 14,14 L 9,14 M 14,14 L 8,8" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
             </Grid>
 
             <Border x:Name="MediaPanel"

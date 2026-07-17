@@ -94,31 +94,9 @@
 
                 <!-- Header/Titlebar -->
                 <Grid Grid.Row="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="16" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="24" />
-                    </Grid.ColumnDefinitions>
-                    
-                    <Image Grid.Column="0" 
-                           Width="16" 
-                           Height="16" 
-                           VerticalAlignment="Center"
-                           Source="pack://siteoforigin:,,,/Resources/ico.ico"
-                           RenderOptions.BitmapScalingMode="HighQuality" />
-                           
-                    <TextBlock Grid.Column="1" 
-                               Margin="6,0,0,0" 
-                               VerticalAlignment="Center" 
-                               Text="Mystral" 
-                               Foreground="#FBFCF7" 
-                               FontWeight="SemiBold"
-                               FontSize="11.5"
-                               Effect="{StaticResource TextShadow}" />
-                               
-                    <Button Grid.Column="2" 
-                            Style="{StaticResource ChromeButtonStyle}" 
-                            Click="CloseButton_Click" 
+                    <Button HorizontalAlignment="Left"
+                            Style="{StaticResource ChromeButtonStyle}"
+                            Click="CloseButton_Click"
                             ToolTip="Close">
                         <Path Width="8"
                               Height="8"
@@ -127,6 +105,24 @@
                               StrokeThickness="1.8"
                               Data="M 1,1 L 10,10 M 10,1 L 1,10" />
                     </Button>
+
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                IsHitTestVisible="False">
+                        <Image Width="16"
+                               Height="16"
+                               VerticalAlignment="Center"
+                               Source="pack://siteoforigin:,,,/Resources/ico.ico"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <TextBlock Margin="6,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Text="Mystral"
+                                   Foreground="#FBFCF7"
+                                   FontWeight="SemiBold"
+                                   FontSize="11.5"
+                                   Effect="{StaticResource TextShadow}" />
+                    </StackPanel>
                 </Grid>
 
                 <!-- Main Content Area -->
