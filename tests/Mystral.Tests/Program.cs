@@ -243,6 +243,10 @@ static class AppSettingsServiceTests
                 AlwaysOnTop = false,
                 BurnLyricsProvider = BurnLyricsProvider.Lrclib
             },
+            Appearance = new AppearanceSettings
+            {
+                PlayerThemeColor = "  #a1b2c3  "
+            },
             Social = new SocialSettings
             {
                 IsAccountLinked = true,
@@ -257,6 +261,7 @@ static class AppSettingsServiceTests
         Check.Equal(" pass ", service.Settings.LastFm.Password);
         Check.False(service.Settings.Behavior.AlwaysOnTop);
         Check.Equal(BurnLyricsProvider.Lrclib, service.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal("#A1B2C3", service.Settings.Appearance.PlayerThemeColor);
         Check.True(service.Settings.Social.IsAccountLinked);
         Check.True(service.Settings.Social.AutomaticallyShareBurns);
 
@@ -272,6 +277,7 @@ static class AppSettingsServiceTests
         Check.True(reloaded.Settings.LastFm.IsConfigured);
         Check.False(reloaded.Settings.Behavior.AlwaysOnTop);
         Check.Equal(BurnLyricsProvider.Lrclib, reloaded.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal("#A1B2C3", reloaded.Settings.Appearance.PlayerThemeColor);
         Check.False(reloaded.Settings.Social.IsAccountLinked);
         Check.True(reloaded.Settings.Social.AutomaticallyShareBurns);
 
@@ -279,10 +285,14 @@ static class AppSettingsServiceTests
         Check.False(reloaded.Settings.Social.AutomaticallyShareBurns);
 
         var nullPath = Path.Combine(temp.Path, "null-settings.json");
-        File.WriteAllText(nullPath, """{"LastFm":null,"Behavior":null,"Social":null}""");
+        File.WriteAllText(
+            nullPath,
+            """{"LastFm":null,"Behavior":null,"Appearance":null,"Social":null}""");
         var nullNested = new AppSettingsService(nullPath, new MemorySecureCredentialStore());
         Check.NotNull(nullNested.Settings.LastFm);
         Check.NotNull(nullNested.Settings.Behavior);
+        Check.NotNull(nullNested.Settings.Appearance);
+        Check.Equal(string.Empty, nullNested.Settings.Appearance.PlayerThemeColor);
         Check.NotNull(nullNested.Settings.Social);
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
@@ -291,13 +301,14 @@ static class AppSettingsServiceTests
         var invalidProviderPath = Path.Combine(temp.Path, "invalid-provider-settings.json");
         File.WriteAllText(
             invalidProviderPath,
-            """{"Behavior":{"BurnLyricsProvider":999}}""");
+            """{"Behavior":{"BurnLyricsProvider":999},"Appearance":{"PlayerThemeColor":"#12345678"}}""");
         var invalidProvider = new AppSettingsService(
             invalidProviderPath,
             new MemorySecureCredentialStore());
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             invalidProvider.Settings.Behavior.BurnLyricsProvider);
+        Check.Equal(string.Empty, invalidProvider.Settings.Appearance.PlayerThemeColor);
 
         var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
         var legacyStore = new MemorySecureCredentialStore();
@@ -1514,6 +1525,30 @@ static class ModelTests
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             new BehaviorSettings().BurnLyricsProvider);
+        Check.Equal("#4A5258", AppearanceSettings.DefaultPlayerThemeColor);
+        Check.Equal(string.Empty, new AppearanceSettings().PlayerThemeColor);
+        Check.Equal(
+            "#0A7FFF",
+            AppearanceSettings.FormatPlayerThemeColor(0x0A, 0x7F, 0xFF));
+        Check.Equal(
+            "#A1B2C3",
+            AppearanceSettings.NormalizePlayerThemeColor("  #a1b2c3 "));
+        Check.Equal(
+            string.Empty,
+            AppearanceSettings.NormalizePlayerThemeColor("#A1B2C3FF"));
+        Check.True(AppearanceSettings.TryParsePlayerThemeColor(
+            "#0A7FFF",
+            out var themeRed,
+            out var themeGreen,
+            out var themeBlue));
+        Check.Equal((byte)0x0A, themeRed);
+        Check.Equal((byte)0x7F, themeGreen);
+        Check.Equal((byte)0xFF, themeBlue);
+        Check.False(AppearanceSettings.TryParsePlayerThemeColor(
+            "not-a-color",
+            out _,
+            out _,
+            out _));
         Check.Equal("No active track", MediaSnapshot.Empty.Title);
         Check.False(MediaSnapshot.Empty.HasSession);
         Check.Equal(DateTimeOffset.FromUnixTimeSeconds(0).LocalDateTime.ToString("yyyy-MM-dd"), new ScrobbleRecord { Timestamp = 0 }.FormattedTime[..10]);
@@ -1559,6 +1594,20 @@ static class ArtworkTintTests
         Check.NotNull(tint);
         Check.True(tint!.Value.R > tint.Value.G);
         Check.True(tint.Value.G > tint.Value.B);
+
+        var defaultTint = Color.FromRgb(74, 82, 88);
+        Check.Equal(
+            Color.FromRgb(0x12, 0x34, 0x56),
+            MainWindow.ResolvePlayerTint("#123456", Colors.Red, defaultTint));
+        Check.Equal(
+            Colors.Red,
+            MainWindow.ResolvePlayerTint(string.Empty, Colors.Red, defaultTint));
+        Check.Equal(
+            defaultTint,
+            MainWindow.ResolvePlayerTint("not-a-color", null, defaultTint));
+        Check.False(MainWindow.ShouldShowPlayerArtworkBackdrops("#123456"));
+        Check.True(MainWindow.ShouldShowPlayerArtworkBackdrops(string.Empty));
+        Check.True(MainWindow.ShouldShowPlayerArtworkBackdrops("not-a-color"));
     }
 }
 

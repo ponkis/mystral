@@ -101,6 +101,7 @@
                  SelectionChanged="CategoriesListBox_SelectionChanged">
             <ListBoxItem x:Name="LastFmCategoryItem" Height="28" Content="Last.fm" />
             <ListBoxItem x:Name="BehaviorCategoryItem" Height="28" Content="Behavior" />
+            <ListBoxItem x:Name="AppearanceCategoryItem" Height="28" Content="Appearance" />
             <ListBoxItem x:Name="SocialCategoryItem" Height="28" Content="Social" />
             <ListBoxItem x:Name="HistoryCategoryItem" Height="28" Content="History" />
         </ListBox>
@@ -228,6 +229,57 @@
                                Foreground="#555555"
                                TextWrapping="Wrap"
                                Text="MusicBrainz-assisted uses the matched song metadata for a more precise LRCLIB lyric search. Direct mode searches LRCLIB with the fields in the burn editor." />
+                </StackPanel>
+
+                <StackPanel x:Name="AppearancePanel"
+                            Visibility="Collapsed">
+                    <TextBlock FontWeight="Bold"
+                               Text="Appearance" />
+                    <TextBlock Margin="0,5,0,12"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="Choose how the player is tinted. This setting does not affect the burn editor or track notifications." />
+
+                    <TextBlock Text="Theme" />
+                    <ComboBox x:Name="PlayerThemeComboBox"
+                              Width="245"
+                              Height="23"
+                              Margin="0,4,0,0"
+                              HorizontalAlignment="Left"
+                              SelectionChanged="PlayerThemeComboBox_SelectionChanged">
+                        <ComboBoxItem Content="Automatic (album artwork)" />
+                        <ComboBoxItem Content="Custom color..." />
+                    </ComboBox>
+
+                    <StackPanel Margin="0,12,0,0"
+                                Orientation="Horizontal">
+                        <Border Width="24"
+                                Height="24"
+                                BorderBrush="#7F7F7F"
+                                BorderThickness="1"
+                                CornerRadius="2">
+                            <Border x:Name="PlayerThemeColorSwatch"
+                                    Margin="2"
+                                    Background="#4A5258"
+                                    CornerRadius="1" />
+                        </Border>
+                        <TextBlock x:Name="PlayerThemeColorText"
+                                   Width="112"
+                                   Margin="8,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="#333333"
+                                   Text="#4A5258" />
+                        <Button x:Name="ChoosePlayerThemeColorButton"
+                                Width="104"
+                                Height="23"
+                                Content="Choose color..."
+                                Click="ChoosePlayerThemeColorButton_Click" />
+                    </StackPanel>
+
+                    <TextBlock Margin="0,9,0,0"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="A custom color overrides the tint derived from album artwork and removes artwork from the player's background." />
                 </StackPanel>
 
                 <StackPanel x:Name="SocialPanel"

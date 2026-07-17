@@ -1212,10 +1212,21 @@ public partial class BurningWindow : Window
             messages.Add("LRCLIB did not find lyrics for this track.");
         }
 
+        var message = string.Join(Environment.NewLine, messages);
+        if (lyricsError is null && lyricsResult?.Status == LyricsStatus.Instrumental)
+        {
+            AppDialogWindow.ShowWarningWithIcon(
+                this,
+                "Song data and lyrics not found",
+                message,
+                "Resources/instrumental.ico");
+            return;
+        }
+
         AppDialogWindow.ShowWarning(
             this,
             "Song data and lyrics not found",
-            string.Join(Environment.NewLine, messages));
+            message);
     }
 
     private static string PreferFetched(string? fetched, string fallback)

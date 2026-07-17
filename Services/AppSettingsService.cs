@@ -282,10 +282,13 @@ public sealed class AppSettingsService
     {
         settings.LastFm ??= new LastFmCredentials();
         settings.Behavior ??= new BehaviorSettings();
+        settings.Appearance ??= new AppearanceSettings();
         settings.Social ??= new SocialSettings();
         settings.LastFm.ApiKey = settings.LastFm.ApiKey.Trim();
         settings.LastFm.ApiSecret = settings.LastFm.ApiSecret.Trim();
         settings.LastFm.Username = settings.LastFm.Username.Trim();
+        settings.Appearance.PlayerThemeColor = AppearanceSettings.NormalizePlayerThemeColor(
+            settings.Appearance.PlayerThemeColor);
         if (!Enum.IsDefined(settings.Behavior.BurnLyricsProvider))
         {
             settings.Behavior.BurnLyricsProvider = BurnLyricsProvider.MusicBrainzAssisted;

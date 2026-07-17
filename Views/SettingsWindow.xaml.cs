@@ -16,6 +16,7 @@ namespace Mystral.Views;
 
 public partial class SettingsWindow : Window
 {
+    private static readonly Color DefaultPlayerThemeColorValue = Color.FromRgb(0x4A, 0x52, 0x58);
     private const int MaximumSocialAvatarDownloadBytes = 5 * 1024 * 1024;
     private const int MaximumSocialAvatarSourceDimension = 8192;
     private const long MaximumSocialAvatarSourcePixels = 32L * 1024 * 1024;
@@ -25,6 +26,7 @@ public partial class SettingsWindow : Window
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
     private bool _isLoadingSettings;
+    private bool _isUpdatingThemeControls;
     private bool _hasUnsavedChanges;
     private bool _isClosingConfirmed;
     private bool _isSaving;
@@ -41,6 +43,7 @@ public partial class SettingsWindow : Window
     private GlobeProfile? _socialProfile;
     private ImageSource? _socialProfileImage;
     private int _socialAvatarGeneration;
+    private Color _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
 
     internal event EventHandler? CloseRequestCanceled;
 
@@ -108,6 +111,21 @@ public partial class SettingsWindow : Window
         BurnLyricsProviderComboBox.SelectedIndex = settings.Behavior.BurnLyricsProvider == BurnLyricsProvider.Lrclib
             ? 1
             : 0;
+        if (AppearanceSettings.TryParsePlayerThemeColor(
+                settings.Appearance.PlayerThemeColor,
+                out var themeRed,
+                out var themeGreen,
+                out var themeBlue))
+        {
+            _selectedPlayerThemeColor = Color.FromRgb(themeRed, themeGreen, themeBlue);
+            PlayerThemeComboBox.SelectedIndex = 1;
+        }
+        else
+        {
+            _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+            PlayerThemeComboBox.SelectedIndex = 0;
+        }
+        UpdatePlayerThemeControls();
         var globeState = _globeConnectionService.State;
         _isSocialAccountLinked = globeState.IsLinked;
         _isSocialSharingAvailable = globeState.CanShare;
@@ -132,6 +150,7 @@ public partial class SettingsWindow : Window
         
         LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        AppearancePanel.Visibility = selectedItem == AppearanceCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         SocialPanel.Visibility = selectedItem == SocialCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
 
@@ -144,6 +163,11 @@ public partial class SettingsWindow : Window
         {
             SettingsTitleText.Text = "Behavior";
             SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
+        }
+        else if (selectedItem == AppearanceCategoryItem)
+        {
+            SettingsTitleText.Text = "Appearance";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/appearance.ico", 16);
         }
         else if (selectedItem == SocialCategoryItem)
         {
@@ -165,6 +189,84 @@ public partial class SettingsWindow : Window
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
         RefreshDirtyState();
+    }
+
+    private void PlayerThemeComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isLoadingSettings || _isUpdatingThemeControls)
+        {
+            return;
+        }
+
+        if (PlayerThemeComboBox.SelectedIndex == 1)
+        {
+            if (!TryChoosePlayerThemeColor())
+            {
+                _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+                SetPlayerThemeMode(0);
+            }
+        }
+        else
+        {
+            _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+        }
+
+        UpdatePlayerThemeControls();
+        RefreshDirtyState();
+    }
+
+    private void ChoosePlayerThemeColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryChoosePlayerThemeColor())
+        {
+            return;
+        }
+
+        SetPlayerThemeMode(1);
+        UpdatePlayerThemeControls();
+        RefreshDirtyState();
+    }
+
+    private bool TryChoosePlayerThemeColor()
+    {
+        var picker = new ThemeColorPickerWindow(_selectedPlayerThemeColor)
+        {
+            Owner = this
+        };
+        if (picker.ShowDialog() != true)
+        {
+            return false;
+        }
+
+        _selectedPlayerThemeColor = Color.FromRgb(
+            picker.SelectedColor.R,
+            picker.SelectedColor.G,
+            picker.SelectedColor.B);
+        return true;
+    }
+
+    private void SetPlayerThemeMode(int selectedIndex)
+    {
+        _isUpdatingThemeControls = true;
+        try
+        {
+            PlayerThemeComboBox.SelectedIndex = selectedIndex;
+        }
+        finally
+        {
+            _isUpdatingThemeControls = false;
+        }
+    }
+
+    private void UpdatePlayerThemeControls()
+    {
+        PlayerThemeColorSwatch.Background = new SolidColorBrush(_selectedPlayerThemeColor);
+        PlayerThemeColorText.Text = AppearanceSettings.FormatPlayerThemeColor(
+            _selectedPlayerThemeColor.R,
+            _selectedPlayerThemeColor.G,
+            _selectedPlayerThemeColor.B);
     }
 
     private void RefreshDirtyState()
@@ -270,6 +372,15 @@ public partial class SettingsWindow : Window
                 BurnLyricsProvider = BurnLyricsProviderComboBox.SelectedIndex == 1
                     ? BurnLyricsProvider.Lrclib
                     : BurnLyricsProvider.MusicBrainzAssisted
+            },
+            Appearance = new AppearanceSettings
+            {
+                PlayerThemeColor = PlayerThemeComboBox.SelectedIndex == 1
+                    ? AppearanceSettings.FormatPlayerThemeColor(
+                        _selectedPlayerThemeColor.R,
+                        _selectedPlayerThemeColor.G,
+                        _selectedPlayerThemeColor.B)
+                    : string.Empty
             },
             Social = new SocialSettings
             {

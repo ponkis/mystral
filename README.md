@@ -1,6 +1,6 @@
 # Mystral
 
-Mystral is a Windows desktop music companion built with WPF. It reads the active Windows media session, shows playback controls, lyrics, Last.fm links, optional Last.fm scrobbling, and a tray menu for quick actions.
+Mystral is a Windows desktop music companion built with WPF. It reads the active Windows media session, shows playback controls, lyrics, Last.fm links, optional Last.fm scrobbling, customizable player themes, and a tray menu for quick actions.
 
 ## Requirements
 
@@ -44,6 +44,13 @@ Under `Behavior`, choose how the burn editor looks up lyrics:
   currently shown in the burn editor.
 
 Neither burn-lyrics mode requires an API key.
+
+Under `Appearance`, the player theme can follow each track's artwork automatically
+or use a color chosen from the theme color picker. A custom color becomes the
+fixed tint for the main player and removes its cover-derived background artwork;
+the burn editor and track notifications continue using their own automatic
+artwork tint. Returning the theme to automatic restores the artwork tint and
+backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on
@@ -92,7 +99,7 @@ The test suite covers the vital headless app logic:
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
 - LRCLIB exact lookup, fallback search ranking, parsing, and caching
-- settings persistence, burn-lyrics provider defaults, and corrupt JSON fallback
+- settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - model defaults and artwork tint edge cases
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
@@ -274,3 +281,5 @@ artifacts\installer\Mystral-<version>-win-x64-setup.exe
 ## Runtime Assets
 
 All runtime assets are inside this project under `Resources`.
+Licenses for the Appearance color-picker dependencies are listed in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
