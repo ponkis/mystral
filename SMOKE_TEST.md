@@ -26,6 +26,8 @@ For packaged development builds:
 
 ## Window And Tray
 
+- Confirm each custom title bar places its available Close and Minimize controls on the left, while main-window actions such as Always on top and Fullscreen remain on the right.
+- Confirm the Mystral icon and name are visually centered in custom title bars where they are shown, including the burn editor and track notification.
 - Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
 - Toggle always-on-top and confirm the setting sticks after restart.
 - Minimize the app and confirm restore works.
@@ -76,8 +78,9 @@ For packaged development builds:
 - Add or edit plain lyrics and timestamped LRC lyrics such as `[00:12.34]First line`, save the burned copy, reopen that copy, and confirm both lyric forms round-trip.
 - Clear both lyric fields, save another copy, reopen it, and confirm the lyrics were removed while unrelated metadata remains intact.
 - Enter synchronized text without a valid LRC timestamp and confirm Save reports a readable validation error instead of creating the burned copy.
-- With `MusicBrainz-assisted (default)` selected, click `Fetch song + lyrics` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
-- With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song + lyrics`, and confirm lyrics are searched using the values currently in the editor.
+- With `MusicBrainz-assisted (default)` selected, click `Fetch song data` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
+- With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song data`, and confirm lyrics are searched using the values currently in the editor.
+- While a fetch is running, confirm the progress window uses the search icon and concise song-search wording; when cover or disc artwork is not found, confirm the notice uses the artwork icon.
 - If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
 - Confirm the original audio bytes and tags are unchanged after every burn.
 

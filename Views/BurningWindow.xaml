@@ -204,27 +204,8 @@
                           Grid.Row="0"
                           Background="#12000000"
                           MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Image Width="16"
-                               Height="16"
-                               Margin="10,0,0,0"
-                               VerticalAlignment="Center"
-                               Source="pack://siteoforigin:,,,/Resources/ico.ico"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
-                        <TextBlock Grid.Column="1"
-                                   Margin="7,0,0,0"
-                                   VerticalAlignment="Center"
-                                   FontSize="12"
-                                   FontWeight="SemiBold"
-                                   Foreground="#FCFEFC"
-                                   Effect="{StaticResource TextShadow}"
-                                   Text="Mystral" />
                         <Button x:Name="CloseButton"
-                                Grid.Column="2"
+                                HorizontalAlignment="Left"
                                 Style="{StaticResource ChromeButtonStyle}"
                                 Click="CloseButton_Click"
                                 ToolTip="Close">
@@ -235,6 +216,24 @@
                                   StrokeThickness="1.8"
                                   Data="M 1,1 L 10,10 M 10,1 L 1,10" />
                         </Button>
+
+                        <StackPanel HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    IsHitTestVisible="False">
+                            <Image Width="16"
+                                   Height="16"
+                                   VerticalAlignment="Center"
+                                   Source="pack://siteoforigin:,,,/Resources/ico.ico"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <TextBlock Margin="7,0,0,0"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       Foreground="#FCFEFC"
+                                       Effect="{StaticResource TextShadow}"
+                                       Text="Mystral" />
+                        </StackPanel>
                     </Grid>
 
                     <Border Grid.Row="1"
@@ -551,7 +550,7 @@
                                         MinWidth="118"
                                         Height="23"
                                         Click="FetchButton_Click"
-                                        Content="Fetch song + lyrics" />
+                                        Content="Fetch song data" />
                             </StackPanel>
 
                             <TextBlock x:Name="DirtyStatusText"

@@ -45,6 +45,10 @@ Under `Behavior`, choose how the burn editor looks up lyrics:
 
 Neither burn-lyrics mode requires an API key.
 
+Mystral's custom title bars place the available Close and Minimize controls on
+the left, keep window-specific actions such as Always on top and Fullscreen on
+the right, and center the app icon and name where that identity is shown.
+
 ## Burn Editor
 
 The burn editor always writes a separate copy of the selected audio file. It can
@@ -53,7 +57,7 @@ in LRC format; the source audio is never modified. Synchronized lyrics use a
 native synchronized tag when the file's tagging format supports one and fall
 back to portable timestamped LRC text otherwise.
 
-`Fetch song + lyrics` retrieves metadata and artwork through MusicBrainz and the
+`Fetch song data` retrieves metadata and artwork through MusicBrainz and the
 Cover Art Archive, and retrieves plain or synchronized lyrics through LRCLIB.
 Fetched lyrics remain editable before the copy is saved.
 

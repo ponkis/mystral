@@ -648,11 +648,12 @@ public partial class BurningWindow : Window
         var wasCanceled = false;
         var progressWindow = new OperationProgressWindow(
             this,
-            "Fetching song and lyrics",
-            "Fetching song data and lyrics",
-            "Searching MusicBrainz, Cover Art Archive, and LRCLIB…",
+            "Fetch song data",
+            "Fetching song data",
+            "Searching for a matching song…",
             isIndeterminate: true,
             _operationCts.Cancel,
+            iconPath: "Resources/search.ico",
             progressBrush: Brushes.LightSeaGreen);
         progressWindow.ContentRendered += async (_, _) =>
         {
@@ -805,10 +806,11 @@ public partial class BurningWindow : Window
                 }
                 else
                 {
-                    AppDialogWindow.ShowWarning(
+                    AppDialogWindow.ShowWarningWithIcon(
                         this,
                         "Cover art not found",
-                        "Cover Art Archive has no cover art for this release. You can add cover art yourself from the Artwork tab.");
+                        "Cover Art Archive has no cover art for this release. You can add cover art yourself from the Artwork tab.",
+                        "Resources/artwork.ico");
                 }
             }
 
@@ -823,10 +825,11 @@ public partial class BurningWindow : Window
                 }
                 else
                 {
-                    AppDialogWindow.ShowWarning(
+                    AppDialogWindow.ShowWarningWithIcon(
                         this,
                         "CD artwork not found",
-                        "MusicBrainz has no disc or medium artwork for this release. You can upload CD artwork yourself from the Artwork tab; it is optional.");
+                        "MusicBrainz has no disc or medium artwork for this release. You can upload CD artwork yourself from the Artwork tab; it is optional.",
+                        "Resources/artwork.ico");
                 }
             }
         }

@@ -170,6 +170,21 @@ public partial class AppDialogWindow : Window
             "warning.wav");
     }
 
+    internal static MessageBoxResult ShowWarningWithIcon(
+        Window owner,
+        string title,
+        string message,
+        string iconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadBestFitFrame(iconPath, 32),
+            ContinueButtons(),
+            "warning.wav");
+    }
+
     private static MessageBoxResult ShowDialog(
         Window owner,
         string title,
