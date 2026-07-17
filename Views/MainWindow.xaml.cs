@@ -275,7 +275,7 @@ public partial class MainWindow : Window
                         this,
                         "Update installed",
                         message,
-                        "What's new",
+                        "What's new?",
                         compareUri);
                 }
             }
