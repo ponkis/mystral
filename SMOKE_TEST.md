@@ -41,7 +41,9 @@ For packaged development builds:
 - Start playback in Spotify, a browser, or another Windows media-session app.
 - Confirm title, artist/description, progress, duration, play state, and artwork update.
 - Test play/pause, next, previous, and seek controls.
+- In compact, expanded, and fullscreen playback controls, confirm Lyrics appears before More.
 - In compact, expanded, lyrics, and fullscreen modes, click an empty point on the progress bar and drag from the track (not only the thumb); confirm every progress bar follows the same target.
+- Confirm the hand cursor covers the full progress and volume bar surfaces, not only their draggable thumbs.
 - Hover a progress bar and confirm its tooltip says `Seek`; click or drag and confirm it shows the target time, stays visible briefly after release, and then returns to `Seek`.
 - While dragging a progress bar, switch away from Mystral before releasing; return and confirm the timeline is not stuck in seek-preview mode.
 - Seek forward and backward in Spotify and Chrome and confirm the chosen timestamp does not snap back while Windows delivers the old position.

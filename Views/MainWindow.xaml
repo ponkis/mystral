@@ -172,11 +172,12 @@
 
         <Style x:Key="GlassSliderStyle" TargetType="Slider">
             <Setter Property="Height" Value="18" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
-                        <Grid>
+                        <Grid Background="Transparent">
                             <Border Height="2"
                                     Margin="0,0,8,0"
                                     CornerRadius="1"
@@ -272,8 +273,6 @@
             <Setter Property="Value" Value="0" />
             <Setter Property="IsMoveToPointEnabled" Value="True" />
             <EventSetter Event="ValueChanged" Handler="ProgressSlider_ValueChanged" />
-            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ProgressSlider_PreviewMouseLeftButtonDown" />
-            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ProgressSlider_PreviewMouseLeftButtonUp" />
         </Style>
 
         <Style x:Key="VolumeSliderStyle" TargetType="Slider" BasedOn="{StaticResource GlassSliderStyle}">
@@ -785,22 +784,22 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     Margin="0,0,-2,0">
-                            <Button x:Name="CompactInfoButton"
-                                    Style="{StaticResource InfoButtonStyle}"
-                                    Width="28"
-                                    Height="28"
-                                    Margin="0,0,3,0"
-                                    Visibility="Collapsed"
-                                    Click="InfoButton_Click"
-                                    ToolTip="More" />
                             <Button x:Name="CompactLyricsButton"
                                     Style="{StaticResource LyricsButtonStyle}"
                                     Width="28"
                                     Height="28"
-                                    Margin="0"
+                                    Margin="0,0,3,0"
                                     Visibility="Collapsed"
                                     Click="LyricsButton_Click"
                                     ToolTip="Lyrics" />
+                            <Button x:Name="CompactInfoButton"
+                                    Style="{StaticResource InfoButtonStyle}"
+                                    Width="28"
+                                    Height="28"
+                                    Margin="0"
+                                    Visibility="Collapsed"
+                                    Click="InfoButton_Click"
+                                    ToolTip="More" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -982,22 +981,22 @@
                                             Orientation="Horizontal"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Center">
-                                    <Button x:Name="ExpandedInfoButton"
-                                            Style="{StaticResource InfoButtonStyle}"
-                                            Width="34"
-                                            Height="34"
-                                            Margin="0,0,3,0"
-                                            Visibility="Collapsed"
-                                            Click="InfoButton_Click"
-                                            ToolTip="More" />
                                     <Button x:Name="ExpandedLyricsButton"
                                             Style="{StaticResource LyricsButtonStyle}"
                                             Width="34"
                                             Height="34"
-                                            Margin="0"
+                                            Margin="0,0,3,0"
                                             Visibility="Collapsed"
                                             Click="LyricsButton_Click"
                                             ToolTip="Lyrics" />
+                                    <Button x:Name="ExpandedInfoButton"
+                                            Style="{StaticResource InfoButtonStyle}"
+                                            Width="34"
+                                            Height="34"
+                                            Margin="0"
+                                            Visibility="Collapsed"
+                                            Click="InfoButton_Click"
+                                            ToolTip="More" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -1573,20 +1572,20 @@
                                         <StackPanel Orientation="Horizontal"
                                                     VerticalAlignment="Center"
                                                     HorizontalAlignment="Right">
-                                            <Button x:Name="FullscreenInfoButton"
-                                                    Style="{StaticResource InfoButtonStyle}"
-                                                    Width="32"
-                                                    Height="32"
-                                                    Margin="0,0,6,0"
-                                                    Click="InfoButton_Click"
-                                                    ToolTip="More" />
                                             <Button x:Name="FullscreenLyricsToggle"
                                                     Style="{StaticResource LyricsButtonStyle}"
                                                     Width="32"
                                                     Height="32"
-                                                    Margin="0"
+                                                    Margin="0,0,6,0"
                                                     Click="FullscreenLyricsToggle_Click"
                                                     ToolTip="Lyrics" />
+                                            <Button x:Name="FullscreenInfoButton"
+                                                    Style="{StaticResource InfoButtonStyle}"
+                                                    Width="32"
+                                                    Height="32"
+                                                    Margin="0"
+                                                    Click="InfoButton_Click"
+                                                    ToolTip="More" />
                                         </StackPanel>
                                     </Grid>
                                 </Grid>

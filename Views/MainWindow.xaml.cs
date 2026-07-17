@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private string _trayNowPlayingTrackName = string.Empty;
     private ScrobblePlaybackState? _scrobbleState;
     private bool _isSeeking;
+    private bool _isProgressThumbDragging;
     private bool _isExpanded;
     private bool _isLyricsMode;
     private bool _restoreExpandedAfterLyrics;
@@ -303,6 +304,14 @@ public partial class MainWindow : Window
             slider.ToolTip = CreateSeekToolTip(slider);
             ToolTipService.SetInitialShowDelay(slider, 250);
             ToolTipService.SetShowDuration(slider, 60000);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonDownEvent,
+                new MouseButtonEventHandler(ProgressSlider_PreviewMouseLeftButtonDown),
+                handledEventsToo: true);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonUpEvent,
+                new MouseButtonEventHandler(ProgressSlider_PreviewMouseLeftButtonUp),
+                handledEventsToo: true);
             slider.MouseMove += ProgressSlider_MouseMove;
             slider.MouseLeave += ProgressSlider_MouseLeave;
             slider.LostMouseCapture += ProgressSlider_LostMouseCapture;
@@ -342,7 +351,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.LeftButton == MouseButtonState.Pressed)
+        if (e.LeftButton == MouseButtonState.Pressed && !_isProgressThumbDragging)
         {
             SetProgressSliderValueFromPointer(slider, e);
         }
@@ -3477,19 +3486,15 @@ public partial class MainWindow : Window
         _seekToolTipHideTimer.Stop();
         _isSeeking = true;
         _activeProgressSlider = slider;
-        SetProgressSliderValueFromPointer(slider, e);
-        ShowSeekToolTip(slider, includePosition: true);
-
-        Dispatcher.BeginInvoke(() =>
+        _isProgressThumbDragging = IsPointerOverSliderThumb(e, slider);
+        if (!_isProgressThumbDragging)
         {
-            if (_isSeeking
-                && ReferenceEquals(_activeProgressSlider, slider)
-                && Mouse.LeftButton == MouseButtonState.Pressed
-                && Mouse.Captured is null)
-            {
-                slider.CaptureMouse();
-            }
-        }, DispatcherPriority.Input);
+            SetProgressSliderValueFromPointer(slider, e);
+            slider.CaptureMouse();
+            e.Handled = true;
+        }
+
+        ShowSeekToolTip(slider, includePosition: true);
     }
 
     private async void ProgressSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -3497,6 +3502,12 @@ public partial class MainWindow : Window
         if (sender is not Slider slider || IsControlDisabled(slider))
         {
             _isSeeking = false;
+            _isProgressThumbDragging = false;
+            if (sender is Slider disabledSlider)
+            {
+                ReleaseProgressMouseCapture(disabledSlider);
+            }
+
             e.Handled = true;
             HideSeekToolTip();
             UpdateTimelineUi();
@@ -3508,7 +3519,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        SetProgressSliderValueFromPointer(slider, e);
+        var wasThumbDrag = _isProgressThumbDragging;
+        _isProgressThumbDragging = false;
+        if (!wasThumbDrag)
+        {
+            SetProgressSliderValueFromPointer(slider, e);
+            e.Handled = true;
+        }
+
         await CompleteSeekAsync(slider);
     }
 
@@ -3567,6 +3585,27 @@ public partial class MainWindow : Window
         }
     }
 
+    private static bool IsPointerOverSliderThumb(MouseButtonEventArgs e, Slider slider)
+    {
+        var current = e.OriginalSource as DependencyObject;
+        while (current is Visual or Visual3D)
+        {
+            if (current is System.Windows.Controls.Primitives.Thumb)
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(current, slider))
+            {
+                break;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
     private async Task CompleteSeekAsync(Slider slider)
     {
         if (!_isSeeking || !ReferenceEquals(_activeProgressSlider, slider))
@@ -3583,6 +3622,12 @@ public partial class MainWindow : Window
             Snapshot.IsPlaying,
             DateTimeOffset.Now);
         _isSeeking = false;
+        _isProgressThumbDragging = false;
+        if (slider.IsMouseCaptured)
+        {
+            slider.ReleaseMouseCapture();
+        }
+
         ShowSeekToolTip(slider, includePosition: true);
         BeginSeekToolTipLinger();
         UpdateTimelineUi();
@@ -3609,8 +3654,26 @@ public partial class MainWindow : Window
     private void CancelSeekInteraction()
     {
         _isSeeking = false;
+        _isProgressThumbDragging = false;
+        if (_activeProgressSlider is { } slider)
+        {
+            ReleaseProgressMouseCapture(slider);
+        }
+
         HideSeekToolTip();
         UpdateTimelineUi();
+    }
+
+    private static void ReleaseProgressMouseCapture(Slider slider)
+    {
+        if (slider.IsMouseCaptured)
+        {
+            slider.ReleaseMouseCapture();
+        }
+        else if (slider.IsMouseCaptureWithin)
+        {
+            Mouse.Capture(null);
+        }
     }
 
     private void SetTransportEnabled(bool isEnabled)

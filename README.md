@@ -60,7 +60,8 @@ fullscreen, Close is hidden and the Fullscreen action becomes the exit control.
 The playback timeline uses the media session's own update timestamp so Spotify
 and browser sessions do not rewind when Windows repeats a stale position. Each
 progress bar supports click-to-jump and drag seeking; hovering labels it `Seek`,
-while an active seek shows the target time briefly after release.
+while an active seek shows the target time briefly after release. Progress and
+volume bars use their full surface as a hand-cursor interaction target.
 
 ## Burn Editor
 
