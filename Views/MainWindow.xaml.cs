@@ -2770,7 +2770,18 @@ public partial class MainWindow : Window
     {
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
         var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
-        if (activeIndex < 0 || activeIndex >= blocks.Count || scrollViewer.ViewportHeight <= 1)
+        if (scrollViewer.ViewportHeight <= 1)
+        {
+            return;
+        }
+
+        if (activeIndex < 0)
+        {
+            AnimateLyricsScrollTo(0, isFullscreen);
+            return;
+        }
+
+        if (activeIndex >= blocks.Count)
         {
             return;
         }
@@ -3882,7 +3893,6 @@ public partial class MainWindow : Window
         block.Background = Brushes.Transparent;
         block.MouseLeftButtonDown += SyncedLyricLine_MouseLeftButtonDown;
         block.MouseLeftButtonUp += SyncedLyricLine_MouseLeftButtonUp;
-        ToolTipService.SetInitialShowDelay(block, 250);
         UpdateSyncedLyricBlockSeekability(block, Snapshot);
     }
 
@@ -3899,9 +3909,6 @@ public partial class MainWindow : Window
         var canSeek = block.Tag is TimeSpan timestamp
             && CanSeekToSyncedLyric(snapshot, timestamp);
         block.Cursor = canSeek ? Cursors.Hand : Cursors.Arrow;
-        block.ToolTip = canSeek && block.Tag is TimeSpan seekTimestamp
-            ? $"Seek to {FormatTime(seekTimestamp)}"
-            : null;
     }
 
     private static bool CanSeekToSyncedLyric(MediaSnapshot snapshot, TimeSpan timestamp)
