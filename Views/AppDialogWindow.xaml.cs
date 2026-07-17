@@ -44,6 +44,21 @@ public partial class AppDialogWindow : Window
         return ShowDialog(owner, title, message, FromSystemIcon(System.Drawing.SystemIcons.Information), ContinueButtons(), "confirmation.wav");
     }
 
+    internal static MessageBoxResult ShowConfirmationWithIcon(
+        Window owner,
+        string title,
+        string message,
+        string iconPath)
+    {
+        return ShowDialog(
+            owner,
+            title,
+            message,
+            IconImageSource.LoadBestFitFrame(iconPath, 32),
+            ContinueButtons(),
+            "confirmation.wav");
+    }
+
     public static MessageBoxResult ShowWarning(Window owner, string title, string message)
     {
         return ShowDialog(

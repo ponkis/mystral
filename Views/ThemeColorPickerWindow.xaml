@@ -15,6 +15,14 @@
         FontFamily="Segoe UI"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -24,7 +32,7 @@
 
         <TextBlock Foreground="#333333"
                    TextWrapping="Wrap"
-                   Text="Choose the fixed color used to tint the player." />
+                   Text="Choose a color." />
 
         <picker:StandardColorPicker x:Name="ThemeColorPicker"
                                     Grid.Row="1"

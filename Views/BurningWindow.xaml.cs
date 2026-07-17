@@ -774,7 +774,18 @@ public partial class BurningWindow : Window
                 (true, false) => "Song data was fetched from MusicBrainz. LRCLIB did not return lyrics.",
                 _ => "Lyrics were fetched from LRCLIB. MusicBrainz did not return a confident metadata match."
             };
-            AppDialogWindow.ShowConfirmation(this, "Fetch complete", confirmationMessage);
+            if (lyricsResult?.Status == LyricsStatus.Instrumental)
+            {
+                AppDialogWindow.ShowConfirmationWithIcon(
+                    this,
+                    "Fetch complete",
+                    confirmationMessage,
+                    "Resources/instrumental.ico");
+            }
+            else
+            {
+                AppDialogWindow.ShowConfirmation(this, "Fetch complete", confirmationMessage);
+            }
 
             if (metadataError is not null)
             {

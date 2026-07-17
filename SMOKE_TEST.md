@@ -88,7 +88,7 @@ For packaged development builds:
 - With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song data`, and confirm lyrics are searched using the values currently in the editor.
 - Fetch a song with lyrics, then fetch a song that has no lyrics; confirm both lyric editors clear instead of retaining the previous song's text.
 - While a fetch is running, confirm the progress window uses the search icon and concise song-search wording; when cover or disc artwork is not found, confirm the notice uses the artwork icon.
-- Fetch a track that LRCLIB marks as instrumental while MusicBrainz has no confident match; confirm the warning popup uses the instrumental icon.
+- Fetch tracks that LRCLIB marks as instrumental both with and without a confident MusicBrainz match; confirm the completion or warning popup uses the instrumental icon.
 - If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
 - Confirm the original audio bytes and tags are unchanged after every burn.
 
