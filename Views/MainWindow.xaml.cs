@@ -1633,7 +1633,14 @@ public partial class MainWindow : Window
                 };
             }
 
+            var didRestartPlayback = _timelineStabilizer.LastObservationWasPlaybackRestart;
+
             Snapshot = snapshot;
+            if (didRestartPlayback)
+            {
+                ResetLyricsForPlaybackRestart();
+            }
+
             ApplySnapshot(snapshot);
         });
     }
@@ -1738,6 +1745,7 @@ public partial class MainWindow : Window
             SetControlDisabledState(slider, canSeek);
             slider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
         }
+        UpdateSyncedLyricLineSeekability(snapshot);
 
         CompactProgressRow.Visibility = snapshot.HasSession ? Visibility.Visible : Visibility.Collapsed;
         CompactBurnSlot.Visibility = snapshot.HasSession ? Visibility.Collapsed : Visibility.Visible;
@@ -2017,6 +2025,36 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ResetLyricsForPlaybackRestart()
+    {
+        _lastLyricsPosition = TimeSpan.Zero;
+        _activeLyricIndex = -1;
+        _activeFullscreenLyricIndex = -1;
+        _activeLyricWaitIndicatorIndex = -1;
+        _activeFullscreenLyricWaitIndicatorIndex = -1;
+        _isUserBrowsingLyrics = false;
+        _isUserBrowsingFullscreenLyrics = false;
+        _fullscreenLyricsInactivityTimer.Stop();
+        ScrollLyricsToTop();
+
+        if (Lyrics.Status == LyricsStatus.Synced)
+        {
+            ApplyLyricBlockVisualState(-1);
+            ApplyLyricBlockVisualState(-1, isFullscreen: true);
+            UpdateLyricWaitIndicators(TimeSpan.Zero);
+            UpdateFullscreenLyricWaitIndicators(TimeSpan.Zero);
+        }
+    }
+
+    private void ScrollLyricsToTop()
+    {
+        StopLyricsScrollAnimation();
+        _lyricsScrollTarget = 0;
+        _fullscreenLyricsScrollTarget = 0;
+        LyricsScrollViewer.ScrollToVerticalOffset(0);
+        FullscreenLyricsScrollViewer.ScrollToVerticalOffset(0);
+    }
+
     private static void SetSliderValueIfChanged(Slider slider, double value)
     {
         if (Math.Abs(slider.Value - value) > 0.001)
@@ -2239,7 +2277,7 @@ public partial class MainWindow : Window
         FullscreenLyricsLoadingIcon.Source = _loadingIconFrames[_loadingIconFrameIndex];
     }
 
-    private static void AddLyricBlock(
+    private static TextBlock AddLyricBlock(
         Panel panel,
         ICollection<TextBlock> blocks,
         string text,
@@ -2263,6 +2301,7 @@ public partial class MainWindow : Window
 
         blocks.Add(block);
         panel.Children.Add(block);
+        return block;
     }
 
     private void AddLyricWaitIndicatorIfNeeded(
@@ -3731,6 +3770,23 @@ public partial class MainWindow : Window
         }
 
         var target = TimeSpan.FromSeconds(slider.Value);
+        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+        BeginSliderToolTipLinger(interaction);
+        await SeekToPositionAsync(target);
+    }
+
+    private async Task SeekToPositionAsync(TimeSpan target)
+    {
+        if (!Snapshot.HasSession || !Snapshot.CanSeek || Snapshot.Duration <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        target = TimeSpan.FromSeconds(Math.Clamp(
+            target.TotalSeconds,
+            0,
+            Snapshot.Duration.TotalSeconds));
         var requestGeneration = ++_seekRequestGeneration;
         _timelineStabilizer.BeginSeek(
             CreateTimelineMediaKey(Snapshot),
@@ -3738,9 +3794,7 @@ public partial class MainWindow : Window
             Snapshot.Duration,
             Snapshot.IsPlaying,
             DateTimeOffset.Now);
-        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
-        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
-        BeginSliderToolTipLinger(interaction);
+        PrepareLyricsForExplicitSeek(target);
         UpdateTimelineUi();
 
         var accepted = false;
@@ -3760,6 +3814,24 @@ public partial class MainWindow : Window
 
         _timelineStabilizer.RejectPendingSeek(DateTimeOffset.Now);
         UpdateTimelineUi();
+    }
+
+    private void PrepareLyricsForExplicitSeek(TimeSpan target)
+    {
+        _lastLyricsPosition = target;
+        _isUserBrowsingLyrics = false;
+        _isUserBrowsingFullscreenLyrics = false;
+        _fullscreenLyricsInactivityTimer.Stop();
+        StopLyricsScrollAnimation();
+        if (Lyrics.Status == LyricsStatus.Synced)
+        {
+            _activeLyricIndex = -1;
+            _activeFullscreenLyricIndex = -1;
+            _activeLyricWaitIndicatorIndex = -1;
+            _activeFullscreenLyricWaitIndicatorIndex = -1;
+            ApplyLyricBlockVisualState(-1);
+            ApplyLyricBlockVisualState(-1, isFullscreen: true);
+        }
     }
 
     private void SetTransportEnabled(bool isEnabled)
@@ -3792,7 +3864,7 @@ public partial class MainWindow : Window
             var line = Lyrics.SyncedLines[i];
             var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
             AddLyricWaitIndicatorIfNeeded(i, previousLineTime, line.Time, panel, waitIndicators, isFullscreen);
-            AddLyricBlock(
+            var block = AddLyricBlock(
                 panel,
                 blocks,
                 line.Text,
@@ -3800,7 +3872,66 @@ public partial class MainWindow : Window
                 isFullscreen ? 0.35 : 0.30,
                 isFullscreen ? new Thickness(0, 22, 0, 22) : new Thickness(0, 13, 0, 13),
                 isFullscreen ? Color.FromRgb(150, 158, 158) : Color.FromRgb(124, 132, 132));
+            ConfigureSyncedLyricBlock(block, line.Time);
         }
+    }
+
+    private void ConfigureSyncedLyricBlock(TextBlock block, TimeSpan timestamp)
+    {
+        block.Tag = timestamp;
+        block.Background = Brushes.Transparent;
+        block.MouseLeftButtonDown += SyncedLyricLine_MouseLeftButtonDown;
+        block.MouseLeftButtonUp += SyncedLyricLine_MouseLeftButtonUp;
+        ToolTipService.SetInitialShowDelay(block, 250);
+        UpdateSyncedLyricBlockSeekability(block, Snapshot);
+    }
+
+    private void UpdateSyncedLyricLineSeekability(MediaSnapshot snapshot)
+    {
+        foreach (var block in _lyricBlocks.Concat(_fullscreenLyricBlocks))
+        {
+            UpdateSyncedLyricBlockSeekability(block, snapshot);
+        }
+    }
+
+    private static void UpdateSyncedLyricBlockSeekability(TextBlock block, MediaSnapshot snapshot)
+    {
+        var canSeek = block.Tag is TimeSpan timestamp
+            && CanSeekToSyncedLyric(snapshot, timestamp);
+        block.Cursor = canSeek ? Cursors.Hand : Cursors.Arrow;
+        block.ToolTip = canSeek && block.Tag is TimeSpan seekTimestamp
+            ? $"Seek to {FormatTime(seekTimestamp)}"
+            : null;
+    }
+
+    private static bool CanSeekToSyncedLyric(MediaSnapshot snapshot, TimeSpan timestamp)
+    {
+        return snapshot.HasSession
+            && snapshot.CanSeek
+            && snapshot.Duration > TimeSpan.Zero
+            && timestamp >= TimeSpan.Zero
+            && timestamp <= snapshot.Duration;
+    }
+
+    private void SyncedLyricLine_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is TextBlock { Tag: TimeSpan timestamp }
+            && CanSeekToSyncedLyric(Snapshot, timestamp))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private async void SyncedLyricLine_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBlock { Tag: TimeSpan timestamp }
+            || !CanSeekToSyncedLyric(Snapshot, timestamp))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await SeekToPositionAsync(timestamp);
     }
 
     private void RenderPlainLyrics(Panel panel, ICollection<TextBlock> blocks, bool isFullscreen)

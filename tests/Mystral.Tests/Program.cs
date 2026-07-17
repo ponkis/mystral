@@ -1462,6 +1462,137 @@ static class PlaybackTimelineStabilizerTests
                 timelineUpdatedAt: start + TimeSpan.FromSeconds(11),
                 hasReliableTimelineUpdatedAt: false,
                 observedAt: start + TimeSpan.FromSeconds(11)));
+
+        Check.True(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(178),
+            TimeSpan.FromSeconds(2),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(90),
+            TimeSpan.FromSeconds(2),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(178),
+            TimeSpan.FromSeconds(172),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(13),
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(14)));
+
+        // A same-track loop is accepted after a second coherent near-start
+        // observation. The first zero remains fenced as possible provider jitter.
+        var reliableRestart = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start));
+        Check.Equal(
+            TimeSpan.FromSeconds(179),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(1),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(reliableRestart.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.FromSeconds(1),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(1),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(2),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.True(reliableRestart.LastObservationWasPlaybackRestart);
+
+        // Providers with no usable timeline timestamp can report a paused zero
+        // before playback resumes. Two coherent samples still identify the restart.
+        var unreliableRestart = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start));
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(unreliableRestart.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.Zero,
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.True(unreliableRestart.LastObservationWasPlaybackRestart);
+
+        // A single bad zero that recovers to the end is never classified as a loop.
+        var staleEndReading = new PlaybackTimelineStabilizer();
+        staleEndReading.Observe(
+            "chrome|stale-end",
+            hasSession: true,
+            TimeSpan.FromSeconds(178),
+            duration,
+            isPlaying: false,
+            timelineUpdatedAt: default,
+            hasReliableTimelineUpdatedAt: false,
+            observedAt: start);
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            staleEndReading.Observe(
+                "chrome|stale-end",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(staleEndReading.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            staleEndReading.Observe(
+                "chrome|stale-end",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.False(staleEndReading.LastObservationWasPlaybackRestart);
     }
 }
 

@@ -67,6 +67,12 @@ For Apple Music's Windows media session, lyric lookup separates a combined
 `Artist — Album` value when the session omits its album field, and uses the
 session's album artist when its primary artist field is empty.
 
+Synchronized lyric lines become seek targets when the active media session
+allows seeking; plain lyrics remain read-only text. When a looping track
+restarts after reaching its end, lyric browsing resets in both the regular and
+fullscreen views. Lyrics mode uses one cover-derived backdrop plus its header
+artwork, while a fixed custom theme continues to hide the backdrop.
+
 ## Burn Editor
 
 The burn editor always writes a separate copy of the selected audio file. It can
@@ -114,7 +120,7 @@ The test suite covers the vital headless app logic:
 - LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
-- media-session timestamp projection, stale-position filtering, and seek reconciliation
+- media-session timestamp projection, stale-position filtering, seek reconciliation, and loop-restart detection
 - model defaults and artwork tint edge cases
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling

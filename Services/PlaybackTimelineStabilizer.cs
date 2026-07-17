@@ -18,8 +18,29 @@ internal sealed class PlaybackTimelineStabilizer
     private TimelineObservation? _latestObservation;
     private PendingSeek? _pendingSeek;
     private TimelineObservation? _backwardCandidate;
+    private TimelineObservation? _restartCandidate;
 
     public TimeSpan Duration => _hasAnchor ? _duration : TimeSpan.Zero;
+    public bool LastObservationWasPlaybackRestart { get; private set; }
+
+    public static bool IsPlaybackRestart(
+        TimeSpan previousPosition,
+        TimeSpan currentPosition,
+        TimeSpan duration)
+    {
+        if (duration < TimeSpan.FromSeconds(15))
+        {
+            return false;
+        }
+
+        previousPosition = Clamp(previousPosition, duration);
+        currentPosition = Clamp(currentPosition, duration);
+        var minimumRegression = TimeSpan.FromSeconds(Math.Max(10, duration.TotalSeconds * 0.5));
+
+        return IsNearStart(currentPosition, duration)
+            && IsNearEnd(previousPosition, duration)
+            && previousPosition - currentPosition >= minimumRegression;
+    }
 
     public TimeSpan Observe(
         string mediaKey,
@@ -31,6 +52,7 @@ internal sealed class PlaybackTimelineStabilizer
         bool hasReliableTimelineUpdatedAt,
         DateTimeOffset observedAt)
     {
+        LastObservationWasPlaybackRestart = false;
         if (!hasSession || string.IsNullOrWhiteSpace(mediaKey))
         {
             Reset();
@@ -72,11 +94,32 @@ internal sealed class PlaybackTimelineStabilizer
         {
             _pendingSeek = null;
             _backwardCandidate = null;
+            _restartCandidate = null;
             SetAnchor(mediaKey, position, duration, isPlaying, observedAt);
             return position;
         }
 
         var displayedPosition = GetPosition(observedAt);
+        if (_pendingSeek is null
+            && IsPlaybackRestart(displayedPosition, position, duration))
+        {
+            if (_restartCandidate is { } restartCandidate
+                && IsCoherentRestartObservation(restartCandidate, observation))
+            {
+                LastObservationWasPlaybackRestart = true;
+                _restartCandidate = null;
+                _backwardCandidate = null;
+                SetAnchor(mediaKey, position, duration, isPlaying, observedAt);
+                return position;
+            }
+
+            _restartCandidate = observation;
+            _backwardCandidate = null;
+            SetAnchor(mediaKey, displayedPosition, duration, isPlaying, observedAt);
+            return displayedPosition;
+        }
+
+        _restartCandidate = null;
         if (_pendingSeek is { } pendingSeek)
         {
             var seekAge = observedAt - pendingSeek.StartedAt;
@@ -150,6 +193,8 @@ internal sealed class PlaybackTimelineStabilizer
 
         SetAnchor(mediaKey, targetPosition, duration, isPlaying, startedAt);
         _backwardCandidate = null;
+        _restartCandidate = null;
+        LastObservationWasPlaybackRestart = false;
         _pendingSeek = new PendingSeek(
             TargetPosition: targetPosition,
             OriginalPosition: originalPosition,
@@ -266,6 +311,8 @@ internal sealed class PlaybackTimelineStabilizer
         _latestObservation = null;
         _pendingSeek = null;
         _backwardCandidate = null;
+        _restartCandidate = null;
+        LastObservationWasPlaybackRestart = false;
     }
 
     private static TimeSpan Advance(
@@ -295,6 +342,18 @@ internal sealed class PlaybackTimelineStabilizer
     private static TimeSpan Distance(TimeSpan left, TimeSpan right)
     {
         return (left - right).Duration();
+    }
+
+    private static bool IsNearStart(TimeSpan position, TimeSpan duration)
+    {
+        var startWindow = TimeSpan.FromSeconds(Math.Clamp(duration.TotalSeconds * 0.05, 3, 10));
+        return Clamp(position, duration) <= startWindow;
+    }
+
+    private static bool IsNearEnd(TimeSpan position, TimeSpan duration)
+    {
+        var endWindow = TimeSpan.FromSeconds(Math.Clamp(duration.TotalSeconds * 0.08, 5, 15));
+        return Clamp(position, duration) >= duration - endWindow;
     }
 
     private static bool IsCoherentBackwardObservation(
@@ -332,6 +391,33 @@ internal sealed class PlaybackTimelineStabilizer
                 || Distance(observation.RawPosition, candidate.RawPosition)
                     <= BackwardReconciliationTolerance);
         return progressed || pausedConfirmation;
+    }
+
+    private static bool IsCoherentRestartObservation(
+        TimelineObservation candidate,
+        TimelineObservation observation)
+    {
+        var elapsed = observation.ObservedAt - candidate.ObservedAt;
+        if (elapsed <= TimeSpan.Zero || elapsed > TimeSpan.FromSeconds(10))
+        {
+            return false;
+        }
+
+        if (!IsNearStart(observation.Position, observation.Duration))
+        {
+            return false;
+        }
+
+        var expected = Advance(
+            candidate.Position,
+            candidate.IsPlaying,
+            elapsed,
+            observation.Duration);
+        var followsPlayback = Distance(observation.Position, expected)
+            <= BackwardReconciliationTolerance;
+        var remainsAtStart = Distance(observation.RawPosition, candidate.RawPosition)
+            <= BackwardReconciliationTolerance;
+        return followsPlayback || remainsAtStart;
     }
 
     private sealed record TimelineObservation(

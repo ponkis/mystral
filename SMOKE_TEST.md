@@ -57,6 +57,9 @@ For packaged development builds:
 - In Apple Music for Windows, play a known track and confirm lyrics load when its media session combines `Artist — Album` instead of publishing a separate album.
 - Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
 - During a long gap, confirm the three dots fill alongside the preceding highlighted lyric without recentering or advancing lyric synchronization early.
+- With a seekable source and synchronized lyrics, click a line in both regular and fullscreen lyrics; confirm playback seeks to that line and recenters it. Confirm plain lyrics and synchronized lyrics from a non-seekable source keep the normal cursor and do nothing when clicked.
+- Scroll regular and fullscreen lyrics away from the active line, then let the same track loop from near its end to the beginning; confirm both views clear browsing state and return to the top. Confirm a one-off zero/near-zero provider reading or small backward jitter does not reset the lyric view.
+- With the automatic artwork theme, confirm lyrics mode shows one blurred cover backdrop plus the header thumbnail without a doubled backdrop. With a fixed custom theme, confirm the backdrop stays hidden while the header thumbnail remains.
 - Switch tracks and confirm old lyrics do not remain stuck.
 - Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
 - Play a track with no lyrics and confirm the empty/not-found state is readable.
@@ -79,6 +82,7 @@ For packaged development builds:
 
 - Open settings from the app and tray menu.
 - Toggle behavior settings, save, restart, and confirm persistence.
+- Export playback history and confirm the successful `Export complete` dialog uses the CSV icon.
 - Under Behavior, switch the Burn lyrics provider between `MusicBrainz-assisted (default)` and `LRCLIB (direct)`, save, restart, and confirm the selected provider persists.
 - Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker.
 - While a track is visible, choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.
