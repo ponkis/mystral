@@ -45,6 +45,7 @@ internal static class Program
             ("MusicBrainz reports artwork outcomes and records failure diagnostics", MusicBrainzServiceTests.ReportsArtworkOutcomesAndDiagnostics),
             ("artwork diagnostics write a bounded, rotating, failure-tolerant log", ArtworkDiagnosticsTests.WritesAndRotatesBoundedLog),
             ("update downloads reject interrupted files and preserve useful failure causes", UpdateDownloadTests.ValidatesInterruptedDownloadsAndFailureMessages),
+            ("burn lyric fetches replace definitive results and preserve service failures", BurnLyricsFetchTests.ReplacesDefinitiveResultsAndPreservesFailures),
             ("burn metadata validates bounded fields and creates safe title filenames", BurnMetadataValidationTests.ValidatesFieldsAndSuggestedFileNames),
             ("audio burning reads headers and saves metadata to a separate WAV copy", AudioTagServiceTests.ReadsAndSavesMetadataWithoutTouchingSource)
         };
@@ -2150,6 +2151,37 @@ static class UpdateDownloadTests
             "connection reset by peer",
             SettingsWindow.DescribeUpdateDownloadFailure(
                 new HttpRequestException("Request failed.", new IOException("connection reset by peer"))));
+    }
+}
+
+static class BurnLyricsFetchTests
+{
+    public static void ReplacesDefinitiveResultsAndPreservesFailures()
+    {
+        var plain = BurningWindow.CreateFetchedLyricsReplacement(
+            LyricsResult.Plain(["New plain line"], sourceText: "New plain line"));
+        Check.True(plain.ShouldReplace);
+        Check.Equal("New plain line", plain.Unsynchronized);
+        Check.Equal(string.Empty, plain.Synchronized);
+
+        var synced = BurningWindow.CreateFetchedLyricsReplacement(
+            LyricsResult.Synced([new LyricLine(TimeSpan.FromSeconds(1.25), "New synced line")]));
+        Check.True(synced.ShouldReplace);
+        Check.Equal(string.Empty, synced.Unsynchronized);
+        Check.Equal("[00:01.25]New synced line", synced.Synchronized);
+
+        var notFound = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.NotFound);
+        Check.True(notFound.ShouldReplace);
+        Check.Equal(string.Empty, notFound.Unsynchronized);
+        Check.Equal(string.Empty, notFound.Synchronized);
+
+        var instrumental = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.Instrumental);
+        Check.True(instrumental.ShouldReplace);
+        Check.Equal(string.Empty, instrumental.Unsynchronized);
+        Check.Equal(string.Empty, instrumental.Synchronized);
+
+        var failed = BurningWindow.CreateFetchedLyricsReplacement(LyricsResult.Error("Unavailable"));
+        Check.False(failed.ShouldReplace);
     }
 }
 

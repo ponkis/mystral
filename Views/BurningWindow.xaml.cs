@@ -1113,46 +1113,68 @@ public partial class BurningWindow : Window
 
     private bool ApplyFetchedLyrics(LyricsResult? result)
     {
-        if (result?.Status is not (LyricsStatus.Synced or LyricsStatus.Plain))
+        var replacement = CreateFetchedLyricsReplacement(result);
+        if (!replacement.ShouldReplace)
         {
             return false;
         }
 
-        var applied = false;
+        UnsynchronizedLyricsBox.Text = LimitForTextBox(
+            UnsynchronizedLyricsBox,
+            replacement.Unsynchronized);
+        SynchronizedLyricsBox.Text = LimitForTextBox(
+            SynchronizedLyricsBox,
+            replacement.Synchronized);
+        SyncDraftFromForm();
+
+        return !string.IsNullOrWhiteSpace(replacement.Unsynchronized)
+            || !string.IsNullOrWhiteSpace(replacement.Synchronized);
+    }
+
+    internal static (bool ShouldReplace, string Unsynchronized, string Synchronized)
+        CreateFetchedLyricsReplacement(LyricsResult? result)
+    {
+        if (result?.Status is not (
+                LyricsStatus.Synced
+                or LyricsStatus.Plain
+                or LyricsStatus.Instrumental
+                or LyricsStatus.NotFound))
+        {
+            return (false, string.Empty, string.Empty);
+        }
+
+        if (result.Status is LyricsStatus.Instrumental or LyricsStatus.NotFound)
+        {
+            return (true, string.Empty, string.Empty);
+        }
+
         var unsynchronized = NormalizeLyricsText(result.PlainText);
-        if (unsynchronized.Length == 0 && result.Status == LyricsStatus.Plain)
+        if (string.IsNullOrWhiteSpace(unsynchronized) && result.PlainLines.Count > 0)
         {
-            unsynchronized = string.Join("\n", result.PlainLines);
+            unsynchronized = NormalizeLyricsText(string.Join("\n", result.PlainLines));
         }
 
-        if (!string.IsNullOrWhiteSpace(unsynchronized))
+        if (string.IsNullOrWhiteSpace(unsynchronized))
         {
-            UnsynchronizedLyricsBox.Text = LimitForTextBox(
-                UnsynchronizedLyricsBox,
-                unsynchronized);
-            applied = true;
+            unsynchronized = string.Empty;
         }
 
-        var synchronized = NormalizeLyricsText(result.SyncedText);
-        if (synchronized.Length == 0 && result.Status == LyricsStatus.Synced)
+        var synchronized = string.Empty;
+        if (result.Status == LyricsStatus.Synced)
         {
-            synchronized = FormatLrc(result.SyncedLines);
+            synchronized = NormalizeLyricsText(result.SyncedText);
+            if (string.IsNullOrWhiteSpace(synchronized))
+            {
+                synchronized = FormatLrc(result.SyncedLines);
+            }
+
+            if (string.IsNullOrWhiteSpace(synchronized))
+            {
+                synchronized = string.Empty;
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(synchronized))
-        {
-            SynchronizedLyricsBox.Text = LimitForTextBox(
-                SynchronizedLyricsBox,
-                synchronized);
-            applied = true;
-        }
-
-        if (applied)
-        {
-            SyncDraftFromForm();
-        }
-
-        return applied;
+        return (true, unsynchronized, synchronized);
     }
 
     private static string FormatLrc(IEnumerable<LyricLine> lines)

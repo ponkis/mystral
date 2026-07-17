@@ -80,6 +80,7 @@ For packaged development builds:
 - Enter synchronized text without a valid LRC timestamp and confirm Save reports a readable validation error instead of creating the burned copy.
 - With `MusicBrainz-assisted (default)` selected, click `Fetch song data` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
 - With `LRCLIB (direct)` selected, edit the lookup fields, click `Fetch song data`, and confirm lyrics are searched using the values currently in the editor.
+- Fetch a song with lyrics, then fetch a song that has no lyrics; confirm both lyric editors clear instead of retaining the previous song's text.
 - While a fetch is running, confirm the progress window uses the search icon and concise song-search wording; when cover or disc artwork is not found, confirm the notice uses the artwork icon.
 - If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
 - Confirm the original audio bytes and tags are unchanged after every burn.
