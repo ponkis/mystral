@@ -30,7 +30,9 @@ public partial class MainWindow : Window
     private readonly AppSettingsService _settingsService;
     private readonly DispatcherTimer _mediaPollTimer;
     private readonly DispatcherTimer _loadingIconTimer;
+    private readonly DispatcherTimer _seekToolTipHideTimer;
     private readonly DispatcherTimer _volumeToolTipHideTimer;
+    private readonly PlaybackTimelineStabilizer _timelineStabilizer = new();
     private readonly CancellationTokenSource _burnDiscArtworkCts = new();
     private readonly List<TextBlock> _lyricBlocks = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
@@ -66,6 +68,7 @@ public partial class MainWindow : Window
     private bool _isClosing;
     private bool _allowClose;
     private bool _isVolumeDragging;
+    private bool _progressSliderUpdating;
     private bool _isBurnDiscPointerDown;
     private bool _isBurnDiscDragging;
     private bool _isBurnDiscInserting;
@@ -97,6 +100,7 @@ public partial class MainWindow : Window
     private bool _isUserBrowsingFullscreenLyrics;
     private bool _isLyricsScrollAnimating;
     private readonly DispatcherTimer _fullscreenLyricsInactivityTimer;
+    private Slider? _activeProgressSlider;
     private Slider? _activeVolumeSlider;
     private FrameworkElement? _lyricsFooterPanel;
     private FrameworkElement? _fullscreenLyricsFooterPanel;
@@ -108,8 +112,8 @@ public partial class MainWindow : Window
     private int _activeLyricIndex = -1;
     private int _activeLyricWaitIndicatorIndex = -1;
     private double _lyricsScrollTarget;
-    private DateTimeOffset _lastSnapshotAt = DateTimeOffset.Now;
     private TimeSpan _lastLyricsPosition = TimeSpan.Zero;
+    private int _seekRequestGeneration;
     private int _loadingIconFrameIndex;
     private const double CompactWidth = 352;
     private const double CompactHeight = 172;
@@ -189,6 +193,8 @@ public partial class MainWindow : Window
 
         _loadingIconTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(65) };
         _loadingIconTimer.Tick += (_, _) => AdvanceLoadingIconFrame();
+        _seekToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+        _seekToolTipHideTimer.Tick += (_, _) => HideSeekToolTip();
         _volumeToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
         _volumeToolTipHideTimer.Tick += (_, _) => HideVolumeToolTip();
         LoadLoadingIconFrames();
@@ -294,9 +300,12 @@ public partial class MainWindow : Window
 
         foreach (var slider in ProgressSliders)
         {
-            slider.ToolTip = "Seek";
+            slider.ToolTip = CreateSeekToolTip(slider);
             ToolTipService.SetInitialShowDelay(slider, 250);
+            ToolTipService.SetShowDuration(slider, 60000);
             slider.MouseMove += ProgressSlider_MouseMove;
+            slider.MouseLeave += ProgressSlider_MouseLeave;
+            slider.LostMouseCapture += ProgressSlider_LostMouseCapture;
         }
 
         foreach (var slider in VolumeSliders)
@@ -325,14 +334,61 @@ public partial class MainWindow : Window
 
     private void ProgressSlider_MouseMove(object sender, MouseEventArgs e)
     {
-        if (sender is not Slider slider || IsControlDisabled(slider) || slider.ActualWidth <= 1)
+        if (!_isSeeking
+            || sender is not Slider slider
+            || !ReferenceEquals(_activeProgressSlider, slider)
+            || IsControlDisabled(slider))
         {
             return;
         }
 
-        var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
-        var seconds = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
-        slider.ToolTip = $"Seek to {FormatTime(TimeSpan.FromSeconds(seconds))}";
+        if (e.LeftButton == MouseButtonState.Pressed)
+        {
+            SetProgressSliderValueFromPointer(slider, e);
+        }
+
+        ShowSeekToolTip(slider, includePosition: true);
+    }
+
+    private void ProgressSlider_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (!_isSeeking && ReferenceEquals(_activeProgressSlider, sender))
+        {
+            BeginSeekToolTipLinger();
+        }
+    }
+
+    private async void ProgressSlider_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (!ReferenceEquals(_activeProgressSlider, sender))
+        {
+            return;
+        }
+
+        if (_isSeeking && sender is Slider slider)
+        {
+            if (Mouse.LeftButton != MouseButtonState.Pressed)
+            {
+                await CompleteSeekAsync(slider);
+                return;
+            }
+
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (_isSeeking
+                    && ReferenceEquals(_activeProgressSlider, slider)
+                    && !slider.IsMouseCaptureWithin)
+                {
+                    CancelSeekInteraction();
+                }
+            }, DispatcherPriority.Input);
+            return;
+        }
+
+        if (!_isSeeking)
+        {
+            BeginSeekToolTipLinger();
+        }
     }
 
     private async Task LoadCompactBurnDiscArtworkAsync()
@@ -1212,6 +1268,70 @@ public partial class MainWindow : Window
         cancellation?.Dispose();
     }
 
+    private static ToolTip CreateSeekToolTip(Slider slider)
+    {
+        return new ToolTip
+        {
+            Content = "Seek",
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            PlacementTarget = slider,
+            StaysOpen = true
+        };
+    }
+
+    private void ShowSeekToolTip(Slider slider, bool includePosition)
+    {
+        _seekToolTipHideTimer.Stop();
+        if (_activeProgressSlider is { } previous
+            && !ReferenceEquals(previous, slider)
+            && previous.ToolTip is ToolTip previousToolTip)
+        {
+            previousToolTip.IsOpen = false;
+            previousToolTip.Content = "Seek";
+        }
+
+        _activeProgressSlider = slider;
+        UpdateSeekToolTip(slider, includePosition);
+        if (slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.PlacementTarget = slider;
+            toolTip.IsOpen = true;
+        }
+    }
+
+    private static void UpdateSeekToolTip(Slider slider, bool includePosition)
+    {
+        if (slider.ToolTip is not ToolTip toolTip)
+        {
+            slider.ToolTip = toolTip = CreateSeekToolTip(slider);
+        }
+
+        toolTip.Content = includePosition
+            ? $"Seek: {FormatTime(TimeSpan.FromSeconds(slider.Value))}"
+            : "Seek";
+    }
+
+    private void BeginSeekToolTipLinger()
+    {
+        _seekToolTipHideTimer.Stop();
+        _seekToolTipHideTimer.Start();
+    }
+
+    private void HideSeekToolTip()
+    {
+        _seekToolTipHideTimer.Stop();
+        if (_activeProgressSlider?.ToolTip is ToolTip toolTip)
+        {
+            toolTip.IsOpen = false;
+            toolTip.Content = "Seek";
+        }
+
+        if (!_isSeeking)
+        {
+            _activeProgressSlider = null;
+        }
+    }
+
     private ToolTip CreateVolumeToolTip(Slider slider)
     {
         return new ToolTip
@@ -1328,8 +1448,29 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
+            var observedAt = DateTimeOffset.Now;
+            var mediaKey = CreateTimelineMediaKey(snapshot);
+            var stabilizedPosition = _timelineStabilizer.Observe(
+                mediaKey,
+                snapshot.HasSession,
+                snapshot.Position,
+                snapshot.Duration,
+                snapshot.IsPlaying,
+                snapshot.TimelineUpdatedAt,
+                snapshot.HasReliableTimelineUpdatedAt,
+                observedAt);
+            if (snapshot.HasSession
+                && snapshot.Duration <= TimeSpan.Zero
+                && _timelineStabilizer.Duration > TimeSpan.Zero)
+            {
+                snapshot = snapshot with
+                {
+                    Position = stabilizedPosition,
+                    Duration = _timelineStabilizer.Duration
+                };
+            }
+
             Snapshot = snapshot;
-            _lastSnapshotAt = DateTimeOffset.Now;
             ApplySnapshot(snapshot);
         });
     }
@@ -1661,8 +1802,11 @@ public partial class MainWindow : Window
 
     private void UpdateTimelineUi()
     {
-        var position = GetCurrentPosition();
+        var playbackPosition = GetCurrentPosition();
         var duration = Snapshot.Duration;
+        var position = _isSeeking && _activeProgressSlider is { } activeSlider
+            ? TimeSpan.FromSeconds(activeSlider.Value)
+            : playbackPosition;
 
         if (!_isSeeking)
         {
@@ -1693,11 +1837,11 @@ public partial class MainWindow : Window
             SetTextIfChanged(textBlock, remainingText);
         }
 
-        UpdateSyncedLyricsUi(position);
+        UpdateSyncedLyricsUi(playbackPosition);
 
         if (_isFullscreen && _isFullscreenLyrics)
         {
-            UpdateSyncedLyricsUi(position, isFullscreen: true);
+            UpdateSyncedLyricsUi(playbackPosition, isFullscreen: true);
         }
     }
 
@@ -3103,18 +3247,22 @@ public partial class MainWindow : Window
             return TimeSpan.Zero;
         }
 
-        var position = Snapshot.Position;
-        if (Snapshot.IsPlaying)
+        return _timelineStabilizer.GetPosition(DateTimeOffset.Now);
+    }
+
+    private static string CreateTimelineMediaKey(MediaSnapshot snapshot)
+    {
+        if (!snapshot.HasSession)
         {
-            position += DateTimeOffset.Now - _lastSnapshotAt;
+            return string.Empty;
         }
 
-        if (position < TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
-
-        return position > Snapshot.Duration ? Snapshot.Duration : position;
+        return string.Join(
+            '\u001f',
+            snapshot.SourceApp.Trim(),
+            snapshot.Title.Trim(),
+            snapshot.Artist.Trim(),
+            snapshot.Album.Trim());
     }
 
     private async void PlayPauseButton_Click(object sender, RoutedEventArgs e)
@@ -3320,32 +3468,149 @@ public partial class MainWindow : Window
 
     private void ProgressSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (IsControlDisabled(sender))
+        if (sender is not Slider slider || IsControlDisabled(slider))
         {
             e.Handled = true;
             return;
         }
 
+        _seekToolTipHideTimer.Stop();
         _isSeeking = true;
+        _activeProgressSlider = slider;
+        SetProgressSliderValueFromPointer(slider, e);
+        ShowSeekToolTip(slider, includePosition: true);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_isSeeking
+                && ReferenceEquals(_activeProgressSlider, slider)
+                && Mouse.LeftButton == MouseButtonState.Pressed
+                && Mouse.Captured is null)
+            {
+                slider.CaptureMouse();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private async void ProgressSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (IsControlDisabled(sender))
+        if (sender is not Slider slider || IsControlDisabled(slider))
         {
             _isSeeking = false;
             e.Handled = true;
+            HideSeekToolTip();
+            UpdateTimelineUi();
             return;
         }
 
-        if (!_isSeeking)
+        if (!_isSeeking || !ReferenceEquals(_activeProgressSlider, slider))
         {
             return;
         }
 
+        SetProgressSliderValueFromPointer(slider, e);
+        await CompleteSeekAsync(slider);
+    }
+
+    private void ProgressSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_progressSliderUpdating
+            || !_isSeeking
+            || sender is not Slider slider
+            || !ReferenceEquals(_activeProgressSlider, slider))
+        {
+            return;
+        }
+
+        _progressSliderUpdating = true;
+        try
+        {
+            foreach (var progressSlider in ProgressSliders)
+            {
+                if (!ReferenceEquals(progressSlider, slider))
+                {
+                    SetSliderValueIfChanged(progressSlider, e.NewValue);
+                }
+            }
+        }
+        finally
+        {
+            _progressSliderUpdating = false;
+        }
+
+        ShowSeekToolTip(slider, includePosition: true);
+        UpdateTimelineUi();
+    }
+
+    private void SetProgressSliderValueFromPointer(Slider slider, MouseEventArgs e)
+    {
+        slider.ApplyTemplate();
+        double value;
+        if (slider.Template.FindName("PART_Track", slider)
+            is System.Windows.Controls.Primitives.Track track)
+        {
+            value = track.ValueFromPoint(e.GetPosition(track));
+        }
+        else if (slider.ActualWidth > 1)
+        {
+            var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
+            value = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
+        }
+        else
+        {
+            return;
+        }
+
+        if (!double.IsNaN(value) && !double.IsInfinity(value))
+        {
+            slider.Value = Math.Clamp(value, slider.Minimum, slider.Maximum);
+        }
+    }
+
+    private async Task CompleteSeekAsync(Slider slider)
+    {
+        if (!_isSeeking || !ReferenceEquals(_activeProgressSlider, slider))
+        {
+            return;
+        }
+
+        var target = TimeSpan.FromSeconds(slider.Value);
+        var requestGeneration = ++_seekRequestGeneration;
+        _timelineStabilizer.BeginSeek(
+            CreateTimelineMediaKey(Snapshot),
+            target,
+            Snapshot.Duration,
+            Snapshot.IsPlaying,
+            DateTimeOffset.Now);
         _isSeeking = false;
-        var slider = sender as Slider ?? ProgressSlider;
-        await _mediaService.SeekAsync(TimeSpan.FromSeconds(slider.Value));
+        ShowSeekToolTip(slider, includePosition: true);
+        BeginSeekToolTipLinger();
+        UpdateTimelineUi();
+
+        var accepted = false;
+        try
+        {
+            accepted = await _mediaService.SeekAsync(target);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to seek the active media session: {ex}");
+        }
+
+        if (requestGeneration != _seekRequestGeneration || accepted)
+        {
+            return;
+        }
+
+        _timelineStabilizer.RejectPendingSeek(DateTimeOffset.Now);
+        UpdateTimelineUi();
+    }
+
+    private void CancelSeekInteraction()
+    {
+        _isSeeking = false;
+        HideSeekToolTip();
+        UpdateTimelineUi();
     }
 
     private void SetTransportEnabled(bool isEnabled)
@@ -4451,6 +4716,7 @@ public partial class MainWindow : Window
         _mediaPollTimer.Stop();
         StopLyricsScrollAnimation();
         _loadingIconTimer.Stop();
+        _seekToolTipHideTimer.Stop();
         _volumeToolTipHideTimer.Stop();
         _lyricsRefreshCts?.Cancel();
         _lyricsRefreshCts?.Dispose();
@@ -4590,7 +4856,8 @@ public partial class MainWindow : Window
             _preFullscreenExpanded = _isExpanded;
             _preFullscreenLyrics = _isLyricsMode;
 
-            // Recycle ChromeButtons: hide collapse, topmost, and minimize
+            // Recycle ChromeButtons: fullscreen keeps only its exit control visible.
+            CloseButton.Visibility = Visibility.Collapsed;
             CollapseExpandedButton.Visibility = Visibility.Collapsed;
             TopmostButton.Visibility = Visibility.Collapsed;
             MinimizeButton.Visibility = Visibility.Collapsed;
@@ -4644,6 +4911,7 @@ public partial class MainWindow : Window
                     FullscreenPanel.Visibility = Visibility.Collapsed;
 
                     // Restore other chrome buttons visibility and exit state icon
+                    CloseButton.Visibility = Visibility.Visible;
                     MinimizeButton.Visibility = Visibility.Visible;
                     TopmostButton.Visibility = Visibility.Visible;
                     FullscreenButtonPath.Data = Geometry.Parse("M 1,6 L 1,1 L 6,1 M 1,1 L 7,7 M 14,9 L 14,14 L 9,14 M 14,14 L 8,8");

@@ -64,16 +64,17 @@ public sealed class MediaSessionService : IDisposable
         await RefreshAsync();
     }
 
-    public async Task SeekAsync(TimeSpan position)
+    public async Task<bool> SeekAsync(TimeSpan position)
     {
         var session = _session;
         if (session is null)
         {
-            return;
+            return false;
         }
 
-        await session.TryChangePlaybackPositionAsync(position.Ticks);
+        var accepted = await session.TryChangePlaybackPositionAsync(position.Ticks);
         await RefreshAsync();
+        return accepted;
     }
 
     private async void Manager_SessionsChanged(GlobalSystemMediaTransportControlsSessionManager sender, SessionsChangedEventArgs args)
@@ -157,7 +158,10 @@ public sealed class MediaSessionService : IDisposable
         var properties = await session.TryGetMediaPropertiesAsync();
         var playback = session.GetPlaybackInfo();
         var timeline = session.GetTimelineProperties();
+        var timelineObservedAt = DateTimeOffset.Now;
         var controls = playback.Controls;
+        var status = playback.PlaybackStatus;
+        var isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
         var title = Clean(properties.Title, "Unknown track");
         var artist = Clean(properties.Artist, string.Empty);
@@ -167,17 +171,19 @@ public sealed class MediaSessionService : IDisposable
         var duration = timeline.EndTime > timeline.StartTime
             ? timeline.EndTime - timeline.StartTime
             : TimeSpan.Zero;
-        var position = timeline.Position - timeline.StartTime;
-
-        if (position < TimeSpan.Zero)
-        {
-            position = TimeSpan.Zero;
-        }
-
-        var status = playback.PlaybackStatus;
-        var isPlaying = status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-
         var coverArtKey = $"{app}|{title}|{artist}|{album}";
+        var coverArt = await GetCoverArtAsync(properties.Thumbnail, coverArtKey);
+        var timelineUpdatedAt = PlaybackTimelineStabilizer.ResolveSourceAnchorTimestamp(
+            timeline.LastUpdatedTime,
+            timelineObservedAt,
+            duration,
+            out var hasReliableTimelineUpdatedAt);
+        var position = PlaybackTimelineStabilizer.ProjectSourcePosition(
+            timeline.Position - timeline.StartTime,
+            duration,
+            isPlaying: false,
+            sourceUpdatedAt: timelineUpdatedAt,
+            observedAt: timelineObservedAt);
 
         return new MediaSnapshot(
             HasSession: true,
@@ -195,7 +201,11 @@ public sealed class MediaSessionService : IDisposable
             CanNext: controls.IsNextEnabled,
             CanPrevious: controls.IsPreviousEnabled,
             CanSeek: controls.IsPlaybackPositionEnabled,
-            CoverArt: await GetCoverArtAsync(properties.Thumbnail, coverArtKey));
+            CoverArt: coverArt)
+        {
+            TimelineUpdatedAt = timelineUpdatedAt,
+            HasReliableTimelineUpdatedAt = hasReliableTimelineUpdatedAt
+        };
     }
 
     private async Task<BitmapImage?> GetCoverArtAsync(IRandomAccessStreamReference? thumbnail, string cacheKey)

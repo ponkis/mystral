@@ -271,6 +271,7 @@
             <Setter Property="Maximum" Value="1" />
             <Setter Property="Value" Value="0" />
             <Setter Property="IsMoveToPointEnabled" Value="True" />
+            <EventSetter Event="ValueChanged" Handler="ProgressSlider_ValueChanged" />
             <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ProgressSlider_PreviewMouseLeftButtonDown" />
             <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ProgressSlider_PreviewMouseLeftButtonUp" />
         </Style>
@@ -517,6 +518,16 @@
 
                     <StackPanel HorizontalAlignment="Right"
                                 Orientation="Horizontal">
+                        <Button x:Name="TopmostButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="TopmostButton_Click"
+                                ToolTip="Always on top">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
+                        </Button>
                         <Button x:Name="CollapseExpandedButton"
                                 Style="{StaticResource ChromeButtonStyle}"
                                 Click="CollapseExpandedButton_Click"
@@ -530,16 +541,6 @@
                                   StrokeStartLineCap="Round"
                                   StrokeEndLineCap="Round"
                                   Data="M 1,5 L 5,5 L 5,1 M 5,5 L 1,1 M 11,7 L 7,7 L 7,11 M 7,7 L 11,11" />
-                        </Button>
-                        <Button x:Name="TopmostButton"
-                                Style="{StaticResource ChromeButtonStyle}"
-                                Click="TopmostButton_Click"
-                                ToolTip="Always on top">
-                            <Path Width="11"
-                                  Height="11"
-                                  Stretch="Uniform"
-                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
                         </Button>
                         <Button x:Name="FullscreenButton"
                                 Style="{StaticResource ChromeButtonStyle}"

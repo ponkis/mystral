@@ -34,6 +34,7 @@ internal static class Program
             ("Globe missing claim and revoke endpoints fail safely", GlobeConnectionServiceTests.TreatsMissingEndpointsAsFailures),
             ("Globe avatar dimensions reject oversized and extreme inputs", GlobeConnectionServiceTests.ValidatesAvatarDimensions),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
+            ("media timeline projects source anchors and reconciles stale seeks", PlaybackTimelineStabilizerTests.StabilizesSourceUpdatesAndSeeks),
             ("lyrics service exact-matches, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesExactOrBestLyricsAndCaches),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
@@ -1266,6 +1267,200 @@ static class LocalScrobbleCacheServiceTests
         Check.Empty(service.LoadAllRecords());
         Check.True(service.ClearHistory());
         Check.False(File.Exists(path));
+    }
+}
+
+static class PlaybackTimelineStabilizerTests
+{
+    public static void StabilizesSourceUpdatesAndSeeks()
+    {
+        var start = new DateTimeOffset(2026, 7, 17, 12, 0, 0, TimeSpan.Zero);
+        var duration = TimeSpan.FromMinutes(3);
+
+        var validAnchor = PlaybackTimelineStabilizer.ResolveSourceAnchorTimestamp(
+            start,
+            start + TimeSpan.FromSeconds(5),
+            duration,
+            out var validAnchorIsReliable);
+        Check.Equal(start, validAnchor);
+        Check.True(validAnchorIsReliable);
+        Check.Equal(
+            TimeSpan.FromSeconds(45),
+            PlaybackTimelineStabilizer.ProjectSourcePosition(
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                sourceUpdatedAt: validAnchor,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        var fallbackAnchor = PlaybackTimelineStabilizer.ResolveSourceAnchorTimestamp(
+            default,
+            start,
+            duration,
+            out var fallbackAnchorIsReliable);
+        Check.Equal(start, fallbackAnchor);
+        Check.False(fallbackAnchorIsReliable);
+        Check.Equal(
+            TimeSpan.FromSeconds(40),
+            PlaybackTimelineStabilizer.ProjectSourcePosition(
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: false,
+                sourceUpdatedAt: validAnchor,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        var stabilizer = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(40),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start));
+        Check.Equal(TimeSpan.FromSeconds(42), stabilizer.GetPosition(start + TimeSpan.FromSeconds(2)));
+
+        // Re-reading the same source anchor projects forward instead of resetting
+        // the display to the old raw position on every GSMTC poll.
+        Check.Equal(
+            TimeSpan.FromSeconds(42),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+
+        // A malformed same-track snapshot with no duration must preserve the
+        // established timeline instead of resetting the player to 0:00.
+        Check.Equal(
+            TimeSpan.FromMilliseconds(42500),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                isPlaying: true,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(2500)));
+        Check.Equal(duration, stabilizer.Duration);
+
+        // Chrome can publish a default timestamp and a one-off 0 position. Two
+        // frozen observations must not rewind a timeline that is still playing.
+        Check.Equal(
+            TimeSpan.FromSeconds(43),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(3),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(3)));
+        Check.Equal(
+            TimeSpan.FromSeconds(45),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(5),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        // Even an advancing reset stays filtered when Chrome supplied no reliable
+        // anchor timestamp.
+        Check.Equal(
+            TimeSpan.FromMilliseconds(46500),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromMilliseconds(1500),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromMilliseconds(6500),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(6500)));
+
+        // A deliberate external backwards seek is accepted only after two
+        // coherent observations backed by a credible source anchor.
+        Check.Equal(
+            TimeSpan.FromSeconds(47),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(7),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(7)));
+        Check.Equal(
+            TimeSpan.FromSeconds(3),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(7),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(8)));
+
+        // Mystral's own seek is immediate, while the stale response emitted by
+        // the source right after the command remains fenced out.
+        Check.Equal(
+            TimeSpan.FromSeconds(80),
+            stabilizer.BeginSeek(
+                "spotify|song",
+                TimeSpan.FromSeconds(80),
+                duration,
+                isPlaying: true,
+                startedAt: start + TimeSpan.FromSeconds(9)));
+        Check.Equal(
+            TimeSpan.FromMilliseconds(80100),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromMilliseconds(9100),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(9100)));
+        Check.Equal(
+            TimeSpan.FromSeconds(81),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(81),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(10),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(10)));
+
+        // A track change is an explicit discontinuity and resets immediately.
+        Check.Equal(
+            TimeSpan.Zero,
+            stabilizer.Observe(
+                "chrome|next-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(11),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(11)));
     }
 }
 

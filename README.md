@@ -54,7 +54,13 @@ backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on
-the right, and center the app icon and name where that identity is shown.
+the right, and center the app icon and name where that identity is shown. In
+fullscreen, Close is hidden and the Fullscreen action becomes the exit control.
+
+The playback timeline uses the media session's own update timestamp so Spotify
+and browser sessions do not rewind when Windows repeats a stale position. Each
+progress bar supports click-to-jump and drag seeking; hovering labels it `Seek`,
+while an active seek shows the target time briefly after release.
 
 ## Burn Editor
 
@@ -103,6 +109,7 @@ The test suite covers the vital headless app logic:
 - LRCLIB exact lookup, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
+- media-session timestamp projection, stale-position filtering, and seek reconciliation
 - model defaults and artwork tint edge cases
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling

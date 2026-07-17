@@ -31,6 +31,7 @@ For packaged development builds:
 - Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
 - Toggle always-on-top and confirm the setting sticks after restart.
 - Minimize the app and confirm restore works.
+- Enter fullscreen and confirm Close is hidden, then exit with Escape or the fullscreen control and confirm Close returns.
 - Close with `Close to tray` enabled and confirm the tray icon remains.
 - Restore from the tray icon.
 - Exit from the tray menu and confirm the process closes.
@@ -40,6 +41,11 @@ For packaged development builds:
 - Start playback in Spotify, a browser, or another Windows media-session app.
 - Confirm title, artist/description, progress, duration, play state, and artwork update.
 - Test play/pause, next, previous, and seek controls.
+- In compact, expanded, lyrics, and fullscreen modes, click an empty point on the progress bar and drag from the track (not only the thumb); confirm every progress bar follows the same target.
+- Hover a progress bar and confirm its tooltip says `Seek`; click or drag and confirm it shows the target time, stays visible briefly after release, and then returns to `Seek`.
+- While dragging a progress bar, switch away from Mystral before releasing; return and confirm the timeline is not stuck in seek-preview mode.
+- Seek forward and backward in Spotify and Chrome and confirm the chosen timestamp does not snap back while Windows delivers the old position.
+- Let Spotify and Chrome play across several polling intervals and confirm the elapsed time remains monotonic instead of jumping backward or resetting to zero.
 - Pause playback and confirm the UI state updates.
 - Stop playback or close the media app and confirm Mystral returns to idle without crashing.
 

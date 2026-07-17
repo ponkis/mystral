@@ -20,6 +20,10 @@ public sealed record MediaSnapshot(
     bool CanSeek,
     BitmapImage? CoverArt)
 {
+    public DateTimeOffset TimelineUpdatedAt { get; init; }
+
+    public bool HasReliableTimelineUpdatedAt { get; init; }
+
     public static MediaSnapshot Empty { get; } = new(
         HasSession: false,
         Title: "No active track",
