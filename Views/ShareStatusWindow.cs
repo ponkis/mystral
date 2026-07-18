@@ -3,13 +3,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Mystral.Models;
 using Mystral.Services;
 
 namespace Mystral.Views;
 
 internal sealed class ShareStatusWindow : Window
 {
-    private readonly Func<CancellationToken, Task> _shareAsync;
+    private readonly Func<CancellationToken, Task<GlobeBurnShareResult>> _shareAsync;
     private readonly TextBlock _headingText;
     private readonly TextBlock _detailText;
     private readonly ProgressBar _progressBar;
@@ -17,7 +18,7 @@ internal sealed class ShareStatusWindow : Window
     private readonly Button _closeButton;
     private bool _isRunning;
 
-    internal ShareStatusWindow(Window owner, Func<CancellationToken, Task> shareAsync)
+    internal ShareStatusWindow(Window owner, Func<CancellationToken, Task<GlobeBurnShareResult>> shareAsync)
     {
         _shareAsync = shareAsync;
         Title = "Share to globe";
@@ -128,6 +129,8 @@ internal sealed class ShareStatusWindow : Window
 
     internal bool WasSuccessful { get; private set; }
 
+    internal GlobeBurnShareResult? Result { get; private set; }
+
     private async Task RunShareAsync()
     {
         if (_isRunning)
@@ -137,6 +140,7 @@ internal sealed class ShareStatusWindow : Window
 
         _isRunning = true;
         WasSuccessful = false;
+        Result = null;
         _headingText.Text = "Sharing your burned CD";
         _detailText.Text = "Sending your CD over the internet...";
         _progressBar.Visibility = Visibility.Visible;
@@ -146,7 +150,7 @@ internal sealed class ShareStatusWindow : Window
 
         try
         {
-            await _shareAsync(CancellationToken.None);
+            Result = await _shareAsync(CancellationToken.None);
             WasSuccessful = true;
         }
         catch (Exception ex)

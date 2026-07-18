@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     private DispatcherTimer? _animatedArtRevealTimer;
     private string _animatedArtworkKey = string.Empty;
     private string? _animatedArtworkFile;
+    private ImageSource? _frozenAnimatedArtFrame;
     private string _lyricsTrackKey = string.Empty;
     private string _lastFmTrackKey = string.Empty;
     private string _lastFmLookupCompletedKey = string.Empty;
@@ -102,7 +103,6 @@ public partial class MainWindow : Window
     private bool _isBurnDiscInserting;
     private bool _isOpeningBurningWindow;
     private BurningWindow? _burningWindow;
-    private bool _isBurningWindowSuppressingTopmost;
     private bool _isBurnPresentationDetached;
     private bool _isBurnPresentationReading;
     private bool _isBurningWindowHiddenByDiscRemoval;
@@ -984,8 +984,9 @@ public partial class MainWindow : Window
         }
 
         _isOpeningBurningWindow = true;
+        // Suppress topmost only while the modal file picker is up; the player keeps
+        // its always-on-top state for the whole life of the burning window.
         PushDisableTopmost();
-        var retainTopmostSuppression = false;
         try
         {
             var picker = new Microsoft.Win32.OpenFileDialog
@@ -1049,8 +1050,6 @@ public partial class MainWindow : Window
             {
                 burningWindow.Show();
                 burningWindow.Activate();
-                _isBurningWindowSuppressingTopmost = true;
-                retainTopmostSuppression = true;
                 RefreshCompactBurnPresentation();
             }
             catch
@@ -1075,10 +1074,7 @@ public partial class MainWindow : Window
         {
             Mouse.OverrideCursor = null;
             ResetCompactBurnDisc();
-            if (!retainTopmostSuppression)
-            {
-                PopRestoreTopmost();
-            }
+            PopRestoreTopmost();
             _isOpeningBurningWindow = false;
         }
     }
@@ -1103,11 +1099,6 @@ public partial class MainWindow : Window
         _isBurnPresentationDetached = false;
         _isBurningWindowHiddenByDiscRemoval = false;
         RefreshCompactBurnPresentation();
-        if (_isBurningWindowSuppressingTopmost)
-        {
-            _isBurningWindowSuppressingTopmost = false;
-            PopRestoreTopmost();
-        }
         if (_isWaitingForBurningWindowClose)
         {
             _isWaitingForBurningWindowClose = false;
@@ -1480,13 +1471,46 @@ public partial class MainWindow : Window
 
     private static ToolTip CreateSeekToolTip(Slider slider)
     {
-        return new ToolTip
+        return CreateSliderToolTip("Seek", slider);
+    }
+
+    private static ToolTip CreateSliderToolTip(object content, Slider slider)
+    {
+        var toolTip = new ToolTip
         {
-            Content = "Seek",
-            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            Content = content,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Custom,
             PlacementTarget = slider,
-            StaysOpen = true
+            StaysOpen = true,
+            CustomPopupPlacementCallback = (popupSize, targetSize, _) =>
+            [
+                // Center the tooltip above the placement rectangle (the thumb).
+                new System.Windows.Controls.Primitives.CustomPopupPlacement(
+                    new Point((targetSize.Width - popupSize.Width) / 2, -popupSize.Height - 5),
+                    System.Windows.Controls.Primitives.PopupPrimaryAxis.Horizontal)
+            ]
         };
+        return toolTip;
+    }
+
+    // The thumb is laid out by value fraction across (width - thumb width); mirror
+    // that so the tooltip rides the pill instead of hovering over the whole bar.
+    private static void UpdateSliderToolTipPlacement(Slider slider, ToolTip toolTip)
+    {
+        const double thumbWidth = 16;
+        var range = slider.Maximum - slider.Minimum;
+        var fraction = range > 0
+            ? Math.Clamp((slider.Value - slider.Minimum) / range, 0, 1)
+            : 0;
+        var width = Math.Max(slider.ActualWidth, thumbWidth);
+        var left = fraction * (width - thumbWidth);
+        toolTip.PlacementRectangle = new Rect(left, 0, thumbWidth, slider.ActualHeight);
+        if (toolTip.IsOpen)
+        {
+            // Popups only re-place themselves when an offset changes; nudge it so
+            // the tooltip follows the thumb while dragging.
+            toolTip.HorizontalOffset = toolTip.HorizontalOffset == 0 ? 0.01 : 0;
+        }
     }
 
     private static void UpdateSeekToolTip(Slider slider, bool includePosition)
@@ -1503,13 +1527,7 @@ public partial class MainWindow : Window
 
     private ToolTip CreateVolumeToolTip(Slider slider)
     {
-        return new ToolTip
-        {
-            Content = FormatVolume(GetVolumeTitleValue(slider)),
-            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
-            PlacementTarget = slider,
-            StaysOpen = true
-        };
+        return CreateSliderToolTip(FormatVolume(GetVolumeTitleValue(slider)), slider);
     }
 
     private void UpdateVolumeToolTip(Slider slider)
@@ -1547,6 +1565,7 @@ public partial class MainWindow : Window
         if (slider.ToolTip is ToolTip toolTip)
         {
             toolTip.PlacementTarget = slider;
+            UpdateSliderToolTipPlacement(slider, toolTip);
             toolTip.IsOpen = true;
         }
     }
@@ -2172,7 +2191,20 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         _animatedArtworkCts = null;
-        StopAnimatedArtwork();
+
+        // When the next track's animated cover is already cached, keep the last
+        // rendered frame on screen instead of flashing the static cover during
+        // the swap; otherwise fall back to static art while the fetch runs.
+        var isShowingAnimatedArt = _animatedArtworkFile is not null
+            || _frozenAnimatedArtFrame is not null;
+        if (isShowingAnimatedArt && _animatedArtworkService.HasCachedArtwork(key))
+        {
+            FreezeAnimatedArtworkFrame();
+        }
+        else
+        {
+            StopAnimatedArtwork();
+        }
 
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -2190,15 +2222,22 @@ public partial class MainWindow : Window
         try
         {
             var file = await _animatedArtworkService.GetAnimatedArtworkAsync(snapshot, cancellationToken);
-            if (file is null)
-            {
-                return;
-            }
-
             await Dispatcher.InvokeAsync(() =>
             {
                 if (_animatedArtworkKey != key || cancellationToken.IsCancellationRequested)
                 {
+                    return;
+                }
+
+                if (file is null)
+                {
+                    // A frozen hand-off frame belongs to the previous track; drop
+                    // it so the static cover shows when no animated art arrives.
+                    if (_frozenAnimatedArtFrame is not null)
+                    {
+                        StopAnimatedArtwork();
+                    }
+
                     return;
                 }
 
@@ -2208,6 +2247,13 @@ public partial class MainWindow : Window
         catch
         {
             // Animated artwork is a best-effort enhancement; static art stays visible.
+            _ = Dispatcher.InvokeAsync(() =>
+            {
+                if (_animatedArtworkKey == key && _frozenAnimatedArtFrame is not null)
+                {
+                    StopAnimatedArtwork();
+                }
+            });
         }
     }
 
@@ -2263,11 +2309,71 @@ public partial class MainWindow : Window
             return;
         }
 
+        _frozenAnimatedArtFrame = null;
         _animatedArtPlayer.Play();
         foreach (var overlay in AnimatedArtOverlays)
         {
             overlay.Source = _animatedArtSource;
             AnimateDouble(overlay, OpacityProperty, 1.0, 640);
+        }
+    }
+
+    // Track-change hand-off: paint the last decoded video frame into the overlays
+    // so the static cover never flashes while the next cached cover opens.
+    private void FreezeAnimatedArtworkFrame()
+    {
+        if (_animatedArtworkFile is not null)
+        {
+            _frozenAnimatedArtFrame = TryCaptureAnimatedArtFrame() ?? _frozenAnimatedArtFrame;
+        }
+
+        if (_frozenAnimatedArtFrame is null)
+        {
+            StopAnimatedArtwork();
+            return;
+        }
+
+        _animatedArtworkFile = null;
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtPlayer?.Close();
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Opacity = 1;
+            overlay.Source = _frozenAnimatedArtFrame;
+        }
+    }
+
+    private ImageSource? TryCaptureAnimatedArtFrame()
+    {
+        if (_animatedArtSource?.Drawing is not VideoDrawing drawing
+            || drawing.Rect.Width < 1
+            || drawing.Rect.Height < 1)
+        {
+            return null;
+        }
+
+        try
+        {
+            var visual = new DrawingVisual();
+            using (var context = visual.RenderOpen())
+            {
+                context.DrawDrawing(drawing);
+            }
+
+            var frame = new RenderTargetBitmap(
+                (int)Math.Round(drawing.Rect.Width),
+                (int)Math.Round(drawing.Rect.Height),
+                96,
+                96,
+                PixelFormats.Pbgra32);
+            frame.Render(visual);
+            frame.Freeze();
+            return frame;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -2303,6 +2409,7 @@ public partial class MainWindow : Window
     private void StopAnimatedArtwork()
     {
         _animatedArtworkFile = null;
+        _frozenAnimatedArtFrame = null;
         _animatedArtRevealTimer?.Stop();
         _animatedArtPlayer?.Close();
         foreach (var overlay in AnimatedArtOverlays)
@@ -3327,6 +3434,7 @@ public partial class MainWindow : Window
 
             _isLyricsMode = true;
             SetCompactChromeVisible(false);
+            UpdateCompactBlurredArtVisibility();
             CollapseExpandedButton.Visibility = Visibility.Collapsed;
             LyricsPanel.Visibility = Visibility.Visible;
             LyricsPanel.IsHitTestVisible = true;
@@ -3339,6 +3447,7 @@ public partial class MainWindow : Window
         }
 
         _isLyricsMode = false;
+        UpdateCompactBlurredArtVisibility();
         LyricsPanel.IsHitTestVisible = false;
         var restoreExpanded = _restoreExpandedAfterLyrics;
         _restoreExpandedAfterLyrics = false;
@@ -3502,7 +3611,7 @@ public partial class MainWindow : Window
         _hasAppliedArtworkTint = true;
         _lastArtworkTintSource = coverArt;
         var tint = ResolvePlayerTint(
-            _settingsService.Settings.Appearance.PlayerThemeColor,
+            GetEffectivePlayerThemeColor(),
             ExtractDominantTint(coverArt),
             DefaultTint);
 
@@ -3564,15 +3673,33 @@ public partial class MainWindow : Window
             out _);
     }
 
+    private string? _playerThemeColorPreview;
+
+    /// <summary>
+    /// Live preview for the Appearance color picker: overrides the saved theme
+    /// color until called with null, without touching settings.
+    /// </summary>
+    internal void PreviewPlayerThemeColor(Color? color)
+    {
+        _playerThemeColorPreview = color is { } value
+            ? AppearanceSettings.FormatPlayerThemeColor(value.R, value.G, value.B)
+            : null;
+        ApplyPlayerAppearance();
+    }
+
+    private string GetEffectivePlayerThemeColor()
+    {
+        return _playerThemeColorPreview ?? _settingsService.Settings.Appearance.PlayerThemeColor;
+    }
+
     private void ApplyPlayerAppearance()
     {
-        var playerThemeColor = _settingsService.Settings.Appearance.PlayerThemeColor;
+        var playerThemeColor = GetEffectivePlayerThemeColor();
         var backdropVisibility = ShouldShowPlayerArtworkBackdrops(playerThemeColor)
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        BlurredArtImage.Visibility = backdropVisibility;
-        ExpandedArtImage.Visibility = backdropVisibility;
+        UpdateCompactBlurredArtVisibility();
         LyricsArtImage.Visibility = backdropVisibility;
         FullscreenBlurredArtImage.Visibility = backdropVisibility;
 
@@ -3580,6 +3707,17 @@ public partial class MainWindow : Window
         _hasAppliedArtworkTint = false;
         _lastArtworkTintSource = null;
         ApplyArtworkTint(currentTintSource);
+    }
+
+    // The lyrics panel is translucent and paints its own blurred-art layer, so the
+    // compact blur beneath it must hide while lyrics mode is open or the cover art
+    // shows twice.
+    private void UpdateCompactBlurredArtVisibility()
+    {
+        var showBackdrops = ShouldShowPlayerArtworkBackdrops(GetEffectivePlayerThemeColor());
+        BlurredArtImage.Visibility = showBackdrops && !_isLyricsMode
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void AnimateColor(GradientStop stop, Color color)
@@ -4678,8 +4816,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        PushDisableTopmost();
-
         var settingsWindow = new SettingsWindow(
             _settingsService,
             _lastFmService,
@@ -4735,7 +4871,6 @@ public partial class MainWindow : Window
         if (ReferenceEquals(_settingsWindow, sender))
         {
             _settingsWindow = null;
-            PopRestoreTopmost();
         }
 
         if (_isWaitingForSettingsWindowClose)
@@ -5002,9 +5137,17 @@ public partial class MainWindow : Window
     private void ToggleScrobblingFromTray()
     {
         var current = _settingsService.Settings;
-        if (!current.LastFm.IsConfigured)
+        var enabling = !current.LastFm.ScrobblingEnabled;
+        if (enabling && !current.LastFm.HasScrobblingCredentials)
         {
+            // Never let the tray flip scrobbling on without the credentials it
+            // needs — send the user to the Last.fm settings instead.
+            RestoreFromTray();
             ShowSettingsWindow();
+            AppDialogWindow.ShowWarning(
+                _settingsWindow is { IsVisible: true } settingsWindow ? settingsWindow : this,
+                "Scrobbling needs more details",
+                "Scrobbling requires your Last.fm API secret and password. Add them in the Last.fm settings and save.");
             return;
         }
 
@@ -5012,7 +5155,7 @@ public partial class MainWindow : Window
         {
             LastFm = current.LastFm with
             {
-                ScrobblingEnabled = !current.LastFm.ScrobblingEnabled
+                ScrobblingEnabled = enabling
             }
         });
     }

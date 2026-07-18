@@ -83,7 +83,14 @@
             </Style>
 
             <ContextMenu x:Key="HistoryItemContextMenu">
-                <MenuItem Header="Remove" Click="RemoveHistoryItem_Click" />
+                <MenuItem Header="Remove" Click="RemoveHistoryItem_Click">
+                    <MenuItem.Icon>
+                        <Image Width="16"
+                               Height="16"
+                               Source="pack://siteoforigin:,,,/Resources/delete.ico"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </MenuItem.Icon>
+                </MenuItem>
             </ContextMenu>
 
         </ResourceDictionary>
@@ -148,13 +155,6 @@
                              TextChanged="SettingsControl_Changed"
                              IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
-                    <TextBlock Text="API secret" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
-                    <TextBox x:Name="ApiSecretBox"
-                             Margin="0,4,0,10"
-                             Style="{StaticResource SettingTextBoxStyle}"
-                             TextChanged="SettingsControl_Changed"
-                             IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
-
                     <TextBlock Text="Username" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
                     <TextBox x:Name="UsernameBox"
                              Margin="0,4,0,10"
@@ -162,18 +162,24 @@
                              TextChanged="SettingsControl_Changed"
                              IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
 
-                    <TextBlock Text="Password" IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
+                    <CheckBox x:Name="ScrobbleCheckBox"
+                              Margin="0,2,0,10"
+                              Content="Scrobble playback to Last.fm"
+                              ToolTip="Scrobbling signs requests against your account, so it also needs the API secret and password below."
+                              Click="SettingsControl_Changed"
+                              IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
+
+                    <TextBlock x:Name="ApiSecretLabel" Text="API secret (scrobbling only)" />
+                    <TextBox x:Name="ApiSecretBox"
+                             Margin="0,4,0,10"
+                             Style="{StaticResource SettingTextBoxStyle}"
+                             TextChanged="SettingsControl_Changed" />
+
+                    <TextBlock x:Name="PasswordLabel" Text="Password (scrobbling only)" />
                     <PasswordBox x:Name="PasswordBox"
                                  Margin="0,4,0,10"
                                  Style="{StaticResource SettingPasswordBoxStyle}"
-                                 PasswordChanged="SettingsControl_Changed"
-                                 IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
-
-                    <CheckBox x:Name="ScrobbleCheckBox"
-                              Margin="0,0,0,10"
-                              Content="Scrobble playback to Last.fm"
-                              Click="SettingsControl_Changed"
-                              IsEnabled="{Binding IsChecked, ElementName=EnableLastFmCheckBox}" />
+                                 PasswordChanged="SettingsControl_Changed" />
 
                     <Grid Margin="0,5,0,0">
                         <Grid.ColumnDefinitions>
@@ -222,13 +228,13 @@
                               Height="23"
                               HorizontalAlignment="Left"
                               SelectionChanged="SettingsControl_Changed">
-                        <ComboBoxItem Content="MusicBrainz-assisted (default)" />
-                        <ComboBoxItem Content="LRCLIB (direct)" />
+                        <ComboBoxItem Content="MusicBrainz (default)" />
+                        <ComboBoxItem Content="LRCLIB" />
                     </ComboBox>
                     <TextBlock Margin="0,6,0,0"
                                Foreground="#555555"
                                TextWrapping="Wrap"
-                               Text="MusicBrainz-assisted uses the matched song metadata for a more precise LRCLIB lyric search. Direct mode searches LRCLIB with the fields in the burn editor." />
+                               Text="MusicBrainz first matches the song on MusicBrainz and uses that metadata for a more precise lyric search. LRCLIB searches lyrics directly with the fields in the burn editor. Lyrics always come from LRCLIB — MusicBrainz does not host lyrics." />
                 </StackPanel>
 
                 <StackPanel x:Name="AppearancePanel"
@@ -341,13 +347,16 @@
                                 <StackPanel x:Name="LinkedSocialProfilePanel"
                                             Visibility="Collapsed">
                                     <TextBlock x:Name="SocialUsernameText"
-                                               Foreground="#666666" />
+                                               Foreground="#666666"
+                                               TextTrimming="CharacterEllipsis" />
                                     <TextBlock x:Name="SocialDisplayNameText"
                                                Margin="0,0,0,1"
                                                FontSize="20"
-                                               Foreground="#111111" />
+                                               Foreground="#111111"
+                                               TextTrimming="CharacterEllipsis" />
                                     <TextBlock x:Name="SocialCdCountText"
-                                               Foreground="#666666" />
+                                               Foreground="#666666"
+                                               TextTrimming="CharacterEllipsis" />
                                     <TextBlock Margin="0,10,0,0">
                                         <Hyperlink x:Name="UnlinkSocialAccountLink"
                                                    Click="UnlinkSocialAccount_Click">unlink your account</Hyperlink>

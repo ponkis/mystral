@@ -41,8 +41,38 @@ public sealed partial class AnimatedArtworkService : IDisposable
     {
         _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(AppMetadata.UserAgent);
-        _cacheDirectory = cacheDirectory
-            ?? Path.Combine(AppMetadata.LocalApplicationDataDirectory, "animated-artwork");
+        if (cacheDirectory is null)
+        {
+            // Remuxed covers are regenerable, so they live in temp where Windows
+            // disk cleanup can reclaim them instead of growing LocalAppData.
+            _cacheDirectory = Path.Combine(AppMetadata.TemporaryDirectory, "animated-artwork");
+            CleanUpLegacyCacheDirectory();
+        }
+        else
+        {
+            _cacheDirectory = cacheDirectory;
+        }
+    }
+
+    // Releases before 2.2.1 cached under LocalAppData; sweep that folder away once.
+    private static void CleanUpLegacyCacheDirectory()
+    {
+        var legacyDirectory = Path.Combine(
+            AppMetadata.LocalApplicationDataDirectory,
+            "animated-artwork");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (Directory.Exists(legacyDirectory))
+                {
+                    Directory.Delete(legacyDirectory, recursive: true);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        });
     }
 
     public static string CreateArtworkKey(MediaSnapshot snapshot)
@@ -59,6 +89,25 @@ public sealed partial class AnimatedArtworkService : IDisposable
         }
 
         return $"{NormalizeKey(snapshot.Artist)}|{NormalizeKey(snapshot.Album)}";
+    }
+
+    /// <summary>
+    /// Synchronously reports whether an animated cover for the key is already on
+    /// disk (or in memory), so the UI can hand off between covers without waiting.
+    /// </summary>
+    public bool HasCachedArtwork(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        if (_cache.TryGetValue(key, out var cached))
+        {
+            return cached is not null && File.Exists(cached);
+        }
+
+        return File.Exists(GetCacheFilePath(key));
     }
 
     public async Task<string?> GetAnimatedArtworkAsync(MediaSnapshot snapshot, CancellationToken cancellationToken)

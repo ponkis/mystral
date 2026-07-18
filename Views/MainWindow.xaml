@@ -1015,7 +1015,7 @@
             <Border x:Name="LyricsPanel"
                     Grid.RowSpan="3"
                     CornerRadius="9"
-                    Background="#FF141719"
+                    Background="Transparent"
                     Visibility="Collapsed"
                     Opacity="0"
                     RenderTransformOrigin="0.5,0.5"

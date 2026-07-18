@@ -5,9 +5,9 @@
         Title="Choose player theme"
         Icon="pack://siteoforigin:,,,/Resources/appearance.ico"
         Width="300"
-        Height="480"
+        Height="426"
         MinWidth="300"
-        MinHeight="480"
+        MinHeight="426"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
@@ -28,20 +28,26 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBlock Foreground="#333333"
                    TextWrapping="Wrap"
-                   Text="Choose a color." />
+                   Text="Choose a color. The player previews it right away." />
 
-        <picker:StandardColorPicker x:Name="ThemeColorPicker"
-                                    Grid.Row="1"
-                                    Margin="0,12"
-                                    HorizontalAlignment="Stretch"
-                                    VerticalAlignment="Stretch"
-                                    ShowAlpha="False" />
+        <picker:SquarePicker x:Name="ThemeColorPicker"
+                             Grid.Row="1"
+                             Margin="0,12"
+                             HorizontalAlignment="Stretch"
+                             VerticalAlignment="Stretch" />
 
-        <StackPanel Grid.Row="2"
+        <picker:HexColorTextBox Grid.Row="2"
+                                Margin="0,0,0,12"
+                                HorizontalAlignment="Center"
+                                ShowAlpha="False"
+                                ColorState="{Binding ColorState, ElementName=ThemeColorPicker, Mode=TwoWay}" />
+
+        <StackPanel Grid.Row="3"
                     HorizontalAlignment="Right"
                     Orientation="Horizontal">
             <Button Width="82"

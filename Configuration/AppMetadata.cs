@@ -23,6 +23,14 @@ public static class AppMetadata
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         EnvironmentName == "Production" ? Name : $"{Name} {EnvironmentName}");
 
+    /// <summary>
+    /// Per-environment scratch space under the user's temp directory for
+    /// regenerable caches that Windows disk cleanup may reclaim.
+    /// </summary>
+    public static string TemporaryDirectory { get; } = Path.Combine(
+        Path.GetTempPath(),
+        EnvironmentName == "Production" ? Name : $"{Name} {EnvironmentName}");
+
     public static Uri GlobeBaseUri { get; } = ResolveGlobeBaseUri();
     public static Uri? GlobeAvatarCdnBaseUri { get; } = ResolveGlobeAvatarCdnBaseUri();
 

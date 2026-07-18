@@ -28,29 +28,33 @@ Mystral is a Windows desktop music companion built with WPF. It reads the active
 
 4. Turn on and configure Last.fm under the `Last.fm` category:
 
-   - API key
-   - API secret
-   - Username
-   - Password
+   - API key and Username — enough for track links and the tray profile link
    - `Scrobble playback to Last.fm`, if wanted
+   - API secret and Password — required only when scrobbling is enabled
 
-The app validates Last.fm credentials when settings are saved. Scrobbling uses Last.fm `auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
+The app validates Last.fm credentials when settings are saved: the API key and
+username alone unlock the viewer features, while enabling scrobbling also
+requires the API secret and account password (the tray toggle enforces the same
+rule and stays in sync with an open Settings window). Scrobbling uses Last.fm
+`auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
 
 Under `Behavior`, choose how the burn editor looks up lyrics:
 
-- `MusicBrainz-assisted (default)` uses the MusicBrainz metadata match to refine
-  the LRCLIB lyric search.
-- `LRCLIB (direct)` searches LRCLIB with the title, artist, album, and duration
+- `MusicBrainz (default)` first matches the song on MusicBrainz and uses that
+  metadata to refine the LRCLIB lyric search.
+- `LRCLIB` searches LRCLIB directly with the title, artist, album, and duration
   currently shown in the burn editor.
 
-Neither burn-lyrics mode requires an API key.
+Lyrics always come from LRCLIB (MusicBrainz does not host lyric text), and
+neither burn-lyrics mode requires an API key.
 
 Under `Appearance`, the player theme can follow each track's artwork automatically
-or use a color chosen from the theme color picker. A custom color becomes the
-fixed tint for the main player and removes its cover-derived background artwork;
-the burn editor and track notifications continue using their own automatic
-artwork tint. Returning the theme to automatic restores the artwork tint and
-backgrounds.
+or use a color chosen from the theme color picker (a color wheel plus a hex
+field; the player previews the color live while picking). A custom color becomes
+the fixed tint for the main player and removes its cover-derived blurred
+backgrounds while the expanded view keeps showing the cover itself; the burn
+editor and track notifications continue using their own automatic artwork tint.
+Returning the theme to automatic restores the artwork tint and backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on
@@ -70,15 +74,18 @@ session's album artist when its primary artist field is empty.
 When the playing album has an Apple Music animated cover, Mystral downloads the
 animation once and fades it in over the static cover in the compact, expanded,
 lyrics-header, and fullscreen art views, looping it while the album keeps
-playing. Albums without an animated cover keep the regular artwork. Animated
+playing. Switching to another album whose animated cover is already cached
+holds the last animated frame during the swap instead of flashing the static
+cover. Albums without an animated cover keep the regular artwork. Animated
 covers are resolved through the `artwork.m8tec.top` lookup service and cached
-locally.
+in the user's temp directory, where Windows disk cleanup can reclaim them.
 
 Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. When a looping track
 restarts after reaching its end, lyric browsing resets in both the regular and
-fullscreen views. Lyrics mode uses one cover-derived backdrop plus its header
-artwork, while a fixed custom theme continues to hide the backdrop.
+fullscreen views. Lyrics mode sits on the player's translucent glass surface and
+uses one cover-derived backdrop plus its header artwork, while a fixed custom
+theme continues to hide the backdrop.
 
 ## Burn Editor
 
@@ -90,7 +97,10 @@ back to portable timestamped LRC text otherwise.
 
 `Fetch song data` retrieves metadata and artwork through MusicBrainz and the
 Cover Art Archive, and retrieves plain or synchronized lyrics through LRCLIB.
-Fetched lyrics remain editable before the copy is saved.
+Fetched lyrics remain editable before the copy is saved. The whole fetch runs
+under one connection deadline, so a dropped connection surfaces a timeout
+message instead of stalling. The CD artwork tile's right-click menu can also
+save the transparent disc guide image for aligning artwork in an editor.
 
 ## Updates
 

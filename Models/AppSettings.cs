@@ -29,13 +29,31 @@ public sealed record class LastFmCredentials
 
     public bool ScrobblingEnabled { get; set; }
 
+    /// <summary>
+    /// Enough to look tracks up and open the Last.fm profile: API key + username.
+    /// </summary>
     [JsonIgnore]
-    public bool IsConfigured =>
+    public bool HasViewerCredentials =>
         Enabled
         && !string.IsNullOrWhiteSpace(ApiKey)
+        && !string.IsNullOrWhiteSpace(Username);
+
+    /// <summary>
+    /// Scrobbling additionally signs requests and opens a session, so it needs
+    /// the API secret and account password on top of the viewer credentials.
+    /// </summary>
+    [JsonIgnore]
+    public bool HasScrobblingCredentials =>
+        HasViewerCredentials
         && !string.IsNullOrWhiteSpace(ApiSecret)
-        && !string.IsNullOrWhiteSpace(Username)
         && !string.IsNullOrWhiteSpace(Password);
+
+    /// <summary>
+    /// Every credential the currently enabled feature set requires is present.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsConfigured =>
+        ScrobblingEnabled ? HasScrobblingCredentials : HasViewerCredentials;
 }
 
 public sealed record class BehaviorSettings

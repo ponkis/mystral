@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
@@ -10,6 +12,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using Mystral.Configuration;
 using Mystral.Models;
 using Mystral.Services;
 using static Mystral.Services.ArtworkTint;
@@ -477,6 +480,41 @@ public partial class BurningWindow : Window
         await RefreshArtworkUiAsync();
     }
 
+    private void SaveDiscArtworkGuide_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save CD artwork guide",
+            AddExtension = true,
+            DefaultExt = ".png",
+            FileName = "cd-artwork-guide.png",
+            Filter = "PNG image|*.png"
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            var guidePath = Path.Combine(
+                AppContext.BaseDirectory,
+                "Resources",
+                "Images",
+                "cd_mask.png");
+            File.Copy(guidePath, dialog.FileName, overwrite: true);
+            AppDialogWindow.ShowConfirmationWithIcon(
+                this,
+                "Guide saved",
+                "The CD artwork guide was saved. Align your artwork to its transparent area for a perfect disc print.",
+                "Resources/save.ico");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            AppDialogWindow.ShowWarning(this, "Could not save the guide", ex.Message);
+        }
+    }
+
     private async Task UploadArtworkAsync(bool isDiscArtwork)
     {
         if (_isBusy)
@@ -638,6 +676,11 @@ public partial class BurningWindow : Window
 
         BeginOperation();
         var cancellationToken = _operationCts!.Token;
+        // A lost connection can stall each request until its own timeout and
+        // retries stack up, so the whole fetch gets one overall deadline.
+        using var fetchDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        fetchDeadline.CancelAfter(TimeSpan.FromSeconds(90));
+        var fetchToken = fetchDeadline.Token;
         SetBusy(true);
         MusicBrainzTrackData? result = null;
         LyricsResult? lyricsResult = null;
@@ -663,7 +706,7 @@ public partial class BurningWindow : Window
                     lookupArtist,
                     lookupAlbum,
                     _draft.Duration,
-                    cancellationToken)
+                    fetchToken)
                 : null;
             try
             {
@@ -673,15 +716,15 @@ public partial class BurningWindow : Window
                     _draft.Album,
                     _draft.Isrc,
                     _draft.Duration,
-                    cancellationToken);
+                    fetchToken);
                 if (result?.CoverArtwork is { Length: > 0 } coverBytes)
                 {
-                    fetchedCover = await TryLoadFetchedArtworkAsync(coverBytes, cancellationToken);
+                    fetchedCover = await TryLoadFetchedArtworkAsync(coverBytes, fetchToken);
                 }
 
                 if (result?.DiscArtwork is { Length: > 0 } discBytes)
                 {
-                    fetchedDisc = await TryLoadFetchedArtworkAsync(discBytes, cancellationToken);
+                    fetchedDisc = await TryLoadFetchedArtworkAsync(discBytes, fetchToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -694,7 +737,7 @@ public partial class BurningWindow : Window
             }
             catch (Exception ex)
             {
-                metadataError = ex;
+                metadataError = CreateFetchConnectionError("MusicBrainz", ex);
             }
 
             try
@@ -703,14 +746,14 @@ public partial class BurningWindow : Window
                 {
                     lyricsResult = await directLyricsTask;
                 }
-                else if (!cancellationToken.IsCancellationRequested)
+                else if (!fetchToken.IsCancellationRequested)
                 {
                     lyricsResult = await _lyricsService.GetLyricsAsync(
                         PreferFetched(result?.Title, lookupTitle),
                         PreferFetched(result?.Artist, lookupArtist),
                         PreferFetched(result?.Album, lookupAlbum),
                         _draft.Duration,
-                        cancellationToken);
+                        fetchToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -723,7 +766,7 @@ public partial class BurningWindow : Window
             }
             catch (Exception ex)
             {
-                lyricsError = ex;
+                lyricsError = CreateFetchConnectionError("LRCLIB", ex);
             }
             finally
             {
@@ -1009,34 +1052,30 @@ public partial class BurningWindow : Window
 
         if (automaticallyShare)
         {
-            try
+            if (!showSuccess)
             {
-                await _globeConnectionService.ShareBurnAsync(shareRequest);
-                if (showSuccess)
+                // Closing flows share quietly; failures are reconciled by the
+                // periodic connection check instead of surprise dialogs.
+                try
                 {
-                    AppDialogWindow.ShowConfirmation(
-                        this,
-                        "Burn complete",
-                        "Successfully burned and shared to your globe profile!");
+                    await _globeConnectionService.ShareBurnAsync(shareRequest);
                 }
+                catch (Exception)
+                {
+                }
+                return;
             }
-            catch (Exception)
-            {
-                if (!showSuccess)
-                {
-                    return;
-                }
 
-                var retry = AppDialogWindow.ShowAction(
-                    this,
-                    "Burn complete — sharing failed",
-                    "Your CD was burned, but it couldn't be shared to globe. Check your connection and try again.",
-                    "Retry",
-                    isWarning: true);
-                if (retry)
-                {
-                    ShowShareStatus(shareRequest);
-                }
+            // Auto-share runs through the same visible progress window as a
+            // manual share (with its built-in Retry), so the editor never
+            // appears frozen while the handshake resolves.
+            var autoShareResult = ShowShareStatus(shareRequest);
+            if (autoShareResult is not null)
+            {
+                ShowSharedToGlobeConfirmation(
+                    autoShareResult,
+                    "Burn complete",
+                    "Successfully burned and shared to your globe profile!");
             }
             return;
         }
@@ -1064,7 +1103,14 @@ public partial class BurningWindow : Window
                 "Share to globe");
             if (share)
             {
-                ShowShareStatus(shareRequest);
+                var shareResult = ShowShareStatus(shareRequest);
+                if (shareResult is not null)
+                {
+                    ShowSharedToGlobeConfirmation(
+                        shareResult,
+                        "Shared to globe",
+                        "Your burned CD was shared to your globe profile.");
+                }
             }
             return;
         }
@@ -1073,15 +1119,14 @@ public partial class BurningWindow : Window
             this,
             "Burn complete",
             "Your CD has been burned!",
-            "Link your account to share to the internet",
-            placeActionOnNewLine: true);
+            "Link your account to share to the internet");
         if (link && Application.Current.MainWindow is MainWindow mainWindow)
         {
             mainWindow.ActivateFromExternalRequest(openSocialSettings: true);
         }
     }
 
-    private void ShowShareStatus(GlobeBurnShareRequest shareRequest)
+    private GlobeBurnShareResult? ShowShareStatus(GlobeBurnShareRequest shareRequest)
     {
         var statusWindow = new ShareStatusWindow(
             this,
@@ -1089,13 +1134,42 @@ public partial class BurningWindow : Window
                 shareRequest,
                 cancellationToken));
         statusWindow.ShowDialog();
-        if (statusWindow.WasSuccessful)
+        return statusWindow.WasSuccessful ? statusWindow.Result : null;
+    }
+
+    private void ShowSharedToGlobeConfirmation(
+        GlobeBurnShareResult result,
+        string title,
+        string message)
+    {
+        var postUri = TryCreateGlobePostUri(result);
+        if (postUri is null)
         {
-            AppDialogWindow.ShowConfirmation(
-                this,
-                "Shared to globe",
-                "Your burned CD was shared to your globe profile.");
+            AppDialogWindow.ShowConfirmationWithIcon(this, title, message, "Resources/mail.ico");
+            return;
         }
+
+        AppDialogWindow.ShowConfirmationWithLink(
+            this,
+            title,
+            message,
+            "View your post on globe",
+            postUri,
+            iconPath: "Resources/mail.ico");
+    }
+
+    private Uri? TryCreateGlobePostUri(GlobeBurnShareResult result)
+    {
+        var username = _globeConnectionService.State.Profile?.UsernameWithoutAt;
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(result.PostId))
+        {
+            return null;
+        }
+
+        // globe deep-links posts as /users/<username>?post=<id>.
+        return new Uri(
+            AppMetadata.GlobeBaseUri,
+            $"users/{Uri.EscapeDataString(username)}?post={Uri.EscapeDataString(result.PostId)}");
     }
 
     private async Task<ArtworkAsset?> TryLoadFetchedArtworkAsync(byte[] data, CancellationToken cancellationToken)
@@ -1238,6 +1312,34 @@ public partial class BurningWindow : Window
             this,
             "Song data and lyrics not found",
             message);
+    }
+
+    // Timeouts and socket failures otherwise surface as "A task was canceled." or
+    // raw HTTP errors; translate them into a connection hint the user can act on.
+    internal static Exception CreateFetchConnectionError(string serviceName, Exception exception)
+    {
+        var cause = exception;
+        while (cause.InnerException is not null)
+        {
+            cause = cause.InnerException;
+        }
+
+        if (exception is OperationCanceledException or TimeoutException
+            || cause is OperationCanceledException or TimeoutException)
+        {
+            return new TimeoutException(
+                $"The {serviceName} request timed out. Check your internet connection and try again.",
+                exception);
+        }
+
+        if (exception is HttpRequestException || cause is HttpRequestException or SocketException)
+        {
+            return new HttpRequestException(
+                $"{serviceName} couldn't be reached. Check your internet connection and try again.",
+                exception);
+        }
+
+        return exception;
     }
 
     private static string PreferFetched(string? fetched, string fallback)

@@ -65,6 +65,7 @@ public partial class SettingsWindow : Window
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
         _globeConnectionService.StateChanged += GlobeConnectionService_StateChanged;
+        _settingsService.SettingsChanged += SettingsService_SettingsChanged;
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
 
@@ -73,8 +74,34 @@ public partial class SettingsWindow : Window
         {
             CancelSocialSignIn(restoreProfile: false);
             _globeConnectionService.StateChanged -= GlobeConnectionService_StateChanged;
+            _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
+    }
+
+    // The tray menu can flip scrobbling while this window is open; mirror the
+    // stored value immediately instead of waiting for a reopen.
+    private void SettingsService_SettingsChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => SettingsService_SettingsChanged(sender, e));
+            return;
+        }
+
+        if (_isLoadingSettings || _isSaving)
+        {
+            return;
+        }
+
+        var storedScrobbling = _settingsService.Settings.LastFm.ScrobblingEnabled;
+        if (ScrobbleCheckBox.IsChecked != storedScrobbling)
+        {
+            ScrobbleCheckBox.IsChecked = storedScrobbling;
+            UpdateLastFmFieldStates();
+        }
+
+        RefreshDirtyState();
     }
 
     internal void ShowSocialSection(bool startLinking = false)
@@ -140,8 +167,19 @@ public partial class SettingsWindow : Window
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
+        UpdateLastFmFieldStates();
         UpdateLastFmStatus();
         UpdateDirtyStatus();
+    }
+
+    private void UpdateLastFmFieldStates()
+    {
+        var integrationEnabled = EnableLastFmCheckBox.IsChecked == true;
+        var scrobbling = integrationEnabled && ScrobbleCheckBox.IsChecked == true;
+        ApiSecretLabel.IsEnabled = scrobbling;
+        ApiSecretBox.IsEnabled = scrobbling;
+        PasswordLabel.IsEnabled = scrobbling;
+        PasswordBox.IsEnabled = scrobbling;
     }
 
     private void CategoriesListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -188,6 +226,7 @@ public partial class SettingsWindow : Window
 
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
+        UpdateLastFmFieldStates();
         RefreshDirtyState();
     }
 
@@ -235,8 +274,33 @@ public partial class SettingsWindow : Window
         {
             Owner = this
         };
-        if (picker.ShowDialog() != true)
+
+        // Preview every change live on the player and this panel's swatch; the
+        // preview is discarded (player reverts to saved settings) on close.
+        var mainWindow = Application.Current.MainWindow as MainWindow;
+        picker.SelectedColorChanged += (_, color) =>
         {
+            PlayerThemeColorSwatch.Background = new SolidColorBrush(color);
+            PlayerThemeColorText.Text = AppearanceSettings.FormatPlayerThemeColor(
+                color.R,
+                color.G,
+                color.B);
+            mainWindow?.PreviewPlayerThemeColor(color);
+        };
+
+        bool accepted;
+        try
+        {
+            accepted = picker.ShowDialog() == true;
+        }
+        finally
+        {
+            mainWindow?.PreviewPlayerThemeColor(null);
+        }
+
+        if (!accepted)
+        {
+            UpdatePlayerThemeControls();
             return false;
         }
 
@@ -1150,7 +1214,9 @@ public partial class SettingsWindow : Window
         }
 
         SetLastFmStatus(
-            "Last.fm needs every field before it can be enabled.",
+            credentials.ScrobblingEnabled && credentials.HasViewerCredentials
+                ? "Scrobbling also needs the API secret and password."
+                : "Last.fm needs an API key and username before it can be enabled.",
             isWarning: true);
     }
 
