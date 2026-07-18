@@ -44,6 +44,7 @@ public partial class MainWindow : Window
 
     private readonly MediaSessionService _mediaService;
     private readonly LyricsService _lyricsService;
+    private readonly AnimatedArtworkService _animatedArtworkService;
     private readonly VolumeService _volumeService;
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
@@ -63,6 +64,12 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _lyricsRefreshCts;
     private CancellationTokenSource? _lastFmCts;
     private CancellationTokenSource? _lastFmScrobbleCts;
+    private CancellationTokenSource? _animatedArtworkCts;
+    private MediaPlayer? _animatedArtPlayer;
+    private DrawingImage? _animatedArtSource;
+    private DispatcherTimer? _animatedArtRevealTimer;
+    private string _animatedArtworkKey = string.Empty;
+    private string? _animatedArtworkFile;
     private string _lyricsTrackKey = string.Empty;
     private string _lastFmTrackKey = string.Empty;
     private string _lastFmLookupCompletedKey = string.Empty;
@@ -186,6 +193,7 @@ public partial class MainWindow : Window
         _settingsService = new AppSettingsService();
         _mediaService = new MediaSessionService();
         _lyricsService = new LyricsService();
+        _animatedArtworkService = new AnimatedArtworkService();
         _volumeService = new VolumeService();
         _lastFmService = new LastFmService(_settingsService);
         _globeConnectionService = new GlobeConnectionService(_settingsService);
@@ -1764,6 +1772,7 @@ public partial class MainWindow : Window
         }
 
         RefreshCompactBurnPresentation();
+        RefreshAnimatedArtworkForSnapshot(snapshot);
         RefreshLyricsForSnapshot(snapshot);
         RefreshLastFmForSnapshot(snapshot);
         UpdateScrobblingForSnapshot(snapshot);
@@ -2145,6 +2154,162 @@ public partial class MainWindow : Window
                 Lyrics = LyricsResult.Error("Lyrics unavailable");
                 RenderLyricsState();
             });
+        }
+    }
+
+    private Image[] AnimatedArtOverlays =>
+        [ArtVideoImage, ExpandedArtVideoImage, LyricsHeaderArtVideoImage, FullscreenArtVideoImage];
+
+    private void RefreshAnimatedArtworkForSnapshot(MediaSnapshot snapshot)
+    {
+        var key = AnimatedArtworkService.CreateArtworkKey(snapshot);
+        if (key == _animatedArtworkKey)
+        {
+            return;
+        }
+
+        _animatedArtworkKey = key;
+        _animatedArtworkCts?.Cancel();
+        _animatedArtworkCts?.Dispose();
+        _animatedArtworkCts = null;
+        StopAnimatedArtwork();
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(90));
+        _animatedArtworkCts = cts;
+        _ = LoadAnimatedArtworkAsync(snapshot, key, cts.Token);
+    }
+
+    private async Task LoadAnimatedArtworkAsync(MediaSnapshot snapshot, string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = await _animatedArtworkService.GetAnimatedArtworkAsync(snapshot, cancellationToken);
+            if (file is null)
+            {
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_animatedArtworkKey != key || cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                StartAnimatedArtwork(file);
+            });
+        }
+        catch
+        {
+            // Animated artwork is a best-effort enhancement; static art stays visible.
+        }
+    }
+
+    private void StartAnimatedArtwork(string file)
+    {
+        EnsureAnimatedArtPlayer();
+        _animatedArtworkFile = file;
+        _animatedArtPlayer!.Close();
+        _animatedArtPlayer.Open(new Uri(file));
+    }
+
+    private void EnsureAnimatedArtPlayer()
+    {
+        if (_animatedArtPlayer is not null)
+        {
+            return;
+        }
+
+        var player = new MediaPlayer { IsMuted = true, Volume = 0, ScrubbingEnabled = true };
+        player.MediaOpened += (_, _) => OnAnimatedArtPlayerOpened();
+        player.MediaEnded += (_, _) => OnAnimatedArtPlayerEnded();
+        player.MediaFailed += (_, _) => OnAnimatedArtPlayerFailed();
+        _animatedArtPlayer = player;
+        _animatedArtSource = new DrawingImage(new VideoDrawing { Player = player, Rect = new Rect(0, 0, 1, 1) });
+        _animatedArtRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        _animatedArtRevealTimer.Tick += (_, _) => RevealAnimatedArtwork();
+    }
+
+    private void OnAnimatedArtPlayerOpened()
+    {
+        var player = _animatedArtPlayer;
+        if (_animatedArtworkFile is null || player is null || _animatedArtSource is null)
+        {
+            return;
+        }
+
+        if (_animatedArtSource.Drawing is VideoDrawing drawing && player.NaturalVideoWidth > 0)
+        {
+            drawing.Rect = new Rect(0, 0, player.NaturalVideoWidth, player.NaturalVideoHeight);
+        }
+
+        // Scrubbing renders the first frame while paused, so the reveal fades in
+        // real footage instead of a not-yet-decoded black surface.
+        player.Position = TimeSpan.FromMilliseconds(1);
+        _animatedArtRevealTimer?.Start();
+    }
+
+    private void RevealAnimatedArtwork()
+    {
+        _animatedArtRevealTimer?.Stop();
+        if (_animatedArtworkFile is null || _animatedArtPlayer is null || _animatedArtSource is null)
+        {
+            return;
+        }
+
+        _animatedArtPlayer.Play();
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.Source = _animatedArtSource;
+            AnimateDouble(overlay, OpacityProperty, 1.0, 640);
+        }
+    }
+
+    private void OnAnimatedArtPlayerEnded()
+    {
+        if (_animatedArtworkFile is null || _animatedArtPlayer is null)
+        {
+            return;
+        }
+
+        // The cached file is remuxed into a seekable MP4, so looping is a plain
+        // rewind on the warm pipeline.
+        _animatedArtPlayer.Position = TimeSpan.Zero;
+        _animatedArtPlayer.Play();
+    }
+
+    private void OnAnimatedArtPlayerFailed()
+    {
+        var file = _animatedArtworkFile;
+        StopAnimatedArtwork();
+        if (file is not null)
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private void StopAnimatedArtwork()
+    {
+        _animatedArtworkFile = null;
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtPlayer?.Close();
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Opacity = 0;
+            overlay.Source = null;
         }
     }
 
@@ -5013,6 +5178,10 @@ public partial class MainWindow : Window
         _lastFmCts?.Dispose();
         _lastFmScrobbleCts?.Cancel();
         _lastFmScrobbleCts?.Dispose();
+        _animatedArtworkCts?.Cancel();
+        _animatedArtworkCts?.Dispose();
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtPlayer?.Close();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _globeConnectionService.LinkRevoked -= GlobeConnectionService_LinkRevoked;
@@ -5030,6 +5199,7 @@ public partial class MainWindow : Window
         _lastFmService.Dispose();
         _globeConnectionService.Dispose();
         _lyricsService.Dispose();
+        _animatedArtworkService.Dispose();
         _mediaService.Dispose();
         base.OnClosed(e);
     }

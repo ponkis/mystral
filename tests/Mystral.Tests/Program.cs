@@ -37,6 +37,7 @@ internal static class Program
             ("media timeline projects source anchors and reconciles stale seeks", PlaybackTimelineStabilizerTests.StabilizesSourceUpdatesAndSeeks),
             ("lyrics service exact-matches, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesExactOrBestLyricsAndCaches),
             ("lyrics service normalizes Apple Music media-session metadata", LyricsServiceTests.NormalizesAppleMusicMetadata),
+            ("animated artwork parses playlists, prefers H.264, and keys by album", AnimatedArtworkServiceTests.ParsesPlaylistsAndKeys),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
@@ -76,6 +77,76 @@ internal static class Program
 
         Console.Error.WriteLine(string.Join(Environment.NewLine + Environment.NewLine, failures));
         return 1;
+    }
+}
+
+static class AnimatedArtworkServiceTests
+{
+    public static void ParsesPlaylistsAndKeys()
+    {
+        var snapshot = MediaSnapshot.Empty with
+        {
+            HasSession = true,
+            Title = "Sacrifice",
+            Artist = " The Weeknd ",
+            Album = "Dawn FM"
+        };
+        Check.Equal("the weeknd|dawn fm", AnimatedArtworkService.CreateArtworkKey(snapshot));
+        Check.Equal(string.Empty, AnimatedArtworkService.CreateArtworkKey(snapshot with { Album = " " }));
+        Check.Equal(string.Empty, AnimatedArtworkService.CreateArtworkKey(MediaSnapshot.Empty));
+
+        var masterUri = new Uri("https://example.com/artwork/master.m3u8");
+        var master = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="hvc1.2.20000000.L123.B0",RESOLUTION=768x768
+            hevc_768.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2,CODECS="avc1.640020",RESOLUTION=1080x1080
+            avc_1080.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=3,CODECS="avc1.64001f",RESOLUTION=768x768
+            avc_768.m3u8
+            """;
+        var variant = AnimatedArtworkService.SelectStreamVariantUri(master, masterUri);
+        Check.Equal("https://example.com/artwork/avc_768.m3u8", variant!.ToString());
+
+        var hevcOnly = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="hvc1.2.20000000.L123.B0",RESOLUTION=486x486
+            hevc_486.m3u8
+            """;
+        Check.Equal(
+            "https://example.com/artwork/hevc_486.m3u8",
+            AnimatedArtworkService.SelectStreamVariantUri(hevcOnly, masterUri)!.ToString());
+        Check.True(AnimatedArtworkService.SelectStreamVariantUri("#EXTM3U", masterUri) is null);
+
+        var mediaUri = new Uri("https://example.com/artwork/avc_768.m3u8");
+        var media = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:3
+            #EXT-X-MAP:URI="segment-.mp4",BYTERANGE="897@0"
+            #EXTINF:3.00000,
+            #EXT-X-BYTERANGE:100@897
+            segment-.mp4
+            #EXTINF:3.00000,
+            #EXT-X-BYTERANGE:100@997
+            segment-.mp4
+            """;
+        var file = AnimatedArtworkService.ResolveSegmentFileUri(media, mediaUri);
+        Check.Equal("https://example.com/artwork/segment-.mp4", file!.ToString());
+
+        var multiFile = """
+            #EXTM3U
+            #EXT-X-MAP:URI="init.mp4"
+            #EXTINF:3.00000,
+            other-segment.mp4
+            """;
+        Check.True(AnimatedArtworkService.ResolveSegmentFileUri(multiFile, mediaUri) is null);
+
+        var noMap = """
+            #EXTM3U
+            #EXTINF:3.00000,
+            segment0.ts
+            """;
+        Check.True(AnimatedArtworkService.ResolveSegmentFileUri(noMap, mediaUri) is null);
     }
 }
 

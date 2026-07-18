@@ -67,6 +67,13 @@ For Apple Music's Windows media session, lyric lookup separates a combined
 `Artist — Album` value when the session omits its album field, and uses the
 session's album artist when its primary artist field is empty.
 
+When the playing album has an Apple Music animated cover, Mystral downloads the
+animation once and fades it in over the static cover in the compact, expanded,
+lyrics-header, and fullscreen art views, looping it while the album keeps
+playing. Albums without an animated cover keep the regular artwork. Animated
+covers are resolved through the `artwork.m8tec.top` lookup service and cached
+locally.
+
 Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. When a looping track
 restarts after reaching its end, lyric browsing resets in both the regular and
