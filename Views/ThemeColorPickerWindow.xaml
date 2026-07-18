@@ -33,7 +33,7 @@
 
         <TextBlock Foreground="#333333"
                    TextWrapping="Wrap"
-                   Text="Choose a color. The player previews it right away." />
+                   Text="Choose a color." />
 
         <picker:SquarePicker x:Name="ThemeColorPicker"
                              Grid.Row="1"

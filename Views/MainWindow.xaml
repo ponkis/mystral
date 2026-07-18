@@ -605,6 +605,10 @@
                                    Stretch="UniformToFill"
                                    Opacity="0"
                                    IsHitTestVisible="False" />
+                            <Image x:Name="ArtFrozenFrameImage"
+                                   Stretch="UniformToFill"
+                                   Opacity="0"
+                                   IsHitTestVisible="False" />
                             <Rectangle Height="30"
                                        VerticalAlignment="Top"
                                        Opacity="0.38">
@@ -827,6 +831,10 @@
                            Stretch="UniformToFill"
                            RenderOptions.BitmapScalingMode="HighQuality" />
                     <Image x:Name="ExpandedArtVideoImage"
+                           Stretch="UniformToFill"
+                           Opacity="0"
+                           IsHitTestVisible="False" />
+                    <Image x:Name="ExpandedArtFrozenFrameImage"
                            Stretch="UniformToFill"
                            Opacity="0"
                            IsHitTestVisible="False" />
@@ -1134,6 +1142,10 @@
                                     <Image x:Name="LyricsHeaderArtImage"
                                            Stretch="UniformToFill" />
                                     <Image x:Name="LyricsHeaderArtVideoImage"
+                                           Stretch="UniformToFill"
+                                           Opacity="0"
+                                           IsHitTestVisible="False" />
+                                    <Image x:Name="LyricsHeaderArtFrozenFrameImage"
                                            Stretch="UniformToFill"
                                            Opacity="0"
                                            IsHitTestVisible="False" />
@@ -1452,6 +1464,10 @@
                                                 Stretch="UniformToFill"
                                                 RenderOptions.BitmapScalingMode="HighQuality" />
                                          <Image x:Name="FullscreenArtVideoImage"
+                                                Stretch="UniformToFill"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                                         <Image x:Name="FullscreenArtFrozenFrameImage"
                                                 Stretch="UniformToFill"
                                                 Opacity="0"
                                                 IsHitTestVisible="False" />

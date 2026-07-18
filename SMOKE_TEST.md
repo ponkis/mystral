@@ -66,6 +66,7 @@ For packaged development builds:
 - Scroll regular and fullscreen lyrics away from the active line, then let the same track loop from near its end to the beginning; confirm both views clear browsing state and return to the top. Confirm a one-off zero/near-zero provider reading or small backward jitter does not reset the lyric view.
 - With the automatic artwork theme, confirm lyrics mode shows one blurred cover backdrop plus the header thumbnail without a doubled backdrop or a ghost of the compact player art. With a fixed custom theme, confirm the backdrop stays hidden while the header thumbnail remains.
 - Confirm lyrics mode keeps the player's translucent glass look (the desktop shows through slightly) instead of a fully solid panel.
+- Leave lyrics mode back to the regular and expanded views and confirm the background artwork appears in its final position without shifting sideways during the transition.
 - Switch tracks and confirm old lyrics do not remain stuck.
 - Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
 - Play a track with no lyrics and confirm the empty/not-found state is readable.
@@ -91,7 +92,7 @@ For packaged development builds:
 - Export playback history and confirm the successful `Export complete` dialog uses the CSV icon.
 - Under Behavior, switch the Burn lyrics provider between `MusicBrainz (default)` and `LRCLIB`, save, restart, and confirm the selected provider persists.
 - Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker showing only the color wheel and a hex field.
-- While a track is visible, move the picker's wheel and confirm the main player and the Appearance swatch preview the color live; cancel and confirm the player reverts to the saved theme.
+- Move the picker's wheel and confirm the miniature player preview inside the Appearance panel (and the swatch/hex text) updates live; cancel and confirm the preview returns to the last confirmed color while the real player never changes until Save.
 - Choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.
 - Check the compact, expanded-artwork, lyrics, and fullscreen player modes; confirm cover-derived blurred background artwork is hidden in each mode while foreground cover artwork (including the expanded view's cover) remains visible.
 - In the History list, right-click a track and confirm the `Remove` entry shows the delete icon.
@@ -101,6 +102,7 @@ For packaged development builds:
 - If available, enter valid Last.fm credentials and confirm validation succeeds.
 - With only an API key and username saved, confirm Last.fm track links and the tray profile link work; confirm the API secret and password fields stay disabled until `Scrobble playback to Last.fm` is checked.
 - With scrobbling checked but no API secret or password, confirm Save is blocked with a readable status and the tray's `Enable Scrobbling` toggle refuses to turn on and points to Settings.
+- Fill every Last.fm field but use a wrong password or secret, then enable scrobbling from the tray; confirm Mystral checks the account first and reports the failure instead of turning scrobbling on.
 - With settings open, toggle scrobbling from the tray menu and confirm the settings checkbox updates immediately without reopening the window.
 
 ## Burn Editor
@@ -143,6 +145,7 @@ For packaged development builds:
 - Burn once with automatic sharing on: the same share progress modal must appear, and the completion popup must say `Successfully burned and shared to your globe profile!` only after the server accepted it.
 - On globe, watch the profile's `my CD collection` sidebar while sharing and deleting a burned-CD post; confirm it updates without a page refresh.
 - Stop globe or force the burn endpoint to fail, burn with automatic sharing on, and confirm the popup reports the failure and offers Retry.
+- Stop globe while linked and confirm the Social profile frame transitions to its offline presence; restart globe and confirm it animates back to online on the next status change.
 - Restore globe, click Retry, and confirm Mystral validates immediately and resends the same burn instead of waiting for the periodic check.
 - Unlink in Mystral and confirm globe rejects the old bearer token, local link state clears, auto-share turns off, and a confirmation appears.
 - Link again, unlink from globe's web settings, and confirm Mystral warns once on the next status check and disables globe controls.

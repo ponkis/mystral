@@ -11,6 +11,7 @@ using System.Windows.Media.Animation;
 using Mystral.Configuration;
 using Mystral.Models;
 using Mystral.Services;
+using static Mystral.Services.ArtworkTint;
 
 namespace Mystral.Views;
 
@@ -42,6 +43,7 @@ public partial class SettingsWindow : Window
     private CancellationTokenSource? _socialSignInCancellation;
     private GlobeProfile? _socialProfile;
     private ImageSource? _socialProfileImage;
+    private bool _isSocialFrameOnline;
     private int _socialAvatarGeneration;
     private Color _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
 
@@ -275,9 +277,8 @@ public partial class SettingsWindow : Window
             Owner = this
         };
 
-        // Preview every change live on the player and this panel's swatch; the
-        // preview is discarded (player reverts to saved settings) on close.
-        var mainWindow = Application.Current.MainWindow as MainWindow;
+        // Mirror every change on the swatch, hex text, and the preview player
+        // below; canceling restores the last confirmed color.
         picker.SelectedColorChanged += (_, color) =>
         {
             PlayerThemeColorSwatch.Background = new SolidColorBrush(color);
@@ -285,20 +286,10 @@ public partial class SettingsWindow : Window
                 color.R,
                 color.G,
                 color.B);
-            mainWindow?.PreviewPlayerThemeColor(color);
+            UpdatePlayerThemePreview(color);
         };
 
-        bool accepted;
-        try
-        {
-            accepted = picker.ShowDialog() == true;
-        }
-        finally
-        {
-            mainWindow?.PreviewPlayerThemeColor(null);
-        }
-
-        if (!accepted)
+        if (picker.ShowDialog() != true)
         {
             UpdatePlayerThemeControls();
             return false;
@@ -331,6 +322,26 @@ public partial class SettingsWindow : Window
             _selectedPlayerThemeColor.R,
             _selectedPlayerThemeColor.G,
             _selectedPlayerThemeColor.B);
+        UpdatePlayerThemePreview(_selectedPlayerThemeColor);
+    }
+
+    // Repaints the miniature player below the color controls with the same blend
+    // formulas the real player card uses.
+    private void UpdatePlayerThemePreview(Color tint)
+    {
+        PreviewCardTopStop.Color = WithAlpha(Blend(tint, Colors.White, 0.20), 0x90);
+        PreviewCardUpperStop.Color = WithAlpha(Blend(tint, Colors.White, 0.04), 0x82);
+        PreviewCardLowerStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.35), 0x76);
+        PreviewCardBottomStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.22), 0x84);
+        PreviewCardBorderBrush.Color = WithAlpha(Blend(tint, Colors.White, 0.62), 0xA5);
+        PreviewMediaPanelBrush.Color = WithAlpha(Blend(tint, Colors.Black, 0.45), 0x30);
+        PreviewActionBarTopStop.Color = WithAlpha(Blend(tint, Colors.White, 0.20), 0x2F);
+        PreviewActionBarBottomStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.40), 0x34);
+        PreviewPillTopStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.42), 0xA8);
+        PreviewPillUpperStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.56), 0x84);
+        PreviewPillCreaseStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.74), 0x7A);
+        PreviewPillBottomStop.Color = WithAlpha(Blend(tint, Colors.Black, 0.50), 0x90);
+        PreviewPillBorderBrush.Color = WithAlpha(Blend(tint, Colors.White, 0.38), 0x74);
     }
 
     private void RefreshDirtyState()
@@ -780,7 +791,10 @@ public partial class SettingsWindow : Window
             _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
         }
 
-        UpdateSocialPanel(animate: wasLinked != _isSocialAccountLinked);
+        var isNowFrameOnline = e.State.IsLinked && !e.State.IsOffline;
+        UpdateSocialPanel(
+            animate: wasLinked != _isSocialAccountLinked
+                || _isSocialFrameOnline != isNowFrameOnline);
         if (_socialProfile is not null
             && !e.State.IsChecking
             && string.IsNullOrWhiteSpace(e.State.ErrorMessage))
@@ -1035,11 +1049,15 @@ public partial class SettingsWindow : Window
         SocialCdCountText.Text = profile is null && _isSocialAccountLinked
             ? "Account details will refresh when globe reconnects."
             : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
+        // The frame reflects reachability, not just the link: an unreachable
+        // globe settles it into the offline presence until the server returns.
+        var isFrameOnline = _isSocialAccountLinked && !isGlobeOffline;
         SocialProfileFrame.SetProfile(
-            _isSocialAccountLinked,
+            isFrameOnline,
             _socialProfileImage
             ?? IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png"),
             animate);
+        _isSocialFrameOnline = isFrameOnline;
 
         var transitionId = ++_socialProfileTransitionId;
         SocialProfileDetailsHost.BeginAnimation(OpacityProperty, null);

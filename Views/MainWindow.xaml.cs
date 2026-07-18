@@ -2179,6 +2179,9 @@ public partial class MainWindow : Window
     private Image[] AnimatedArtOverlays =>
         [ArtVideoImage, ExpandedArtVideoImage, LyricsHeaderArtVideoImage, FullscreenArtVideoImage];
 
+    private Image[] FrozenArtOverlays =>
+        [ArtFrozenFrameImage, ExpandedArtFrozenFrameImage, LyricsHeaderArtFrozenFrameImage, FullscreenArtFrozenFrameImage];
+
     private void RefreshAnimatedArtworkForSnapshot(MediaSnapshot snapshot)
     {
         var key = AnimatedArtworkService.CreateArtworkKey(snapshot);
@@ -2309,17 +2312,34 @@ public partial class MainWindow : Window
             return;
         }
 
+        var isHandOff = _frozenAnimatedArtFrame is not null;
         _frozenAnimatedArtFrame = null;
         _animatedArtPlayer.Play();
         foreach (var overlay in AnimatedArtOverlays)
         {
             overlay.Source = _animatedArtSource;
-            AnimateDouble(overlay, OpacityProperty, 1.0, 640);
+            if (isHandOff)
+            {
+                // The frozen frame above covers the swap; no fade from zero, or
+                // the static cover would blink through.
+                overlay.BeginAnimation(OpacityProperty, null);
+                overlay.Opacity = 1;
+            }
+            else
+            {
+                AnimateDouble(overlay, OpacityProperty, 1.0, 640);
+            }
+        }
+
+        if (isHandOff)
+        {
+            FadeOutFrozenArtOverlays();
         }
     }
 
-    // Track-change hand-off: paint the last decoded video frame into the overlays
-    // so the static cover never flashes while the next cached cover opens.
+    // Track-change hand-off: paint the last decoded video frame into a layer
+    // above the video overlays so the static cover never flashes while the next
+    // cached cover opens and decodes.
     private void FreezeAnimatedArtworkFrame()
     {
         if (_animatedArtworkFile is not null)
@@ -2336,11 +2356,50 @@ public partial class MainWindow : Window
         _animatedArtworkFile = null;
         _animatedArtRevealTimer?.Stop();
         _animatedArtPlayer?.Close();
-        foreach (var overlay in AnimatedArtOverlays)
+        foreach (var overlay in FrozenArtOverlays)
         {
             overlay.BeginAnimation(OpacityProperty, null);
             overlay.Opacity = 1;
             overlay.Source = _frozenAnimatedArtFrame;
+        }
+
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Opacity = 0;
+            overlay.Source = null;
+        }
+    }
+
+    // The freshly opened video surface may not have composited a frame yet, so
+    // the frozen frame stays on top and dissolves over the already-playing
+    // video instead of exposing the static cover for even one frame.
+    private void FadeOutFrozenArtOverlays()
+    {
+        var fade = new DoubleAnimation
+        {
+            To = 0,
+            BeginTime = TimeSpan.FromMilliseconds(160),
+            Duration = TimeSpan.FromMilliseconds(360),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (_frozenAnimatedArtFrame is not null)
+            {
+                return;
+            }
+
+            foreach (var overlay in FrozenArtOverlays)
+            {
+                overlay.BeginAnimation(OpacityProperty, null);
+                overlay.Opacity = 0;
+                overlay.Source = null;
+            }
+        };
+        foreach (var overlay in FrozenArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
         }
     }
 
@@ -2413,6 +2472,13 @@ public partial class MainWindow : Window
         _animatedArtRevealTimer?.Stop();
         _animatedArtPlayer?.Close();
         foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Opacity = 0;
+            overlay.Source = null;
+        }
+
+        foreach (var overlay in FrozenArtOverlays)
         {
             overlay.BeginAnimation(OpacityProperty, null);
             overlay.Opacity = 0;
@@ -3447,7 +3513,6 @@ public partial class MainWindow : Window
         }
 
         _isLyricsMode = false;
-        UpdateCompactBlurredArtVisibility();
         LyricsPanel.IsHitTestVisible = false;
         var restoreExpanded = _restoreExpandedAfterLyrics;
         _restoreExpandedAfterLyrics = false;
@@ -3475,6 +3540,10 @@ public partial class MainWindow : Window
                 SetWindowSize(CompactWidth, CompactHeight);
                 SetCompactChromeVisible(true);
             }
+
+            // Restore the blurred backdrop only after the window is back at its
+            // target size, so it never appears mid-resize at the wrong offset.
+            UpdateCompactBlurredArtVisibility();
         };
 
         LyricsPanel.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
@@ -3611,7 +3680,7 @@ public partial class MainWindow : Window
         _hasAppliedArtworkTint = true;
         _lastArtworkTintSource = coverArt;
         var tint = ResolvePlayerTint(
-            GetEffectivePlayerThemeColor(),
+            _settingsService.Settings.Appearance.PlayerThemeColor,
             ExtractDominantTint(coverArt),
             DefaultTint);
 
@@ -3673,28 +3742,9 @@ public partial class MainWindow : Window
             out _);
     }
 
-    private string? _playerThemeColorPreview;
-
-    /// <summary>
-    /// Live preview for the Appearance color picker: overrides the saved theme
-    /// color until called with null, without touching settings.
-    /// </summary>
-    internal void PreviewPlayerThemeColor(Color? color)
-    {
-        _playerThemeColorPreview = color is { } value
-            ? AppearanceSettings.FormatPlayerThemeColor(value.R, value.G, value.B)
-            : null;
-        ApplyPlayerAppearance();
-    }
-
-    private string GetEffectivePlayerThemeColor()
-    {
-        return _playerThemeColorPreview ?? _settingsService.Settings.Appearance.PlayerThemeColor;
-    }
-
     private void ApplyPlayerAppearance()
     {
-        var playerThemeColor = GetEffectivePlayerThemeColor();
+        var playerThemeColor = _settingsService.Settings.Appearance.PlayerThemeColor;
         var backdropVisibility = ShouldShowPlayerArtworkBackdrops(playerThemeColor)
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -3711,13 +3761,17 @@ public partial class MainWindow : Window
 
     // The lyrics panel is translucent and paints its own blurred-art layer, so the
     // compact blur beneath it must hide while lyrics mode is open or the cover art
-    // shows twice.
+    // shows twice. Hidden (not Collapsed) keeps its layout warm so it reappears
+    // without an arrange jump after the window resizes back.
     private void UpdateCompactBlurredArtVisibility()
     {
-        var showBackdrops = ShouldShowPlayerArtworkBackdrops(GetEffectivePlayerThemeColor());
-        BlurredArtImage.Visibility = showBackdrops && !_isLyricsMode
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        var showBackdrops = ShouldShowPlayerArtworkBackdrops(
+            _settingsService.Settings.Appearance.PlayerThemeColor);
+        BlurredArtImage.Visibility = !showBackdrops
+            ? Visibility.Collapsed
+            : _isLyricsMode
+                ? Visibility.Hidden
+                : Visibility.Visible;
     }
 
     private void AnimateColor(GradientStop stop, Color color)
@@ -5134,11 +5188,26 @@ public partial class MainWindow : Window
         return item;
     }
 
-    private void ToggleScrobblingFromTray()
+    private bool _isTrayScrobbleValidationRunning;
+
+    private async void ToggleScrobblingFromTray()
     {
+        if (_isTrayScrobbleValidationRunning)
+        {
+            return;
+        }
+
         var current = _settingsService.Settings;
-        var enabling = !current.LastFm.ScrobblingEnabled;
-        if (enabling && !current.LastFm.HasScrobblingCredentials)
+        if (current.LastFm.ScrobblingEnabled)
+        {
+            _settingsService.Save(current with
+            {
+                LastFm = current.LastFm with { ScrobblingEnabled = false }
+            });
+            return;
+        }
+
+        if (!current.LastFm.HasScrobblingCredentials)
         {
             // Never let the tray flip scrobbling on without the credentials it
             // needs — send the user to the Last.fm settings instead.
@@ -5151,12 +5220,35 @@ public partial class MainWindow : Window
             return;
         }
 
-        _settingsService.Save(current with
+        // Fields being filled in is not enough: prove them against Last.fm the
+        // same way Settings does before the toggle may claim scrobbling is on.
+        _isTrayScrobbleValidationRunning = true;
+        try
         {
-            LastFm = current.LastFm with
+            var validation = await _lastFmService.ValidateCredentialsAsync(
+                current.LastFm with { ScrobblingEnabled = true });
+            if (!validation.IsSuccess)
             {
-                ScrobblingEnabled = enabling
+                AppDialogWindow.ShowWarning(
+                    this,
+                    "Couldn't enable scrobbling",
+                    validation.Message);
+                return;
             }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        finally
+        {
+            _isTrayScrobbleValidationRunning = false;
+        }
+
+        var latest = _settingsService.Settings;
+        _settingsService.Save(latest with
+        {
+            LastFm = latest.LastFm with { ScrobblingEnabled = true }
         });
     }
 

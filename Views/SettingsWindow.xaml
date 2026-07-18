@@ -234,7 +234,7 @@
                     <TextBlock Margin="0,6,0,0"
                                Foreground="#555555"
                                TextWrapping="Wrap"
-                               Text="MusicBrainz first matches the song on MusicBrainz and uses that metadata for a more precise lyric search. LRCLIB searches lyrics directly with the fields in the burn editor. Lyrics always come from LRCLIB — MusicBrainz does not host lyrics." />
+                               Text="MusicBrainz looks up the song's official details first, which usually finds better lyrics. LRCLIB searches using exactly what's typed in the burn editor." />
                 </StackPanel>
 
                 <StackPanel x:Name="AppearancePanel"
@@ -281,6 +281,111 @@
                                 Content="Choose color..."
                                 Click="ChoosePlayerThemeColorButton_Click" />
                     </StackPanel>
+
+                    <Border Width="300"
+                            Margin="0,14,0,0"
+                            HorizontalAlignment="Left"
+                            Padding="16,14"
+                            CornerRadius="6"
+                            BorderBrush="#A8A8A8"
+                            BorderThickness="1">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#3C444E" Offset="0" />
+                                <GradientStop Color="#22272D" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+
+                        <Border Height="98"
+                                CornerRadius="9"
+                                BorderThickness="1">
+                            <Border.BorderBrush>
+                                <SolidColorBrush x:Name="PreviewCardBorderBrush" Color="#A9E2EEF2" />
+                            </Border.BorderBrush>
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop x:Name="PreviewCardTopStop" Color="#905C686E" Offset="0" />
+                                    <GradientStop x:Name="PreviewCardUpperStop" Color="#82475258" Offset="0.21" />
+                                    <GradientStop x:Name="PreviewCardLowerStop" Color="#762D363B" Offset="0.53" />
+                                    <GradientStop x:Name="PreviewCardBottomStop" Color="#84394449" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="12" />
+                                    <RowDefinition Height="52" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="1"
+                                        BorderBrush="#57FFFFFF"
+                                        BorderThickness="0,1,0,1">
+                                    <Border.Background>
+                                        <SolidColorBrush x:Name="PreviewMediaPanelBrush" Color="#30000000" />
+                                    </Border.Background>
+                                    <StackPanel Margin="12,0"
+                                                VerticalAlignment="Center"
+                                                Orientation="Horizontal">
+                                        <Border Width="36"
+                                                Height="36"
+                                                CornerRadius="4"
+                                                BorderBrush="#D7EFF7F7"
+                                                BorderThickness="1">
+                                            <Border.Background>
+                                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                    <GradientStop Color="#D9F5FAFA" Offset="0" />
+                                                    <GradientStop Color="#7A7E8F96" Offset="0.48" />
+                                                    <GradientStop Color="#86242A2E" Offset="1" />
+                                                </LinearGradientBrush>
+                                            </Border.Background>
+                                        </Border>
+                                        <StackPanel Margin="10,0,0,0"
+                                                    VerticalAlignment="Center">
+                                            <Border Width="118"
+                                                    Height="9"
+                                                    HorizontalAlignment="Left"
+                                                    CornerRadius="4"
+                                                    Background="#E8FFFFFF" />
+                                            <Border Width="76"
+                                                    Height="7"
+                                                    Margin="0,6,0,0"
+                                                    HorizontalAlignment="Left"
+                                                    CornerRadius="3"
+                                                    Background="#8CFFFFFF" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Row="2"
+                                        BorderBrush="#4CFFFFFF"
+                                        BorderThickness="0,1,0,0">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                            <GradientStop x:Name="PreviewActionBarTopStop" Color="#2FFFFFFF" Offset="0" />
+                                            <GradientStop x:Name="PreviewActionBarBottomStop" Color="#30000000" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <Border Height="16"
+                                            Margin="14,0"
+                                            VerticalAlignment="Center"
+                                            CornerRadius="8"
+                                            BorderThickness="1">
+                                        <Border.BorderBrush>
+                                            <SolidColorBrush x:Name="PreviewPillBorderBrush" Color="#9EB3C8D7" />
+                                        </Border.BorderBrush>
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop x:Name="PreviewPillTopStop" Color="#A87C8890" Offset="0" />
+                                                <GradientStop x:Name="PreviewPillUpperStop" Color="#84525C64" Offset="0.48" />
+                                                <GradientStop x:Name="PreviewPillCreaseStop" Color="#7A2E3438" Offset="0.51" />
+                                                <GradientStop x:Name="PreviewPillBottomStop" Color="#90454F56" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel x:Name="SocialPanel"
