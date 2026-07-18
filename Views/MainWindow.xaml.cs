@@ -22,15 +22,41 @@ namespace Mystral.Views;
 
 public partial class MainWindow : Window
 {
+    private enum SliderInteractionKind
+    {
+        Seek,
+        Volume
+    }
+
+    private sealed class SliderPointerInteraction
+    {
+        public SliderPointerInteraction(SliderInteractionKind kind)
+        {
+            Kind = kind;
+        }
+
+        public SliderInteractionKind Kind { get; }
+        public Slider? ActiveSlider { get; set; }
+        public bool IsPointerDown { get; set; }
+        public bool IsThumbDrag { get; set; }
+        public bool OwnsMouseCapture { get; set; }
+    }
+
     private readonly MediaSessionService _mediaService;
     private readonly LyricsService _lyricsService;
+    private readonly AnimatedArtworkService _animatedArtworkService;
     private readonly VolumeService _volumeService;
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
     private readonly AppSettingsService _settingsService;
     private readonly DispatcherTimer _mediaPollTimer;
     private readonly DispatcherTimer _loadingIconTimer;
+    private readonly DispatcherTimer _seekToolTipHideTimer;
     private readonly DispatcherTimer _volumeToolTipHideTimer;
+    private readonly PlaybackTimelineStabilizer _timelineStabilizer = new();
+    private readonly SliderPointerInteraction _seekSliderInteraction = new(SliderInteractionKind.Seek);
+    private readonly SliderPointerInteraction _volumeSliderInteraction = new(SliderInteractionKind.Volume);
+    private readonly Dictionary<Slider, SliderPointerInteraction> _sliderPointerInteractions = [];
     private readonly CancellationTokenSource _burnDiscArtworkCts = new();
     private readonly List<TextBlock> _lyricBlocks = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
@@ -38,13 +64,18 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _lyricsRefreshCts;
     private CancellationTokenSource? _lastFmCts;
     private CancellationTokenSource? _lastFmScrobbleCts;
+    private CancellationTokenSource? _animatedArtworkCts;
+    private MediaPlayer? _animatedArtPlayer;
+    private DrawingImage? _animatedArtSource;
+    private DispatcherTimer? _animatedArtRevealTimer;
+    private string _animatedArtworkKey = string.Empty;
+    private string? _animatedArtworkFile;
     private string _lyricsTrackKey = string.Empty;
     private string _lastFmTrackKey = string.Empty;
     private string _lastFmLookupCompletedKey = string.Empty;
     private string _scrobblingStatusText = "Scrobbling: disabled";
     private string _trayNowPlayingTrackName = string.Empty;
     private ScrobblePlaybackState? _scrobbleState;
-    private bool _isSeeking;
     private bool _isExpanded;
     private bool _isLyricsMode;
     private bool _restoreExpandedAfterLyrics;
@@ -65,7 +96,7 @@ public partial class MainWindow : Window
     private bool _isMinimizing;
     private bool _isClosing;
     private bool _allowClose;
-    private bool _isVolumeDragging;
+    private bool _progressSliderUpdating;
     private bool _isBurnDiscPointerDown;
     private bool _isBurnDiscDragging;
     private bool _isBurnDiscInserting;
@@ -97,7 +128,6 @@ public partial class MainWindow : Window
     private bool _isUserBrowsingFullscreenLyrics;
     private bool _isLyricsScrollAnimating;
     private readonly DispatcherTimer _fullscreenLyricsInactivityTimer;
-    private Slider? _activeVolumeSlider;
     private FrameworkElement? _lyricsFooterPanel;
     private FrameworkElement? _fullscreenLyricsFooterPanel;
     private Border? _fullscreenLyricsTopSpacer;
@@ -108,8 +138,8 @@ public partial class MainWindow : Window
     private int _activeLyricIndex = -1;
     private int _activeLyricWaitIndicatorIndex = -1;
     private double _lyricsScrollTarget;
-    private DateTimeOffset _lastSnapshotAt = DateTimeOffset.Now;
     private TimeSpan _lastLyricsPosition = TimeSpan.Zero;
+    private int _seekRequestGeneration;
     private int _loadingIconFrameIndex;
     private const double CompactWidth = 352;
     private const double CompactHeight = 172;
@@ -163,6 +193,7 @@ public partial class MainWindow : Window
         _settingsService = new AppSettingsService();
         _mediaService = new MediaSessionService();
         _lyricsService = new LyricsService();
+        _animatedArtworkService = new AnimatedArtworkService();
         _volumeService = new VolumeService();
         _lastFmService = new LastFmService(_settingsService);
         _globeConnectionService = new GlobeConnectionService(_settingsService);
@@ -189,8 +220,10 @@ public partial class MainWindow : Window
 
         _loadingIconTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(65) };
         _loadingIconTimer.Tick += (_, _) => AdvanceLoadingIconFrame();
+        _seekToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
+        _seekToolTipHideTimer.Tick += (_, _) => HideSliderToolTip(_seekSliderInteraction);
         _volumeToolTipHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
-        _volumeToolTipHideTimer.Tick += (_, _) => HideVolumeToolTip();
+        _volumeToolTipHideTimer.Tick += (_, _) => HideSliderToolTip(_volumeSliderInteraction);
         LoadLoadingIconFrames();
         _ = LoadCompactBurnDiscArtworkAsync();
 
@@ -292,24 +325,14 @@ public partial class MainWindow : Window
         AlbumArtSurface.ToolTip = null;
         LyricsBackButton.ToolTip = "Back";
 
-        foreach (var slider in ProgressSliders)
-        {
-            slider.ToolTip = "Seek";
-            ToolTipService.SetInitialShowDelay(slider, 250);
-            slider.MouseMove += ProgressSlider_MouseMove;
-        }
-
-        foreach (var slider in VolumeSliders)
-        {
-            slider.ToolTip = CreateVolumeToolTip(slider);
-            ToolTipService.SetInitialShowDelay(slider, 0);
-            ToolTipService.SetShowDuration(slider, 60000);
-            slider.PreviewMouseLeftButtonDown += VolumeSlider_PreviewMouseLeftButtonDown;
-            slider.PreviewMouseLeftButtonUp += VolumeSlider_PreviewMouseLeftButtonUp;
-            slider.MouseMove += VolumeSlider_MouseMove;
-            slider.MouseLeave += VolumeSlider_MouseLeave;
-            slider.LostMouseCapture += VolumeSlider_LostMouseCapture;
-        }
+        RegisterInteractiveSliders(
+            ProgressSliders,
+            _seekSliderInteraction,
+            CreateSeekToolTip);
+        RegisterInteractiveSliders(
+            VolumeSliders,
+            _volumeSliderInteraction,
+            CreateVolumeToolTip);
     }
 
     private Button[] PreviousButtons => [PreviousButton, ExpandedPreviousButton, LyricsPreviousButton, FullscreenPreviousButton];
@@ -323,16 +346,259 @@ public partial class MainWindow : Window
     private TextBlock[] ElapsedTexts => [ElapsedText, ExpandedElapsedText, LyricsElapsedText, FullscreenElapsedText];
     private TextBlock[] DurationTexts => [DurationText, ExpandedDurationText, LyricsDurationText, FullscreenDurationText];
 
-    private void ProgressSlider_MouseMove(object sender, MouseEventArgs e)
+    private void RegisterInteractiveSliders(
+        IEnumerable<Slider> sliders,
+        SliderPointerInteraction interaction,
+        Func<Slider, ToolTip> createToolTip)
     {
-        if (sender is not Slider slider || IsControlDisabled(slider) || slider.ActualWidth <= 1)
+        foreach (var slider in sliders)
+        {
+            _sliderPointerInteractions.Add(slider, interaction);
+            slider.ToolTip = createToolTip(slider);
+            ToolTipService.SetInitialShowDelay(slider, 0);
+            ToolTipService.SetBetweenShowDelay(slider, 0);
+            ToolTipService.SetShowDuration(slider, 60000);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonDownEvent,
+                new MouseButtonEventHandler(InteractiveSlider_PreviewMouseLeftButtonDown),
+                handledEventsToo: true);
+            slider.AddHandler(
+                UIElement.PreviewMouseLeftButtonUpEvent,
+                new MouseButtonEventHandler(InteractiveSlider_PreviewMouseLeftButtonUp),
+                handledEventsToo: true);
+            slider.AddHandler(
+                UIElement.MouseMoveEvent,
+                new MouseEventHandler(InteractiveSlider_MouseMove),
+                handledEventsToo: true);
+            slider.MouseLeave += InteractiveSlider_MouseLeave;
+            slider.LostMouseCapture += InteractiveSlider_LostMouseCapture;
+        }
+    }
+
+    private void InteractiveSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction))
         {
             return;
         }
 
-        var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
-        var seconds = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
-        slider.ToolTip = $"Seek to {FormatTime(TimeSpan.FromSeconds(seconds))}";
+        if (IsControlDisabled(slider))
+        {
+            CancelSliderPointerInteraction(interaction);
+            e.Handled = true;
+            return;
+        }
+
+        BeginSliderPointerInteraction(interaction, slider, e);
+    }
+
+    private async void InteractiveSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction))
+        {
+            return;
+        }
+
+        if (IsControlDisabled(slider))
+        {
+            CancelSliderPointerInteraction(interaction);
+            e.Handled = true;
+            return;
+        }
+
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            return;
+        }
+
+        if (!interaction.IsThumbDrag)
+        {
+            SetSliderValueFromPointer(slider, e);
+            e.Handled = true;
+        }
+
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            await CompleteSeekAsync(slider);
+        }
+        else
+        {
+            CompleteVolumeInteraction(slider);
+        }
+    }
+
+    private void InteractiveSlider_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            || !interaction.IsPointerDown
+            || !ReferenceEquals(interaction.ActiveSlider, slider)
+            || IsControlDisabled(slider))
+        {
+            return;
+        }
+
+        if (e.LeftButton == MouseButtonState.Pressed && !interaction.IsThumbDrag)
+        {
+            SetSliderValueFromPointer(slider, e);
+        }
+
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+    }
+
+    private void InteractiveSlider_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (sender is Slider slider
+            && _sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            && !interaction.IsPointerDown
+            && ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            BeginSliderToolTipLinger(interaction);
+        }
+    }
+
+    private async void InteractiveSlider_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (sender is not Slider slider
+            || !_sliderPointerInteractions.TryGetValue(slider, out var interaction)
+            || !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            return;
+        }
+
+        interaction.OwnsMouseCapture = false;
+        if (interaction.IsPointerDown)
+        {
+            if (Mouse.LeftButton != MouseButtonState.Pressed)
+            {
+                if (interaction.Kind == SliderInteractionKind.Seek)
+                {
+                    await CompleteSeekAsync(slider);
+                }
+                else
+                {
+                    CompleteVolumeInteraction(slider);
+                }
+
+                return;
+            }
+
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (interaction.IsPointerDown
+                    && ReferenceEquals(interaction.ActiveSlider, slider)
+                    && !slider.IsMouseCaptureWithin)
+                {
+                    CancelSliderPointerInteraction(interaction);
+                }
+            }, DispatcherPriority.Input);
+            return;
+        }
+
+        BeginSliderToolTipLinger(interaction);
+    }
+
+    private void BeginSliderPointerInteraction(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        MouseButtonEventArgs e)
+    {
+        if (interaction.IsPointerDown && !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            CancelSliderPointerInteraction(interaction);
+        }
+
+        if (interaction.ActiveSlider is { } previous
+            && !ReferenceEquals(previous, slider))
+        {
+            CloseSliderToolTip(interaction, previous);
+        }
+
+        GetSliderToolTipTimer(interaction).Stop();
+        interaction.ActiveSlider = slider;
+        interaction.IsPointerDown = true;
+        interaction.IsThumbDrag = IsPointerOverSliderThumb(e, slider);
+        interaction.OwnsMouseCapture = false;
+
+        if (!interaction.IsThumbDrag)
+        {
+            SetSliderValueFromPointer(slider, e);
+            interaction.OwnsMouseCapture = slider.CaptureMouse();
+            e.Handled = true;
+        }
+
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+    }
+
+    private void CompleteVolumeInteraction(Slider slider)
+    {
+        var interaction = _volumeSliderInteraction;
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
+        {
+            return;
+        }
+
+        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: false);
+        BeginSliderToolTipLinger(interaction);
+    }
+
+    private void CancelSliderPointerInteraction(SliderPointerInteraction interaction)
+    {
+        var slider = interaction.ActiveSlider;
+        interaction.IsPointerDown = false;
+        interaction.IsThumbDrag = false;
+        if (slider is not null)
+        {
+            ReleaseSliderMouseCapture(interaction, slider, releaseNativeCapture: true);
+        }
+
+        HideSliderToolTip(interaction);
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            UpdateTimelineUi();
+        }
+    }
+
+    private static void EndSliderPointerInteraction(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool releaseNativeCapture)
+    {
+        interaction.IsPointerDown = false;
+        interaction.IsThumbDrag = false;
+        ReleaseSliderMouseCapture(interaction, slider, releaseNativeCapture);
+    }
+
+    private static void ReleaseSliderMouseCapture(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool releaseNativeCapture)
+    {
+        var ownsMouseCapture = interaction.OwnsMouseCapture;
+        interaction.OwnsMouseCapture = false;
+        if (ownsMouseCapture && slider.IsMouseCaptured)
+        {
+            slider.ReleaseMouseCapture();
+            return;
+        }
+
+        if (releaseNativeCapture && IsMouseCaptureWithinSlider(slider))
+        {
+            Mouse.Capture(null);
+        }
+    }
+
+    private static bool IsMouseCaptureWithinSlider(Slider slider)
+    {
+        if (Mouse.Captured is not DependencyObject captured)
+        {
+            return false;
+        }
+
+        return ReferenceEquals(captured, slider) || IsVisualDescendantOf(captured, slider);
     }
 
     private async Task LoadCompactBurnDiscArtworkAsync()
@@ -1212,6 +1478,29 @@ public partial class MainWindow : Window
         cancellation?.Dispose();
     }
 
+    private static ToolTip CreateSeekToolTip(Slider slider)
+    {
+        return new ToolTip
+        {
+            Content = "Seek",
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            PlacementTarget = slider,
+            StaysOpen = true
+        };
+    }
+
+    private static void UpdateSeekToolTip(Slider slider, bool includePosition)
+    {
+        if (slider.ToolTip is not ToolTip toolTip)
+        {
+            slider.ToolTip = toolTip = CreateSeekToolTip(slider);
+        }
+
+        toolTip.Content = includePosition
+            ? $"Seek: {FormatTime(TimeSpan.FromSeconds(slider.Value))}"
+            : "Seek";
+    }
+
     private ToolTip CreateVolumeToolTip(Slider slider)
     {
         return new ToolTip
@@ -1221,63 +1510,6 @@ public partial class MainWindow : Window
             PlacementTarget = slider,
             StaysOpen = true
         };
-    }
-
-    private void VolumeSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not Slider slider || IsControlDisabled(slider))
-        {
-            return;
-        }
-
-        _isVolumeDragging = true;
-        _activeVolumeSlider = slider;
-        ShowVolumeToolTip(slider);
-    }
-
-    private void VolumeSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is Slider slider)
-        {
-            ShowVolumeToolTip(slider);
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void VolumeSlider_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (_isVolumeDragging && sender is Slider slider)
-        {
-            ShowVolumeToolTip(slider);
-        }
-    }
-
-    private void VolumeSlider_MouseLeave(object sender, MouseEventArgs e)
-    {
-        if (!_isVolumeDragging)
-        {
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void VolumeSlider_LostMouseCapture(object sender, MouseEventArgs e)
-    {
-        if (_activeVolumeSlider == sender)
-        {
-            BeginVolumeToolTipLinger();
-        }
-    }
-
-    private void ShowVolumeToolTip(Slider slider)
-    {
-        _volumeToolTipHideTimer.Stop();
-        UpdateVolumeToolTip(slider);
-
-        if (slider.ToolTip is ToolTip toolTip)
-        {
-            toolTip.PlacementTarget = slider;
-            toolTip.IsOpen = true;
-        }
     }
 
     private void UpdateVolumeToolTip(Slider slider)
@@ -1290,23 +1522,82 @@ public partial class MainWindow : Window
         toolTip.Content = FormatVolume(GetVolumeTitleValue(slider));
     }
 
-    private void BeginVolumeToolTipLinger()
+    private void ShowSliderToolTip(
+        SliderPointerInteraction interaction,
+        Slider slider,
+        bool includeSeekPosition)
     {
-        _isVolumeDragging = false;
-        _volumeToolTipHideTimer.Stop();
-        _volumeToolTipHideTimer.Start();
-    }
-
-    private void HideVolumeToolTip()
-    {
-        _volumeToolTipHideTimer.Stop();
-
-        if (_activeVolumeSlider?.ToolTip is ToolTip toolTip)
+        GetSliderToolTipTimer(interaction).Stop();
+        if (interaction.ActiveSlider is { } previous
+            && !ReferenceEquals(previous, slider))
         {
-            toolTip.IsOpen = false;
+            CloseSliderToolTip(interaction, previous);
         }
 
-        _activeVolumeSlider = null;
+        interaction.ActiveSlider = slider;
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            UpdateSeekToolTip(slider, includeSeekPosition);
+        }
+        else
+        {
+            UpdateVolumeToolTip(slider);
+        }
+
+        if (slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.PlacementTarget = slider;
+            toolTip.IsOpen = true;
+        }
+    }
+
+    private void BeginSliderToolTipLinger(SliderPointerInteraction interaction)
+    {
+        var timer = GetSliderToolTipTimer(interaction);
+        timer.Stop();
+        timer.Start();
+    }
+
+    private void HideSliderToolTip(SliderPointerInteraction interaction)
+    {
+        GetSliderToolTipTimer(interaction).Stop();
+        if (interaction.ActiveSlider is { } activeSlider)
+        {
+            CloseSliderToolTip(interaction, activeSlider);
+        }
+
+        if (!interaction.IsPointerDown)
+        {
+            interaction.ActiveSlider = null;
+        }
+    }
+
+    private DispatcherTimer GetSliderToolTipTimer(SliderPointerInteraction interaction)
+    {
+        return interaction.Kind == SliderInteractionKind.Seek
+            ? _seekToolTipHideTimer
+            : _volumeToolTipHideTimer;
+    }
+
+    private static void ResetSliderToolTipContent(
+        SliderPointerInteraction interaction,
+        ToolTip toolTip)
+    {
+        if (interaction.Kind == SliderInteractionKind.Seek)
+        {
+            toolTip.Content = "Seek";
+        }
+    }
+
+    private static void CloseSliderToolTip(
+        SliderPointerInteraction interaction,
+        Slider slider)
+    {
+        if (slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.IsOpen = false;
+            ResetSliderToolTipContent(interaction, toolTip);
+        }
     }
 
     private static string FormatVolume(double value)
@@ -1328,8 +1619,36 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
+            var observedAt = DateTimeOffset.Now;
+            var mediaKey = CreateTimelineMediaKey(snapshot);
+            var stabilizedPosition = _timelineStabilizer.Observe(
+                mediaKey,
+                snapshot.HasSession,
+                snapshot.Position,
+                snapshot.Duration,
+                snapshot.IsPlaying,
+                snapshot.TimelineUpdatedAt,
+                snapshot.HasReliableTimelineUpdatedAt,
+                observedAt);
+            if (snapshot.HasSession
+                && snapshot.Duration <= TimeSpan.Zero
+                && _timelineStabilizer.Duration > TimeSpan.Zero)
+            {
+                snapshot = snapshot with
+                {
+                    Position = stabilizedPosition,
+                    Duration = _timelineStabilizer.Duration
+                };
+            }
+
+            var didRestartPlayback = _timelineStabilizer.LastObservationWasPlaybackRestart;
+
             Snapshot = snapshot;
-            _lastSnapshotAt = DateTimeOffset.Now;
+            if (didRestartPlayback)
+            {
+                ResetLyricsForPlaybackRestart();
+            }
+
             ApplySnapshot(snapshot);
         });
     }
@@ -1434,6 +1753,7 @@ public partial class MainWindow : Window
             SetControlDisabledState(slider, canSeek);
             slider.Maximum = Math.Max(1, snapshot.Duration.TotalSeconds);
         }
+        UpdateSyncedLyricLineSeekability(snapshot);
 
         CompactProgressRow.Visibility = snapshot.HasSession ? Visibility.Visible : Visibility.Collapsed;
         CompactBurnSlot.Visibility = snapshot.HasSession ? Visibility.Collapsed : Visibility.Visible;
@@ -1452,6 +1772,7 @@ public partial class MainWindow : Window
         }
 
         RefreshCompactBurnPresentation();
+        RefreshAnimatedArtworkForSnapshot(snapshot);
         RefreshLyricsForSnapshot(snapshot);
         RefreshLastFmForSnapshot(snapshot);
         UpdateScrobblingForSnapshot(snapshot);
@@ -1661,10 +1982,14 @@ public partial class MainWindow : Window
 
     private void UpdateTimelineUi()
     {
-        var position = GetCurrentPosition();
+        var playbackPosition = GetCurrentPosition();
         var duration = Snapshot.Duration;
+        var position = _seekSliderInteraction.IsPointerDown
+            && _seekSliderInteraction.ActiveSlider is { } activeSlider
+            ? TimeSpan.FromSeconds(activeSlider.Value)
+            : playbackPosition;
 
-        if (!_isSeeking)
+        if (!_seekSliderInteraction.IsPointerDown)
         {
             var progressValue = duration > TimeSpan.Zero
                 ? Math.Clamp(position.TotalSeconds, 0, Math.Max(1, duration.TotalSeconds))
@@ -1693,11 +2018,11 @@ public partial class MainWindow : Window
             SetTextIfChanged(textBlock, remainingText);
         }
 
-        UpdateSyncedLyricsUi(position);
+        UpdateSyncedLyricsUi(playbackPosition);
 
         if (_isFullscreen && _isFullscreenLyrics)
         {
-            UpdateSyncedLyricsUi(position, isFullscreen: true);
+            UpdateSyncedLyricsUi(playbackPosition, isFullscreen: true);
         }
     }
 
@@ -1707,6 +2032,36 @@ public partial class MainWindow : Window
         {
             UpdateTimelineUi();
         }
+    }
+
+    private void ResetLyricsForPlaybackRestart()
+    {
+        _lastLyricsPosition = TimeSpan.Zero;
+        _activeLyricIndex = -1;
+        _activeFullscreenLyricIndex = -1;
+        _activeLyricWaitIndicatorIndex = -1;
+        _activeFullscreenLyricWaitIndicatorIndex = -1;
+        _isUserBrowsingLyrics = false;
+        _isUserBrowsingFullscreenLyrics = false;
+        _fullscreenLyricsInactivityTimer.Stop();
+        ScrollLyricsToTop();
+
+        if (Lyrics.Status == LyricsStatus.Synced)
+        {
+            ApplyLyricBlockVisualState(-1);
+            ApplyLyricBlockVisualState(-1, isFullscreen: true);
+            UpdateLyricWaitIndicators(TimeSpan.Zero);
+            UpdateFullscreenLyricWaitIndicators(TimeSpan.Zero);
+        }
+    }
+
+    private void ScrollLyricsToTop()
+    {
+        StopLyricsScrollAnimation();
+        _lyricsScrollTarget = 0;
+        _fullscreenLyricsScrollTarget = 0;
+        LyricsScrollViewer.ScrollToVerticalOffset(0);
+        FullscreenLyricsScrollViewer.ScrollToVerticalOffset(0);
     }
 
     private static void SetSliderValueIfChanged(Slider slider, double value)
@@ -1799,6 +2154,162 @@ public partial class MainWindow : Window
                 Lyrics = LyricsResult.Error("Lyrics unavailable");
                 RenderLyricsState();
             });
+        }
+    }
+
+    private Image[] AnimatedArtOverlays =>
+        [ArtVideoImage, ExpandedArtVideoImage, LyricsHeaderArtVideoImage, FullscreenArtVideoImage];
+
+    private void RefreshAnimatedArtworkForSnapshot(MediaSnapshot snapshot)
+    {
+        var key = AnimatedArtworkService.CreateArtworkKey(snapshot);
+        if (key == _animatedArtworkKey)
+        {
+            return;
+        }
+
+        _animatedArtworkKey = key;
+        _animatedArtworkCts?.Cancel();
+        _animatedArtworkCts?.Dispose();
+        _animatedArtworkCts = null;
+        StopAnimatedArtwork();
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(90));
+        _animatedArtworkCts = cts;
+        _ = LoadAnimatedArtworkAsync(snapshot, key, cts.Token);
+    }
+
+    private async Task LoadAnimatedArtworkAsync(MediaSnapshot snapshot, string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = await _animatedArtworkService.GetAnimatedArtworkAsync(snapshot, cancellationToken);
+            if (file is null)
+            {
+                return;
+            }
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (_animatedArtworkKey != key || cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                StartAnimatedArtwork(file);
+            });
+        }
+        catch
+        {
+            // Animated artwork is a best-effort enhancement; static art stays visible.
+        }
+    }
+
+    private void StartAnimatedArtwork(string file)
+    {
+        EnsureAnimatedArtPlayer();
+        _animatedArtworkFile = file;
+        _animatedArtPlayer!.Close();
+        _animatedArtPlayer.Open(new Uri(file));
+    }
+
+    private void EnsureAnimatedArtPlayer()
+    {
+        if (_animatedArtPlayer is not null)
+        {
+            return;
+        }
+
+        var player = new MediaPlayer { IsMuted = true, Volume = 0, ScrubbingEnabled = true };
+        player.MediaOpened += (_, _) => OnAnimatedArtPlayerOpened();
+        player.MediaEnded += (_, _) => OnAnimatedArtPlayerEnded();
+        player.MediaFailed += (_, _) => OnAnimatedArtPlayerFailed();
+        _animatedArtPlayer = player;
+        _animatedArtSource = new DrawingImage(new VideoDrawing { Player = player, Rect = new Rect(0, 0, 1, 1) });
+        _animatedArtRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        _animatedArtRevealTimer.Tick += (_, _) => RevealAnimatedArtwork();
+    }
+
+    private void OnAnimatedArtPlayerOpened()
+    {
+        var player = _animatedArtPlayer;
+        if (_animatedArtworkFile is null || player is null || _animatedArtSource is null)
+        {
+            return;
+        }
+
+        if (_animatedArtSource.Drawing is VideoDrawing drawing && player.NaturalVideoWidth > 0)
+        {
+            drawing.Rect = new Rect(0, 0, player.NaturalVideoWidth, player.NaturalVideoHeight);
+        }
+
+        // Scrubbing renders the first frame while paused, so the reveal fades in
+        // real footage instead of a not-yet-decoded black surface.
+        player.Position = TimeSpan.FromMilliseconds(1);
+        _animatedArtRevealTimer?.Start();
+    }
+
+    private void RevealAnimatedArtwork()
+    {
+        _animatedArtRevealTimer?.Stop();
+        if (_animatedArtworkFile is null || _animatedArtPlayer is null || _animatedArtSource is null)
+        {
+            return;
+        }
+
+        _animatedArtPlayer.Play();
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.Source = _animatedArtSource;
+            AnimateDouble(overlay, OpacityProperty, 1.0, 640);
+        }
+    }
+
+    private void OnAnimatedArtPlayerEnded()
+    {
+        if (_animatedArtworkFile is null || _animatedArtPlayer is null)
+        {
+            return;
+        }
+
+        // The cached file is remuxed into a seekable MP4, so looping is a plain
+        // rewind on the warm pipeline.
+        _animatedArtPlayer.Position = TimeSpan.Zero;
+        _animatedArtPlayer.Play();
+    }
+
+    private void OnAnimatedArtPlayerFailed()
+    {
+        var file = _animatedArtworkFile;
+        StopAnimatedArtwork();
+        if (file is not null)
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private void StopAnimatedArtwork()
+    {
+        _animatedArtworkFile = null;
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtPlayer?.Close();
+        foreach (var overlay in AnimatedArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Opacity = 0;
+            overlay.Source = null;
         }
     }
 
@@ -1931,7 +2442,7 @@ public partial class MainWindow : Window
         FullscreenLyricsLoadingIcon.Source = _loadingIconFrames[_loadingIconFrameIndex];
     }
 
-    private static void AddLyricBlock(
+    private static TextBlock AddLyricBlock(
         Panel panel,
         ICollection<TextBlock> blocks,
         string text,
@@ -1955,6 +2466,7 @@ public partial class MainWindow : Window
 
         blocks.Add(block);
         panel.Children.Add(block);
+        return block;
     }
 
     private void AddLyricWaitIndicatorIfNeeded(
@@ -2423,7 +2935,18 @@ public partial class MainWindow : Window
     {
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
         var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
-        if (activeIndex < 0 || activeIndex >= blocks.Count || scrollViewer.ViewportHeight <= 1)
+        if (scrollViewer.ViewportHeight <= 1)
+        {
+            return;
+        }
+
+        if (activeIndex < 0)
+        {
+            AnimateLyricsScrollTo(0, isFullscreen);
+            return;
+        }
+
+        if (activeIndex >= blocks.Count)
         {
             return;
         }
@@ -3103,18 +3626,22 @@ public partial class MainWindow : Window
             return TimeSpan.Zero;
         }
 
-        var position = Snapshot.Position;
-        if (Snapshot.IsPlaying)
+        return _timelineStabilizer.GetPosition(DateTimeOffset.Now);
+    }
+
+    private static string CreateTimelineMediaKey(MediaSnapshot snapshot)
+    {
+        if (!snapshot.HasSession)
         {
-            position += DateTimeOffset.Now - _lastSnapshotAt;
+            return string.Empty;
         }
 
-        if (position < TimeSpan.Zero)
-        {
-            return TimeSpan.Zero;
-        }
-
-        return position > Snapshot.Duration ? Snapshot.Duration : position;
+        return string.Join(
+            '\u001f',
+            snapshot.SourceApp.Trim(),
+            snapshot.Title.Trim(),
+            snapshot.Artist.Trim(),
+            snapshot.Album.Trim());
     }
 
     private async void PlayPauseButton_Click(object sender, RoutedEventArgs e)
@@ -3318,34 +3845,169 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ProgressSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void ProgressSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (IsControlDisabled(sender))
+        if (_progressSliderUpdating
+            || !_seekSliderInteraction.IsPointerDown
+            || sender is not Slider slider
+            || !ReferenceEquals(_seekSliderInteraction.ActiveSlider, slider))
         {
-            e.Handled = true;
             return;
         }
 
-        _isSeeking = true;
+        _progressSliderUpdating = true;
+        try
+        {
+            foreach (var progressSlider in ProgressSliders)
+            {
+                if (!ReferenceEquals(progressSlider, slider))
+                {
+                    SetSliderValueIfChanged(progressSlider, e.NewValue);
+                }
+            }
+        }
+        finally
+        {
+            _progressSliderUpdating = false;
+        }
+
+        ShowSliderToolTip(_seekSliderInteraction, slider, includeSeekPosition: true);
+        UpdateTimelineUi();
     }
 
-    private async void ProgressSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private static void SetSliderValueFromPointer(Slider slider, MouseEventArgs e)
     {
-        if (IsControlDisabled(sender))
+        slider.ApplyTemplate();
+        double value;
+        if (slider.Template.FindName("PART_Track", slider)
+            is System.Windows.Controls.Primitives.Track track)
         {
-            _isSeeking = false;
-            e.Handled = true;
+            value = track.ValueFromPoint(e.GetPosition(track));
+        }
+        else if (slider.ActualWidth > 1)
+        {
+            var ratio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
+            value = slider.Minimum + ((slider.Maximum - slider.Minimum) * ratio);
+        }
+        else
+        {
             return;
         }
 
-        if (!_isSeeking)
+        if (!double.IsNaN(value) && !double.IsInfinity(value))
+        {
+            slider.Value = Math.Clamp(value, slider.Minimum, slider.Maximum);
+        }
+    }
+
+    private static bool IsPointerOverSliderThumb(MouseButtonEventArgs e, Slider slider)
+    {
+        var current = e.OriginalSource as DependencyObject;
+        while (current is Visual or Visual3D)
+        {
+            if (current is System.Windows.Controls.Primitives.Thumb)
+            {
+                return true;
+            }
+
+            if (ReferenceEquals(current, slider))
+            {
+                break;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private static bool IsVisualDescendantOf(DependencyObject descendant, DependencyObject ancestor)
+    {
+        var current = descendant;
+        while (current is Visual or Visual3D)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private async Task CompleteSeekAsync(Slider slider)
+    {
+        var interaction = _seekSliderInteraction;
+        if (!interaction.IsPointerDown || !ReferenceEquals(interaction.ActiveSlider, slider))
         {
             return;
         }
 
-        _isSeeking = false;
-        var slider = sender as Slider ?? ProgressSlider;
-        await _mediaService.SeekAsync(TimeSpan.FromSeconds(slider.Value));
+        var target = TimeSpan.FromSeconds(slider.Value);
+        EndSliderPointerInteraction(interaction, slider, releaseNativeCapture: false);
+        ShowSliderToolTip(interaction, slider, includeSeekPosition: true);
+        BeginSliderToolTipLinger(interaction);
+        await SeekToPositionAsync(target);
+    }
+
+    private async Task SeekToPositionAsync(TimeSpan target)
+    {
+        if (!Snapshot.HasSession || !Snapshot.CanSeek || Snapshot.Duration <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        target = TimeSpan.FromSeconds(Math.Clamp(
+            target.TotalSeconds,
+            0,
+            Snapshot.Duration.TotalSeconds));
+        var requestGeneration = ++_seekRequestGeneration;
+        _timelineStabilizer.BeginSeek(
+            CreateTimelineMediaKey(Snapshot),
+            target,
+            Snapshot.Duration,
+            Snapshot.IsPlaying,
+            DateTimeOffset.Now);
+        PrepareLyricsForExplicitSeek(target);
+        UpdateTimelineUi();
+
+        var accepted = false;
+        try
+        {
+            accepted = await _mediaService.SeekAsync(target);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to seek the active media session: {ex}");
+        }
+
+        if (requestGeneration != _seekRequestGeneration || accepted)
+        {
+            return;
+        }
+
+        _timelineStabilizer.RejectPendingSeek(DateTimeOffset.Now);
+        UpdateTimelineUi();
+    }
+
+    private void PrepareLyricsForExplicitSeek(TimeSpan target)
+    {
+        _lastLyricsPosition = target;
+        _isUserBrowsingLyrics = false;
+        _isUserBrowsingFullscreenLyrics = false;
+        _fullscreenLyricsInactivityTimer.Stop();
+        StopLyricsScrollAnimation();
+        if (Lyrics.Status == LyricsStatus.Synced)
+        {
+            _activeLyricIndex = -1;
+            _activeFullscreenLyricIndex = -1;
+            _activeLyricWaitIndicatorIndex = -1;
+            _activeFullscreenLyricWaitIndicatorIndex = -1;
+            ApplyLyricBlockVisualState(-1);
+            ApplyLyricBlockVisualState(-1, isFullscreen: true);
+        }
     }
 
     private void SetTransportEnabled(bool isEnabled)
@@ -3378,7 +4040,7 @@ public partial class MainWindow : Window
             var line = Lyrics.SyncedLines[i];
             var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
             AddLyricWaitIndicatorIfNeeded(i, previousLineTime, line.Time, panel, waitIndicators, isFullscreen);
-            AddLyricBlock(
+            var block = AddLyricBlock(
                 panel,
                 blocks,
                 line.Text,
@@ -3386,7 +4048,62 @@ public partial class MainWindow : Window
                 isFullscreen ? 0.35 : 0.30,
                 isFullscreen ? new Thickness(0, 22, 0, 22) : new Thickness(0, 13, 0, 13),
                 isFullscreen ? Color.FromRgb(150, 158, 158) : Color.FromRgb(124, 132, 132));
+            ConfigureSyncedLyricBlock(block, line.Time);
         }
+    }
+
+    private void ConfigureSyncedLyricBlock(TextBlock block, TimeSpan timestamp)
+    {
+        block.Tag = timestamp;
+        block.Background = Brushes.Transparent;
+        block.MouseLeftButtonDown += SyncedLyricLine_MouseLeftButtonDown;
+        block.MouseLeftButtonUp += SyncedLyricLine_MouseLeftButtonUp;
+        UpdateSyncedLyricBlockSeekability(block, Snapshot);
+    }
+
+    private void UpdateSyncedLyricLineSeekability(MediaSnapshot snapshot)
+    {
+        foreach (var block in _lyricBlocks.Concat(_fullscreenLyricBlocks))
+        {
+            UpdateSyncedLyricBlockSeekability(block, snapshot);
+        }
+    }
+
+    private static void UpdateSyncedLyricBlockSeekability(TextBlock block, MediaSnapshot snapshot)
+    {
+        var canSeek = block.Tag is TimeSpan timestamp
+            && CanSeekToSyncedLyric(snapshot, timestamp);
+        block.Cursor = canSeek ? Cursors.Hand : Cursors.Arrow;
+    }
+
+    private static bool CanSeekToSyncedLyric(MediaSnapshot snapshot, TimeSpan timestamp)
+    {
+        return snapshot.HasSession
+            && snapshot.CanSeek
+            && snapshot.Duration > TimeSpan.Zero
+            && timestamp >= TimeSpan.Zero
+            && timestamp <= snapshot.Duration;
+    }
+
+    private void SyncedLyricLine_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is TextBlock { Tag: TimeSpan timestamp }
+            && CanSeekToSyncedLyric(Snapshot, timestamp))
+        {
+            e.Handled = true;
+        }
+    }
+
+    private async void SyncedLyricLine_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not TextBlock { Tag: TimeSpan timestamp }
+            || !CanSeekToSyncedLyric(Snapshot, timestamp))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await SeekToPositionAsync(timestamp);
     }
 
     private void RenderPlainLyrics(Panel panel, ICollection<TextBlock> blocks, bool isFullscreen)
@@ -3482,9 +4199,11 @@ public partial class MainWindow : Window
         _volumeUpdating = false;
         UpdateVolumeIcon();
         RefreshAllVolumeToolTips();
-        if (_isVolumeDragging && sender is Slider activeSlider)
+        if (_volumeSliderInteraction.IsPointerDown
+            && sender is Slider activeSlider
+            && ReferenceEquals(_volumeSliderInteraction.ActiveSlider, activeSlider))
         {
-            ShowVolumeToolTip(activeSlider);
+            ShowSliderToolTip(_volumeSliderInteraction, activeSlider, includeSeekPosition: false);
         }
     }
 
@@ -4451,6 +5170,7 @@ public partial class MainWindow : Window
         _mediaPollTimer.Stop();
         StopLyricsScrollAnimation();
         _loadingIconTimer.Stop();
+        _seekToolTipHideTimer.Stop();
         _volumeToolTipHideTimer.Stop();
         _lyricsRefreshCts?.Cancel();
         _lyricsRefreshCts?.Dispose();
@@ -4458,6 +5178,10 @@ public partial class MainWindow : Window
         _lastFmCts?.Dispose();
         _lastFmScrobbleCts?.Cancel();
         _lastFmScrobbleCts?.Dispose();
+        _animatedArtworkCts?.Cancel();
+        _animatedArtworkCts?.Dispose();
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtPlayer?.Close();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _globeConnectionService.LinkRevoked -= GlobeConnectionService_LinkRevoked;
@@ -4475,6 +5199,7 @@ public partial class MainWindow : Window
         _lastFmService.Dispose();
         _globeConnectionService.Dispose();
         _lyricsService.Dispose();
+        _animatedArtworkService.Dispose();
         _mediaService.Dispose();
         base.OnClosed(e);
     }
@@ -4590,7 +5315,8 @@ public partial class MainWindow : Window
             _preFullscreenExpanded = _isExpanded;
             _preFullscreenLyrics = _isLyricsMode;
 
-            // Recycle ChromeButtons: hide collapse, topmost, and minimize
+            // Recycle ChromeButtons: fullscreen keeps only its exit control visible.
+            CloseButton.Visibility = Visibility.Collapsed;
             CollapseExpandedButton.Visibility = Visibility.Collapsed;
             TopmostButton.Visibility = Visibility.Collapsed;
             MinimizeButton.Visibility = Visibility.Collapsed;
@@ -4644,6 +5370,7 @@ public partial class MainWindow : Window
                     FullscreenPanel.Visibility = Visibility.Collapsed;
 
                     // Restore other chrome buttons visibility and exit state icon
+                    CloseButton.Visibility = Visibility.Visible;
                     MinimizeButton.Visibility = Visibility.Visible;
                     TopmostButton.Visibility = Visibility.Visible;
                     FullscreenButtonPath.Data = Geometry.Parse("M 1,6 L 1,1 L 6,1 M 1,1 L 7,7 M 14,9 L 14,14 L 9,14 M 14,14 L 8,8");

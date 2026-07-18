@@ -172,11 +172,12 @@
 
         <Style x:Key="GlassSliderStyle" TargetType="Slider">
             <Setter Property="Height" Value="18" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
-                        <Grid>
+                        <Grid Background="Transparent">
                             <Border Height="2"
                                     Margin="0,0,8,0"
                                     CornerRadius="1"
@@ -271,8 +272,7 @@
             <Setter Property="Maximum" Value="1" />
             <Setter Property="Value" Value="0" />
             <Setter Property="IsMoveToPointEnabled" Value="True" />
-            <EventSetter Event="PreviewMouseLeftButtonDown" Handler="ProgressSlider_PreviewMouseLeftButtonDown" />
-            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ProgressSlider_PreviewMouseLeftButtonUp" />
+            <EventSetter Event="ValueChanged" Handler="ProgressSlider_ValueChanged" />
         </Style>
 
         <Style x:Key="VolumeSliderStyle" TargetType="Slider" BasedOn="{StaticResource GlassSliderStyle}">
@@ -517,6 +517,16 @@
 
                     <StackPanel HorizontalAlignment="Right"
                                 Orientation="Horizontal">
+                        <Button x:Name="TopmostButton"
+                                Style="{StaticResource ChromeButtonStyle}"
+                                Click="TopmostButton_Click"
+                                ToolTip="Always on top">
+                            <Path Width="11"
+                                  Height="11"
+                                  Stretch="Uniform"
+                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
+                        </Button>
                         <Button x:Name="CollapseExpandedButton"
                                 Style="{StaticResource ChromeButtonStyle}"
                                 Click="CollapseExpandedButton_Click"
@@ -530,16 +540,6 @@
                                   StrokeStartLineCap="Round"
                                   StrokeEndLineCap="Round"
                                   Data="M 1,5 L 5,5 L 5,1 M 5,5 L 1,1 M 11,7 L 7,7 L 7,11 M 7,7 L 11,11" />
-                        </Button>
-                        <Button x:Name="TopmostButton"
-                                Style="{StaticResource ChromeButtonStyle}"
-                                Click="TopmostButton_Click"
-                                ToolTip="Always on top">
-                            <Path Width="11"
-                                  Height="11"
-                                  Stretch="Uniform"
-                                  Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
-                                  Data="M 5,0 L 10,5 L 7,5 L 7,11 L 3,11 L 3,5 L 0,5 Z" />
                         </Button>
                         <Button x:Name="FullscreenButton"
                                 Style="{StaticResource ChromeButtonStyle}"
@@ -601,6 +601,10 @@
                                    RenderOptions.BitmapScalingMode="HighQuality" />
                             <Image x:Name="ArtImage"
                                    Stretch="UniformToFill" />
+                            <Image x:Name="ArtVideoImage"
+                                   Stretch="UniformToFill"
+                                   Opacity="0"
+                                   IsHitTestVisible="False" />
                             <Rectangle Height="30"
                                        VerticalAlignment="Top"
                                        Opacity="0.38">
@@ -784,22 +788,22 @@
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     Margin="0,0,-2,0">
-                            <Button x:Name="CompactInfoButton"
-                                    Style="{StaticResource InfoButtonStyle}"
-                                    Width="28"
-                                    Height="28"
-                                    Margin="0,0,3,0"
-                                    Visibility="Collapsed"
-                                    Click="InfoButton_Click"
-                                    ToolTip="More" />
                             <Button x:Name="CompactLyricsButton"
                                     Style="{StaticResource LyricsButtonStyle}"
                                     Width="28"
                                     Height="28"
-                                    Margin="0"
+                                    Margin="0,0,3,0"
                                     Visibility="Collapsed"
                                     Click="LyricsButton_Click"
                                     ToolTip="Lyrics" />
+                            <Button x:Name="CompactInfoButton"
+                                    Style="{StaticResource InfoButtonStyle}"
+                                    Width="28"
+                                    Height="28"
+                                    Margin="0"
+                                    Visibility="Collapsed"
+                                    Click="InfoButton_Click"
+                                    ToolTip="More" />
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -822,6 +826,10 @@
                     <Image x:Name="ExpandedArtImage"
                            Stretch="UniformToFill"
                            RenderOptions.BitmapScalingMode="HighQuality" />
+                    <Image x:Name="ExpandedArtVideoImage"
+                           Stretch="UniformToFill"
+                           Opacity="0"
+                           IsHitTestVisible="False" />
 
                     <Border Opacity="0.92">
                         <Border.Background>
@@ -981,22 +989,22 @@
                                             Orientation="Horizontal"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Center">
-                                    <Button x:Name="ExpandedInfoButton"
-                                            Style="{StaticResource InfoButtonStyle}"
-                                            Width="34"
-                                            Height="34"
-                                            Margin="0,0,3,0"
-                                            Visibility="Collapsed"
-                                            Click="InfoButton_Click"
-                                            ToolTip="More" />
                                     <Button x:Name="ExpandedLyricsButton"
                                             Style="{StaticResource LyricsButtonStyle}"
                                             Width="34"
                                             Height="34"
-                                            Margin="0"
+                                            Margin="0,0,3,0"
                                             Visibility="Collapsed"
                                             Click="LyricsButton_Click"
                                             ToolTip="Lyrics" />
+                                    <Button x:Name="ExpandedInfoButton"
+                                            Style="{StaticResource InfoButtonStyle}"
+                                            Width="34"
+                                            Height="34"
+                                            Margin="0"
+                                            Visibility="Collapsed"
+                                            Click="InfoButton_Click"
+                                            ToolTip="More" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -1007,7 +1015,7 @@
             <Border x:Name="LyricsPanel"
                     Grid.RowSpan="3"
                     CornerRadius="9"
-                    Background="Transparent"
+                    Background="#FF141719"
                     Visibility="Collapsed"
                     Opacity="0"
                     RenderTransformOrigin="0.5,0.5"
@@ -1125,6 +1133,10 @@
                                            RenderOptions.BitmapScalingMode="HighQuality" />
                                     <Image x:Name="LyricsHeaderArtImage"
                                            Stretch="UniformToFill" />
+                                    <Image x:Name="LyricsHeaderArtVideoImage"
+                                           Stretch="UniformToFill"
+                                           Opacity="0"
+                                           IsHitTestVisible="False" />
                                     <Rectangle Height="24"
                                                VerticalAlignment="Top"
                                                Opacity="0.30">
@@ -1439,6 +1451,10 @@
                                          <Image x:Name="FullscreenArtImage"
                                                 Stretch="UniformToFill"
                                                 RenderOptions.BitmapScalingMode="HighQuality" />
+                                         <Image x:Name="FullscreenArtVideoImage"
+                                                Stretch="UniformToFill"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
                                          
                                          <!-- Gloss Foreground Overlay Reflection -->
                                          <Rectangle Height="200"
@@ -1572,20 +1588,20 @@
                                         <StackPanel Orientation="Horizontal"
                                                     VerticalAlignment="Center"
                                                     HorizontalAlignment="Right">
-                                            <Button x:Name="FullscreenInfoButton"
-                                                    Style="{StaticResource InfoButtonStyle}"
-                                                    Width="32"
-                                                    Height="32"
-                                                    Margin="0,0,6,0"
-                                                    Click="InfoButton_Click"
-                                                    ToolTip="More" />
                                             <Button x:Name="FullscreenLyricsToggle"
                                                     Style="{StaticResource LyricsButtonStyle}"
                                                     Width="32"
                                                     Height="32"
-                                                    Margin="0"
+                                                    Margin="0,0,6,0"
                                                     Click="FullscreenLyricsToggle_Click"
                                                     ToolTip="Lyrics" />
+                                            <Button x:Name="FullscreenInfoButton"
+                                                    Style="{StaticResource InfoButtonStyle}"
+                                                    Width="32"
+                                                    Height="32"
+                                                    Margin="0"
+                                                    Click="InfoButton_Click"
+                                                    ToolTip="More" />
                                         </StackPanel>
                                     </Grid>
                                 </Grid>

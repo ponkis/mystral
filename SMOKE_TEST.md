@@ -33,6 +33,7 @@ For packaged development builds:
 - Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
 - Toggle always-on-top and confirm the setting sticks after restart.
 - Minimize the app and confirm restore works.
+- Enter fullscreen and confirm Close is hidden, then exit with Escape or the fullscreen control and confirm Close returns.
 - Close with `Close to tray` enabled and confirm the tray icon remains.
 - Restore from the tray icon.
 - Exit from the tray menu and confirm the process closes.
@@ -42,14 +43,27 @@ For packaged development builds:
 - Start playback in Spotify, a browser, or another Windows media-session app.
 - Confirm title, artist/description, progress, duration, play state, and artwork update.
 - Test play/pause, next, previous, and seek controls.
+- In compact, expanded, and fullscreen playback controls, confirm Lyrics appears before More.
+- In compact, expanded, lyrics, and fullscreen modes, click an empty point on the progress bar and drag from the track (not only the thumb); confirm every progress bar follows the same target.
+- Confirm the hand cursor covers the full progress and volume bar surfaces, not only their draggable thumbs.
+- Hover a progress bar and confirm its tooltip says `Seek`; click or drag and confirm it shows the target time, stays visible briefly after release, and then returns to `Seek`.
+- While dragging a progress bar, switch away from Mystral before releasing; return and confirm the timeline is not stuck in seek-preview mode.
+- Seek forward and backward in Spotify and Chrome and confirm the chosen timestamp does not snap back while Windows delivers the old position.
+- Let Spotify and Chrome play across several polling intervals and confirm the elapsed time remains monotonic instead of jumping backward or resetting to zero.
+- Play a track from an album with Apple Music animated cover art (for example The Weeknd — Dawn FM) and confirm the cover fades into a looping animation in the compact, expanded, lyrics-header, and fullscreen art views.
+- Let the animated cover reach its end and confirm it loops without freezing; switch tracks and confirm the next track returns to its own static or animated art without leftovers.
 - Pause playback and confirm the UI state updates.
 - Stop playback or close the media app and confirm Mystral returns to idle without crashing.
 
 ## Lyrics
 
 - Play a well-tagged song with the correct album and duration and confirm synced or plain lyrics load.
+- In Apple Music for Windows, play a known track and confirm lyrics load when its media session combines `Artist — Album` instead of publishing a separate album.
 - Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
 - During a long gap, confirm the three dots fill alongside the preceding highlighted lyric without recentering or advancing lyric synchronization early.
+- With a seekable source and synchronized lyrics, click a line in both regular and fullscreen lyrics; confirm playback seeks to that line and recenters it. Confirm plain lyrics and synchronized lyrics from a non-seekable source keep the normal cursor and do nothing when clicked.
+- Scroll regular and fullscreen lyrics away from the active line, then let the same track loop from near its end to the beginning; confirm both views clear browsing state and return to the top. Confirm a one-off zero/near-zero provider reading or small backward jitter does not reset the lyric view.
+- With the automatic artwork theme, confirm lyrics mode shows one blurred cover backdrop plus the header thumbnail without a doubled backdrop. With a fixed custom theme, confirm the backdrop stays hidden while the header thumbnail remains.
 - Switch tracks and confirm old lyrics do not remain stuck.
 - Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
 - Play a track with no lyrics and confirm the empty/not-found state is readable.
@@ -58,7 +72,8 @@ For packaged development builds:
 
 - Adjust volume using Mystral and confirm Windows output volume changes.
 - Toggle mute and confirm the icon/state updates.
-- Drag the volume slider and confirm tooltip values are reasonable.
+- Click an empty point on each volume bar, then drag from both the track and thumb; confirm volume follows continuously in every player mode.
+- Confirm the volume tooltip appears immediately, stays visible briefly after release, and a lost mouse capture does not leave the slider in its dragging state.
 
 ## Notifications
 
@@ -72,6 +87,7 @@ For packaged development builds:
 
 - Open settings from the app and tray menu.
 - Toggle behavior settings, save, restart, and confirm persistence.
+- Export playback history and confirm the successful `Export complete` dialog uses the CSV icon.
 - Under Behavior, switch the Burn lyrics provider between `MusicBrainz-assisted (default)` and `LRCLIB (direct)`, save, restart, and confirm the selected provider persists.
 - Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker.
 - While a track is visible, choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.

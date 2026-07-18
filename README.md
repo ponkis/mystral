@@ -111,7 +111,31 @@ backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on
-the right, and center the app icon and name where that identity is shown.
+the right, and center the app icon and name where that identity is shown. In
+fullscreen, Close is hidden and the Fullscreen action becomes the exit control.
+
+The playback timeline uses the media session's own update timestamp so Spotify
+and browser sessions do not rewind when Windows repeats a stale position.
+Progress and volume bars use their full hand-cursor surface for click-to-jump or
+dragging, with an immediate tooltip that lingers after release. Volume applies
+continuously; progress previews the target and commits the seek on release.
+
+For Apple Music's Windows media session, lyric lookup separates a combined
+`Artist — Album` value when the session omits its album field, and uses the
+session's album artist when its primary artist field is empty.
+
+When the playing album has an Apple Music animated cover, Mystral downloads the
+animation once and fades it in over the static cover in the compact, expanded,
+lyrics-header, and fullscreen art views, looping it while the album keeps
+playing. Albums without an animated cover keep the regular artwork. Animated
+covers are resolved through the `artwork.m8tec.top` lookup service and cached
+locally.
+
+Synchronized lyric lines become seek targets when the active media session
+allows seeking; plain lyrics remain read-only text. When a looping track
+restarts after reaching its end, lyric browsing resets in both the regular and
+fullscreen views. Lyrics mode uses one cover-derived backdrop plus its header
+artwork, while a fixed custom theme continues to hide the backdrop.
 
 ## Burn Editor
 
@@ -162,9 +186,10 @@ GitHub Actions runs the same build-and-test checks on every push and pull reques
 
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
-- LRCLIB exact lookup, fallback search ranking, parsing, and caching
+- LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
+- media-session timestamp projection, stale-position filtering, seek reconciliation, and loop-restart detection
 - model defaults and artwork tint edge cases
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling

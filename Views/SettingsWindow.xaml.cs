@@ -1576,7 +1576,11 @@ public partial class SettingsWindow : Window
                 }
 
                 System.IO.File.WriteAllText(sfd.FileName, sb.ToString(), System.Text.Encoding.UTF8);
-                AppDialogWindow.ShowInformation(this, "Export complete", "Playback history exported successfully!");
+                AppDialogWindow.ShowConfirmationWithIcon(
+                    this,
+                    "Export complete",
+                    "Playback history exported successfully!",
+                    "Resources/csv.ico");
             }
             catch (Exception ex)
             {

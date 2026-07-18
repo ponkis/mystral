@@ -34,7 +34,10 @@ internal static class Program
             ("Globe missing claim and revoke endpoints fail safely", GlobeConnectionServiceTests.TreatsMissingEndpointsAsFailures),
             ("Globe avatar dimensions reject oversized and extreme inputs", GlobeConnectionServiceTests.ValidatesAvatarDimensions),
             ("local scrobble cache adds, removes, caps, and tolerates corrupt files", LocalScrobbleCacheServiceTests.ManagesHistory),
+            ("media timeline projects source anchors and reconciles stale seeks", PlaybackTimelineStabilizerTests.StabilizesSourceUpdatesAndSeeks),
             ("lyrics service exact-matches, searches, ranks, parses, and caches results", LyricsServiceTests.FetchesExactOrBestLyricsAndCaches),
+            ("lyrics service normalizes Apple Music media-session metadata", LyricsServiceTests.NormalizesAppleMusicMetadata),
+            ("animated artwork parses playlists, prefers H.264, and keys by album", AnimatedArtworkServiceTests.ParsesPlaylistsAndKeys),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
@@ -74,6 +77,76 @@ internal static class Program
 
         Console.Error.WriteLine(string.Join(Environment.NewLine + Environment.NewLine, failures));
         return 1;
+    }
+}
+
+static class AnimatedArtworkServiceTests
+{
+    public static void ParsesPlaylistsAndKeys()
+    {
+        var snapshot = MediaSnapshot.Empty with
+        {
+            HasSession = true,
+            Title = "Sacrifice",
+            Artist = " The Weeknd ",
+            Album = "Dawn FM"
+        };
+        Check.Equal("the weeknd|dawn fm", AnimatedArtworkService.CreateArtworkKey(snapshot));
+        Check.Equal(string.Empty, AnimatedArtworkService.CreateArtworkKey(snapshot with { Album = " " }));
+        Check.Equal(string.Empty, AnimatedArtworkService.CreateArtworkKey(MediaSnapshot.Empty));
+
+        var masterUri = new Uri("https://example.com/artwork/master.m3u8");
+        var master = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="hvc1.2.20000000.L123.B0",RESOLUTION=768x768
+            hevc_768.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=2,CODECS="avc1.640020",RESOLUTION=1080x1080
+            avc_1080.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=3,CODECS="avc1.64001f",RESOLUTION=768x768
+            avc_768.m3u8
+            """;
+        var variant = AnimatedArtworkService.SelectStreamVariantUri(master, masterUri);
+        Check.Equal("https://example.com/artwork/avc_768.m3u8", variant!.ToString());
+
+        var hevcOnly = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="hvc1.2.20000000.L123.B0",RESOLUTION=486x486
+            hevc_486.m3u8
+            """;
+        Check.Equal(
+            "https://example.com/artwork/hevc_486.m3u8",
+            AnimatedArtworkService.SelectStreamVariantUri(hevcOnly, masterUri)!.ToString());
+        Check.True(AnimatedArtworkService.SelectStreamVariantUri("#EXTM3U", masterUri) is null);
+
+        var mediaUri = new Uri("https://example.com/artwork/avc_768.m3u8");
+        var media = """
+            #EXTM3U
+            #EXT-X-TARGETDURATION:3
+            #EXT-X-MAP:URI="segment-.mp4",BYTERANGE="897@0"
+            #EXTINF:3.00000,
+            #EXT-X-BYTERANGE:100@897
+            segment-.mp4
+            #EXTINF:3.00000,
+            #EXT-X-BYTERANGE:100@997
+            segment-.mp4
+            """;
+        var file = AnimatedArtworkService.ResolveSegmentFileUri(media, mediaUri);
+        Check.Equal("https://example.com/artwork/segment-.mp4", file!.ToString());
+
+        var multiFile = """
+            #EXTM3U
+            #EXT-X-MAP:URI="init.mp4"
+            #EXTINF:3.00000,
+            other-segment.mp4
+            """;
+        Check.True(AnimatedArtworkService.ResolveSegmentFileUri(multiFile, mediaUri) is null);
+
+        var noMap = """
+            #EXTM3U
+            #EXTINF:3.00000,
+            segment0.ts
+            """;
+        Check.True(AnimatedArtworkService.ResolveSegmentFileUri(noMap, mediaUri) is null);
     }
 }
 
@@ -1269,6 +1342,331 @@ static class LocalScrobbleCacheServiceTests
     }
 }
 
+static class PlaybackTimelineStabilizerTests
+{
+    public static void StabilizesSourceUpdatesAndSeeks()
+    {
+        var start = new DateTimeOffset(2026, 7, 17, 12, 0, 0, TimeSpan.Zero);
+        var duration = TimeSpan.FromMinutes(3);
+
+        var validAnchor = PlaybackTimelineStabilizer.ResolveSourceAnchorTimestamp(
+            start,
+            start + TimeSpan.FromSeconds(5),
+            duration,
+            out var validAnchorIsReliable);
+        Check.Equal(start, validAnchor);
+        Check.True(validAnchorIsReliable);
+        Check.Equal(
+            TimeSpan.FromSeconds(45),
+            PlaybackTimelineStabilizer.ProjectSourcePosition(
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                sourceUpdatedAt: validAnchor,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        var fallbackAnchor = PlaybackTimelineStabilizer.ResolveSourceAnchorTimestamp(
+            default,
+            start,
+            duration,
+            out var fallbackAnchorIsReliable);
+        Check.Equal(start, fallbackAnchor);
+        Check.False(fallbackAnchorIsReliable);
+        Check.Equal(
+            TimeSpan.FromSeconds(40),
+            PlaybackTimelineStabilizer.ProjectSourcePosition(
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: false,
+                sourceUpdatedAt: validAnchor,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        var stabilizer = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(40),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start));
+        Check.Equal(TimeSpan.FromSeconds(42), stabilizer.GetPosition(start + TimeSpan.FromSeconds(2)));
+
+        // Re-reading the same source anchor projects forward instead of resetting
+        // the display to the old raw position on every GSMTC poll.
+        Check.Equal(
+            TimeSpan.FromSeconds(42),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(40),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+
+        // A malformed same-track snapshot with no duration must preserve the
+        // established timeline instead of resetting the player to 0:00.
+        Check.Equal(
+            TimeSpan.FromMilliseconds(42500),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                isPlaying: true,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(2500)));
+        Check.Equal(duration, stabilizer.Duration);
+
+        // Chrome can publish a default timestamp and a one-off 0 position. Two
+        // frozen observations must not rewind a timeline that is still playing.
+        Check.Equal(
+            TimeSpan.FromSeconds(43),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(3),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(3)));
+        Check.Equal(
+            TimeSpan.FromSeconds(45),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(5),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(5)));
+
+        // Even an advancing reset stays filtered when Chrome supplied no reliable
+        // anchor timestamp.
+        Check.Equal(
+            TimeSpan.FromMilliseconds(46500),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromMilliseconds(1500),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromMilliseconds(6500),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(6500)));
+
+        // A deliberate external backwards seek is accepted only after two
+        // coherent observations backed by a credible source anchor.
+        Check.Equal(
+            TimeSpan.FromSeconds(47),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(7),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(7)));
+        Check.Equal(
+            TimeSpan.FromSeconds(3),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(7),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(8)));
+
+        // Mystral's own seek is immediate, while the stale response emitted by
+        // the source right after the command remains fenced out.
+        Check.Equal(
+            TimeSpan.FromSeconds(80),
+            stabilizer.BeginSeek(
+                "spotify|song",
+                TimeSpan.FromSeconds(80),
+                duration,
+                isPlaying: true,
+                startedAt: start + TimeSpan.FromSeconds(9)));
+        Check.Equal(
+            TimeSpan.FromMilliseconds(80100),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(2),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromMilliseconds(9100),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromMilliseconds(9100)));
+        Check.Equal(
+            TimeSpan.FromSeconds(81),
+            stabilizer.Observe(
+                "spotify|song",
+                hasSession: true,
+                TimeSpan.FromSeconds(81),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(10),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(10)));
+
+        // A track change is an explicit discontinuity and resets immediately.
+        Check.Equal(
+            TimeSpan.Zero,
+            stabilizer.Observe(
+                "chrome|next-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(11),
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(11)));
+
+        Check.True(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(178),
+            TimeSpan.FromSeconds(2),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(90),
+            TimeSpan.FromSeconds(2),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(178),
+            TimeSpan.FromSeconds(172),
+            duration));
+        Check.False(PlaybackTimelineStabilizer.IsPlaybackRestart(
+            TimeSpan.FromSeconds(13),
+            TimeSpan.Zero,
+            TimeSpan.FromSeconds(14)));
+
+        // A same-track loop is accepted after a second coherent near-start
+        // observation. The first zero remains fenced as possible provider jitter.
+        var reliableRestart = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start,
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start));
+        Check.Equal(
+            TimeSpan.FromSeconds(179),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(1),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(reliableRestart.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.FromSeconds(1),
+            reliableRestart.Observe(
+                "spotify|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(1),
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: start + TimeSpan.FromSeconds(2),
+                hasReliableTimelineUpdatedAt: true,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.True(reliableRestart.LastObservationWasPlaybackRestart);
+
+        // Providers with no usable timeline timestamp can report a paused zero
+        // before playback resumes. Two coherent samples still identify the restart.
+        var unreliableRestart = new PlaybackTimelineStabilizer();
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start));
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(unreliableRestart.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.Zero,
+            unreliableRestart.Observe(
+                "browser|looping-song",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: true,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.True(unreliableRestart.LastObservationWasPlaybackRestart);
+
+        // A single bad zero that recovers to the end is never classified as a loop.
+        var staleEndReading = new PlaybackTimelineStabilizer();
+        staleEndReading.Observe(
+            "chrome|stale-end",
+            hasSession: true,
+            TimeSpan.FromSeconds(178),
+            duration,
+            isPlaying: false,
+            timelineUpdatedAt: default,
+            hasReliableTimelineUpdatedAt: false,
+            observedAt: start);
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            staleEndReading.Observe(
+                "chrome|stale-end",
+                hasSession: true,
+                TimeSpan.Zero,
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(1)));
+        Check.False(staleEndReading.LastObservationWasPlaybackRestart);
+        Check.Equal(
+            TimeSpan.FromSeconds(178),
+            staleEndReading.Observe(
+                "chrome|stale-end",
+                hasSession: true,
+                TimeSpan.FromSeconds(178),
+                duration,
+                isPlaying: false,
+                timelineUpdatedAt: default,
+                hasReliableTimelineUpdatedAt: false,
+                observedAt: start + TimeSpan.FromSeconds(2)));
+        Check.False(staleEndReading.LastObservationWasPlaybackRestart);
+    }
+}
+
 static class LyricsServiceTests
 {
     public static void FetchesExactOrBestLyricsAndCaches()
@@ -1407,6 +1805,86 @@ static class LyricsServiceTests
             CancellationToken.None).GetAwaiter().GetResult();
         Check.Equal(LyricsStatus.NotFound, missingArtist.Status);
         Check.Equal(1, missingArtistSearchCount);
+    }
+
+    public static void NormalizesAppleMusicMetadata()
+    {
+        const string appleMusicSource = "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App";
+        var appleSnapshot = Snapshot(
+                "Potholderz (feat. Count Bass D)",
+                "MF DOOM \u2014 MM..FOOD (Deluxe Edition)",
+                "",
+                TimeSpan.FromSeconds(200)) with
+            {
+                SourceApp = appleMusicSource
+            };
+
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal("/api/get", request.RequestUri!.AbsolutePath);
+            var query = ParseQuery(request.RequestUri);
+            Check.Equal("Potholderz (feat. Count Bass D)", query["track_name"]);
+            Check.Equal("MF DOOM", query["artist_name"]);
+            Check.Equal("MM..FOOD (Deluxe Edition)", query["album_name"]);
+            Check.Equal("200", query["duration"]);
+            return Json(new
+            {
+                id = 7,
+                trackName = "Potholderz (feat. Count Bass D)",
+                artistName = "MF DOOM",
+                albumName = "MM..FOOD (Deluxe Edition)",
+                duration = 200d,
+                instrumental = false,
+                plainLyrics = "Apple plain line",
+                syncedLyrics = (string?)"[00:01.00]Apple line"
+            });
+        });
+
+        using var service = new LyricsService(new HttpClient(handler));
+        var result = service.GetLyricsAsync(appleSnapshot, CancellationToken.None).GetAwaiter().GetResult();
+        Check.Equal(1, handler.Count);
+        Check.Equal(LyricsStatus.Synced, result.Status);
+        Check.Equal("Apple line", result.SyncedLines.Single().Text);
+
+        var normalized = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot);
+        Check.Equal("MF DOOM", normalized.Artist);
+        Check.Equal("MM..FOOD (Deluxe Edition)", normalized.Album);
+        Check.Equal(
+            "potholderz (feat. count bass d)|mf doom|mm..food (deluxe edition)",
+            LyricsService.CreateTrackKey(appleSnapshot));
+
+        var appleWithAlbum = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot with
+        {
+            Artist = "MF DOOM \u2014 Should remain artist text",
+            Album = "Published Album"
+        });
+        Check.Equal("MF DOOM \u2014 Should remain artist text", appleWithAlbum.Artist);
+        Check.Equal("Published Album", appleWithAlbum.Album);
+
+        var enDash = AppleMusicMediaMetadata.NormalizeLyricsLookup(appleSnapshot with
+        {
+            Artist = "MF DOOM \u2013 MM..FOOD (Deluxe Edition)"
+        });
+        Check.Equal("MF DOOM", enDash.Artist);
+        Check.Equal("MM..FOOD (Deluxe Edition)", enDash.Album);
+
+        var nonAppleSnapshot = appleSnapshot with { SourceApp = "chrome.exe" };
+        var nonAppleNormalized = AppleMusicMediaMetadata.NormalizeLyricsLookup(nonAppleSnapshot);
+        Check.Equal("MF DOOM \u2014 MM..FOOD (Deluxe Edition)", nonAppleNormalized.Artist);
+        Check.Equal("", nonAppleNormalized.Album);
+        Check.Equal(
+            "potholderz (feat. count bass d)|mf doom \u2014 mm..food (deluxe edition)|",
+            LyricsService.CreateTrackKey(nonAppleSnapshot));
+
+        Check.Equal(
+            "Album Artist",
+            AppleMusicMediaMetadata.ResolveArtist("", " Album Artist ", appleMusicSource));
+        Check.Equal(
+            "Primary Artist",
+            AppleMusicMediaMetadata.ResolveArtist(" Primary Artist ", "Album Artist", appleMusicSource));
+        Check.Equal(
+            "",
+            AppleMusicMediaMetadata.ResolveArtist("", "Album Artist", "chrome.exe"));
     }
 
     private static Dictionary<string, string> ParseQuery(Uri uri)
