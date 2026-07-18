@@ -52,7 +52,7 @@ For packaged development builds:
 - Let Spotify and Chrome play across several polling intervals and confirm the elapsed time remains monotonic instead of jumping backward or resetting to zero.
 - Play a track from an album with Apple Music animated cover art (for example The Weeknd — Dawn FM) and confirm the cover fades into a looping animation in the compact, expanded, lyrics-header, and fullscreen art views.
 - Let the animated cover reach its end and confirm it loops without freezing; switch tracks and confirm the next track returns to its own static or animated art without leftovers.
-- Switch between two albums whose animated covers are both already cached and confirm the art holds the previous animation's last frame during the swap instead of flashing the static cover; switch to an album without animated art and confirm the static cover appears once the lookup resolves.
+- Switch between two albums whose animated covers are both already cached and confirm the art holds the previous animation's last frame during the swap — the static cover must never appear, not even for a frame. Switch to an album without animated art and confirm the held frame dissolves into the static cover within a few seconds.
 - Pause playback and confirm the UI state updates.
 - Stop playback or close the media app and confirm Mystral returns to idle without crashing.
 
@@ -92,7 +92,8 @@ For packaged development builds:
 - Export playback history and confirm the successful `Export complete` dialog uses the CSV icon.
 - Under Behavior, switch the Burn lyrics provider between `MusicBrainz (default)` and `LRCLIB`, save, restart, and confirm the selected provider persists.
 - Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker showing only the color wheel and a hex field.
-- Move the picker's wheel and confirm the miniature player preview inside the Appearance panel (and the swatch/hex text) updates live; cancel and confirm the preview returns to the last confirmed color while the real player never changes until Save.
+- Move the picker's wheel and confirm the main player (and the Appearance swatch/hex text) previews the color live; cancel and confirm the player returns to the last accepted or saved appearance.
+- Accept a color with `Use color` and confirm the player keeps showing it; save and confirm it becomes permanent, or close settings without saving and confirm the player reverts.
 - Choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.
 - Check the compact, expanded-artwork, lyrics, and fullscreen player modes; confirm cover-derived blurred background artwork is hidden in each mode while foreground cover artwork (including the expanded view's cover) remains visible.
 - In the History list, right-click a track and confirm the `Remove` entry shows the delete icon.

@@ -50,12 +50,13 @@ neither burn-lyrics mode requires an API key.
 
 Under `Appearance`, the player theme can follow each track's artwork automatically
 or use a color chosen from the theme color picker (a color wheel plus a hex
-field). A miniature player rendered inside the Appearance panel shows the chosen
-color live while picking. A custom color becomes the fixed tint for the main
-player and removes its cover-derived blurred backgrounds while the expanded view
-keeps showing the cover itself; the burn editor and track notifications continue
-using their own automatic artwork tint. Returning the theme to automatic
-restores the artwork tint and backgrounds.
+field). The live player previews the color while picking, and an accepted color
+stays applied to the player until the settings are saved (making it permanent)
+or the settings window closes without saving (reverting it). A custom color
+becomes the fixed tint for the main player and removes its cover-derived blurred
+backgrounds while the expanded view keeps showing the cover itself; the burn
+editor and track notifications continue using their own automatic artwork tint.
+Returning the theme to automatic restores the artwork tint and backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on

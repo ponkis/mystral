@@ -91,25 +91,6 @@ public sealed partial class AnimatedArtworkService : IDisposable
         return $"{NormalizeKey(snapshot.Artist)}|{NormalizeKey(snapshot.Album)}";
     }
 
-    /// <summary>
-    /// Synchronously reports whether an animated cover for the key is already on
-    /// disk (or in memory), so the UI can hand off between covers without waiting.
-    /// </summary>
-    public bool HasCachedArtwork(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        if (_cache.TryGetValue(key, out var cached))
-        {
-            return cached is not null && File.Exists(cached);
-        }
-
-        return File.Exists(GetCacheFilePath(key));
-    }
-
     public async Task<string?> GetAnimatedArtworkAsync(MediaSnapshot snapshot, CancellationToken cancellationToken)
     {
         snapshot = AppleMusicMediaMetadata.NormalizeLyricsLookup(snapshot);

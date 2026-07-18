@@ -68,6 +68,7 @@ public partial class MainWindow : Window
     private MediaPlayer? _animatedArtPlayer;
     private DrawingImage? _animatedArtSource;
     private DispatcherTimer? _animatedArtRevealTimer;
+    private DispatcherTimer? _frozenArtHoldTimer;
     private string _animatedArtworkKey = string.Empty;
     private string? _animatedArtworkFile;
     private ImageSource? _frozenAnimatedArtFrame;
@@ -2195,12 +2196,13 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Dispose();
         _animatedArtworkCts = null;
 
-        // When the next track's animated cover is already cached, keep the last
-        // rendered frame on screen instead of flashing the static cover during
-        // the swap; otherwise fall back to static art while the fetch runs.
+        // Track changes deliver metadata in pieces (empty or partial keys can
+        // appear for a few snapshots), so never drop straight to the static
+        // cover here. Hold the last animated frame; the new lookup or the hold
+        // timeout decides what replaces it.
         var isShowingAnimatedArt = _animatedArtworkFile is not null
             || _frozenAnimatedArtFrame is not null;
-        if (isShowingAnimatedArt && _animatedArtworkService.HasCachedArtwork(key))
+        if (isShowingAnimatedArt)
         {
             FreezeAnimatedArtworkFrame();
         }
@@ -2314,6 +2316,7 @@ public partial class MainWindow : Window
 
         var isHandOff = _frozenAnimatedArtFrame is not null;
         _frozenAnimatedArtFrame = null;
+        _frozenArtHoldTimer?.Stop();
         _animatedArtPlayer.Play();
         foreach (var overlay in AnimatedArtOverlays)
         {
@@ -2368,6 +2371,52 @@ public partial class MainWindow : Window
             overlay.BeginAnimation(OpacityProperty, null);
             overlay.Opacity = 0;
             overlay.Source = null;
+        }
+
+        // A held frame must never outlive the transition: if no animated cover
+        // arrives for the new track in time, dissolve into the static cover.
+        if (_frozenArtHoldTimer is null)
+        {
+            _frozenArtHoldTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
+            _frozenArtHoldTimer.Tick += (_, _) => OnFrozenArtHoldTimeout();
+        }
+
+        _frozenArtHoldTimer.Stop();
+        _frozenArtHoldTimer.Start();
+    }
+
+    private void OnFrozenArtHoldTimeout()
+    {
+        _frozenArtHoldTimer?.Stop();
+        if (_frozenAnimatedArtFrame is null)
+        {
+            return;
+        }
+
+        _frozenAnimatedArtFrame = null;
+        var fade = new DoubleAnimation
+        {
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(280),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        fade.Completed += (_, _) =>
+        {
+            if (_frozenAnimatedArtFrame is not null)
+            {
+                return;
+            }
+
+            foreach (var overlay in FrozenArtOverlays)
+            {
+                overlay.BeginAnimation(OpacityProperty, null);
+                overlay.Opacity = 0;
+                overlay.Source = null;
+            }
+        };
+        foreach (var overlay in FrozenArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
         }
     }
 
@@ -2470,6 +2519,7 @@ public partial class MainWindow : Window
         _animatedArtworkFile = null;
         _frozenAnimatedArtFrame = null;
         _animatedArtRevealTimer?.Stop();
+        _frozenArtHoldTimer?.Stop();
         _animatedArtPlayer?.Close();
         foreach (var overlay in AnimatedArtOverlays)
         {
@@ -3680,7 +3730,7 @@ public partial class MainWindow : Window
         _hasAppliedArtworkTint = true;
         _lastArtworkTintSource = coverArt;
         var tint = ResolvePlayerTint(
-            _settingsService.Settings.Appearance.PlayerThemeColor,
+            GetEffectivePlayerThemeColor(),
             ExtractDominantTint(coverArt),
             DefaultTint);
 
@@ -3742,9 +3792,29 @@ public partial class MainWindow : Window
             out _);
     }
 
+    private string? _playerThemeColorPreview;
+
+    /// <summary>
+    /// Settings-driven preview: overrides the saved theme color on the live
+    /// player until called with null (picker closed without saving, settings
+    /// window closed, or the color saved for real).
+    /// </summary>
+    internal void PreviewPlayerThemeColor(Color? color)
+    {
+        _playerThemeColorPreview = color is { } value
+            ? AppearanceSettings.FormatPlayerThemeColor(value.R, value.G, value.B)
+            : null;
+        ApplyPlayerAppearance();
+    }
+
+    private string GetEffectivePlayerThemeColor()
+    {
+        return _playerThemeColorPreview ?? _settingsService.Settings.Appearance.PlayerThemeColor;
+    }
+
     private void ApplyPlayerAppearance()
     {
-        var playerThemeColor = _settingsService.Settings.Appearance.PlayerThemeColor;
+        var playerThemeColor = GetEffectivePlayerThemeColor();
         var backdropVisibility = ShouldShowPlayerArtworkBackdrops(playerThemeColor)
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -3765,8 +3835,7 @@ public partial class MainWindow : Window
     // without an arrange jump after the window resizes back.
     private void UpdateCompactBlurredArtVisibility()
     {
-        var showBackdrops = ShouldShowPlayerArtworkBackdrops(
-            _settingsService.Settings.Appearance.PlayerThemeColor);
+        var showBackdrops = ShouldShowPlayerArtworkBackdrops(GetEffectivePlayerThemeColor());
         BlurredArtImage.Visibility = !showBackdrops
             ? Visibility.Collapsed
             : _isLyricsMode
@@ -5416,6 +5485,7 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         _animatedArtRevealTimer?.Stop();
+        _frozenArtHoldTimer?.Stop();
         _animatedArtPlayer?.Close();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
