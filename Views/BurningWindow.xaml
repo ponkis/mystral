@@ -444,6 +444,14 @@
                                                                RenderOptions.BitmapScalingMode="HighQuality" />
                                                     </MenuItem.Icon>
                                                 </MenuItem>
+                                                <MenuItem Header="Save artwork guide..." Click="SaveDiscArtworkGuide_Click">
+                                                    <MenuItem.Icon>
+                                                        <Image Width="16"
+                                                               Height="16"
+                                                               Source="pack://siteoforigin:,,,/Resources/save.ico"
+                                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
                                             </ContextMenu>
                                         </Border.ContextMenu>
                                         <Grid>
@@ -468,7 +476,7 @@
                                                            HorizontalAlignment="Center"
                                                            FontSize="11"
                                                            Foreground="#647078"
-                                                           Text="Optional disc or medium scan" />
+                                                           Text="Click to upload an image" />
                                             </Grid>
                                         </Grid>
                                     </Border>

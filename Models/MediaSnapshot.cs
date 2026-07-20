@@ -24,6 +24,8 @@ public sealed record MediaSnapshot(
 
     public bool HasReliableTimelineUpdatedAt { get; init; }
 
+    public string CoverArtFingerprint { get; init; } = string.Empty;
+
     public static MediaSnapshot Empty { get; } = new(
         HasSession: false,
         Title: "No active track",

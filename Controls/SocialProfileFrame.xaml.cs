@@ -15,7 +15,7 @@ public partial class SocialProfileFrame : UserControl
 
     private readonly ImageSource _offlineFrame;
     private readonly ImageSource _onlineFrameAnimation;
-    private bool _isOnline;
+    private bool? _isOnline;
     private long _transitionId;
 
     public SocialProfileFrame()
@@ -36,28 +36,44 @@ public partial class SocialProfileFrame : UserControl
         ArgumentNullException.ThrowIfNull(profilePicture);
 
         var transitionId = ++_transitionId;
-        StopAnimations();
+        SetProfilePicture(profilePicture, animate, transitionId);
 
-        if (!animate)
+        // Aerochat's frame only reacts to actual status changes; refreshes that
+        // keep the same presence must not restart or cut short a transition.
+        if (_isOnline == isOnline)
         {
-            _isOnline = isOnline;
-            ProfilePictureImage.Source = profilePicture;
-            ProfilePictureImage.Opacity = 1;
-            ApplySettledPresence(isOnline);
             return;
         }
 
-        AnimateProfilePicture(profilePicture, transitionId);
-        if (_isOnline != isOnline)
+        if (animate && _isOnline is not null)
         {
             AnimatePresenceChange(isOnline);
         }
         else
         {
+            BeginAnimation(OpacityProperty, null);
             ApplySettledPresence(isOnline);
         }
 
         _isOnline = isOnline;
+    }
+
+    private void SetProfilePicture(ImageSource profilePicture, bool animate, long transitionId)
+    {
+        if (ReferenceEquals(ProfilePictureImage.Source, profilePicture))
+        {
+            return;
+        }
+
+        if (animate)
+        {
+            AnimateProfilePicture(profilePicture, transitionId);
+            return;
+        }
+
+        ProfilePictureImage.BeginAnimation(OpacityProperty, null);
+        ProfilePictureImage.Source = profilePicture;
+        ProfilePictureImage.Opacity = 1;
     }
 
     private void AnimateProfilePicture(ImageSource profilePicture, long transitionId)
@@ -95,22 +111,26 @@ public partial class SocialProfileFrame : UserControl
     private void AnimatePresenceChange(bool isOnline)
     {
         // Match Aerochat's ProfilePictureFrame exactly: online always uses the
-        // non-looping animation sheet, including as the outgoing/settled source.
+        // non-looping animation sheet, including as the outgoing/settled source,
+        // and both tiles restart from frame zero when the status flips.
+        var wasOnline = _isOnline == true;
         SetFrameSource(
             FrontFrameImage,
-            _isOnline ? _onlineFrameAnimation : _offlineFrame);
+            wasOnline ? _onlineFrameAnimation : _offlineFrame);
+        FrontFrameTranslate.BeginAnimation(TranslateTransform.XProperty, null);
         FrontFrameTranslate.X = 0;
         FrontFrameImage.Opacity = 1;
 
         SetFrameSource(
             BackFrameImage,
             isOnline ? _onlineFrameAnimation : _offlineFrame);
+        BackFrameTranslate.BeginAnimation(TranslateTransform.XProperty, null);
         BackFrameTranslate.X = 0;
         BackFrameImage.Opacity = 0;
 
         var newFrameCount = isOnline ? OnlineFrameCount : 1;
         var halfTimeMilliseconds = newFrameCount * OnlineFrameDurationMilliseconds / 2.0;
-        var crossFadeDelayMilliseconds = _isOnline
+        var crossFadeDelayMilliseconds = wasOnline
             ? halfTimeMilliseconds
             : halfTimeMilliseconds / 2.0;
         var crossFadeDelay = TimeSpan.FromMilliseconds(crossFadeDelayMilliseconds);
@@ -144,11 +164,25 @@ public partial class SocialProfileFrame : UserControl
                 FillBehavior = FillBehavior.HoldEnd
             });
 
-        if (!isOnline)
+        // Aerochat resets the outgoing tile too, so a formerly-online frame
+        // replays its sheet while it fades instead of freezing on frame zero.
+        if (wasOnline)
         {
-            return;
+            FrontFrameTranslate.BeginAnimation(
+                TranslateTransform.XProperty,
+                CreateOnlineSpriteAnimation());
         }
 
+        if (isOnline)
+        {
+            BackFrameTranslate.BeginAnimation(
+                TranslateTransform.XProperty,
+                CreateOnlineSpriteAnimation());
+        }
+    }
+
+    private static DoubleAnimationUsingKeyFrames CreateOnlineSpriteAnimation()
+    {
         var spriteAnimation = new DoubleAnimationUsingKeyFrames
         {
             Duration = TimeSpan.FromMilliseconds(OnlineFrameCount * OnlineFrameDurationMilliseconds),
@@ -161,7 +195,7 @@ public partial class SocialProfileFrame : UserControl
                 KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(frame * OnlineFrameDurationMilliseconds))));
         }
 
-        BackFrameTranslate.BeginAnimation(TranslateTransform.XProperty, spriteAnimation);
+        return spriteAnimation;
     }
 
     private void ApplySettledPresence(bool isOnline)
@@ -193,15 +227,6 @@ public partial class SocialProfileFrame : UserControl
 
         image.ClearValue(WidthProperty);
         image.ClearValue(HeightProperty);
-    }
-
-    private void StopAnimations()
-    {
-        var currentOpacity = Opacity;
-        BeginAnimation(OpacityProperty, null);
-        Opacity = currentOpacity;
-        ProfilePictureImage.BeginAnimation(OpacityProperty, null);
-        StopFrameAnimations();
     }
 
     private void StopFrameAnimations()

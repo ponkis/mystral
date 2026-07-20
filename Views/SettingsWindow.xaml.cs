@@ -42,6 +42,7 @@ public partial class SettingsWindow : Window
     private CancellationTokenSource? _socialSignInCancellation;
     private GlobeProfile? _socialProfile;
     private ImageSource? _socialProfileImage;
+    private bool _isSocialFrameOnline;
     private int _socialAvatarGeneration;
     private Color _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
 
@@ -65,6 +66,7 @@ public partial class SettingsWindow : Window
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
         _globeConnectionService.StateChanged += GlobeConnectionService_StateChanged;
+        _settingsService.SettingsChanged += SettingsService_SettingsChanged;
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
 
@@ -72,9 +74,37 @@ public partial class SettingsWindow : Window
         Closed += (s, e) =>
         {
             CancelSocialSignIn(restoreProfile: false);
+            _pendingThemePreviewColor = null;
+            ApplyPlayerThemePreview(null);
             _globeConnectionService.StateChanged -= GlobeConnectionService_StateChanged;
+            _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
+    }
+
+    // The tray menu can flip scrobbling while this window is open; mirror the
+    // stored value immediately instead of waiting for a reopen.
+    private void SettingsService_SettingsChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => SettingsService_SettingsChanged(sender, e));
+            return;
+        }
+
+        if (_isLoadingSettings || _isSaving)
+        {
+            return;
+        }
+
+        var storedScrobbling = _settingsService.Settings.LastFm.ScrobblingEnabled;
+        if (ScrobbleCheckBox.IsChecked != storedScrobbling)
+        {
+            ScrobbleCheckBox.IsChecked = storedScrobbling;
+            UpdateLastFmFieldStates();
+        }
+
+        RefreshDirtyState();
     }
 
     internal void ShowSocialSection(bool startLinking = false)
@@ -140,8 +170,19 @@ public partial class SettingsWindow : Window
         _isLoadingSettings = false;
 
         _hasUnsavedChanges = false;
+        UpdateLastFmFieldStates();
         UpdateLastFmStatus();
         UpdateDirtyStatus();
+    }
+
+    private void UpdateLastFmFieldStates()
+    {
+        var integrationEnabled = EnableLastFmCheckBox.IsChecked == true;
+        var scrobbling = integrationEnabled && ScrobbleCheckBox.IsChecked == true;
+        ApiSecretLabel.IsEnabled = scrobbling;
+        ApiSecretBox.IsEnabled = scrobbling;
+        PasswordLabel.IsEnabled = scrobbling;
+        PasswordBox.IsEnabled = scrobbling;
     }
 
     private void CategoriesListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -188,6 +229,7 @@ public partial class SettingsWindow : Window
 
     private void SettingsControl_Changed(object sender, RoutedEventArgs e)
     {
+        UpdateLastFmFieldStates();
         RefreshDirtyState();
     }
 
@@ -211,6 +253,8 @@ public partial class SettingsWindow : Window
         else
         {
             _selectedPlayerThemeColor = DefaultPlayerThemeColorValue;
+            _pendingThemePreviewColor = null;
+            ApplyPlayerThemePreview(null);
         }
 
         UpdatePlayerThemeControls();
@@ -229,14 +273,31 @@ public partial class SettingsWindow : Window
         RefreshDirtyState();
     }
 
+    private Color? _pendingThemePreviewColor;
+
     private bool TryChoosePlayerThemeColor()
     {
         var picker = new ThemeColorPickerWindow(_selectedPlayerThemeColor)
         {
             Owner = this
         };
+
+        // Mirror every change on the swatch, hex text, and the live player;
+        // canceling restores the last accepted (or saved) appearance.
+        picker.SelectedColorChanged += (_, color) =>
+        {
+            PlayerThemeColorSwatch.Background = new SolidColorBrush(color);
+            PlayerThemeColorText.Text = AppearanceSettings.FormatPlayerThemeColor(
+                color.R,
+                color.G,
+                color.B);
+            ApplyPlayerThemePreview(color);
+        };
+
         if (picker.ShowDialog() != true)
         {
+            UpdatePlayerThemeControls();
+            ApplyPlayerThemePreview(_pendingThemePreviewColor);
             return false;
         }
 
@@ -244,6 +305,8 @@ public partial class SettingsWindow : Window
             picker.SelectedColor.R,
             picker.SelectedColor.G,
             picker.SelectedColor.B);
+        _pendingThemePreviewColor = _selectedPlayerThemeColor;
+        ApplyPlayerThemePreview(_pendingThemePreviewColor);
         return true;
     }
 
@@ -267,6 +330,13 @@ public partial class SettingsWindow : Window
             _selectedPlayerThemeColor.R,
             _selectedPlayerThemeColor.G,
             _selectedPlayerThemeColor.B);
+    }
+
+    // The live player carries the preview: an accepted color stays applied until
+    // it is saved for real or this window closes without saving.
+    private void ApplyPlayerThemePreview(Color? color)
+    {
+        (Application.Current.MainWindow as MainWindow)?.PreviewPlayerThemeColor(color);
     }
 
     private void RefreshDirtyState()
@@ -322,6 +392,10 @@ public partial class SettingsWindow : Window
             }
 
             _settingsService.Save(settings);
+            // The saved settings now carry the chosen appearance; drop the
+            // temporary preview so they are the single source of truth.
+            _pendingThemePreviewColor = null;
+            ApplyPlayerThemePreview(null);
             _hasUnsavedChanges = false;
             UpdateLastFmStatus();
             UpdateDirtyStatus();
@@ -716,7 +790,10 @@ public partial class SettingsWindow : Window
             _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
         }
 
-        UpdateSocialPanel(animate: wasLinked != _isSocialAccountLinked);
+        var isNowFrameOnline = e.State.IsLinked && !e.State.IsOffline;
+        UpdateSocialPanel(
+            animate: wasLinked != _isSocialAccountLinked
+                || _isSocialFrameOnline != isNowFrameOnline);
         if (_socialProfile is not null
             && !e.State.IsChecking
             && string.IsNullOrWhiteSpace(e.State.ErrorMessage))
@@ -971,11 +1048,15 @@ public partial class SettingsWindow : Window
         SocialCdCountText.Text = profile is null && _isSocialAccountLinked
             ? "Account details will refresh when globe reconnects."
             : $"{cdCount} {(cdCount == 1 ? "CD" : "CDs")} burned total";
+        // The frame reflects reachability, not just the link: an unreachable
+        // globe settles it into the offline presence until the server returns.
+        var isFrameOnline = _isSocialAccountLinked && !isGlobeOffline;
         SocialProfileFrame.SetProfile(
-            _isSocialAccountLinked,
+            isFrameOnline,
             _socialProfileImage
             ?? IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png"),
             animate);
+        _isSocialFrameOnline = isFrameOnline;
 
         var transitionId = ++_socialProfileTransitionId;
         SocialProfileDetailsHost.BeginAnimation(OpacityProperty, null);
@@ -1150,7 +1231,9 @@ public partial class SettingsWindow : Window
         }
 
         SetLastFmStatus(
-            "Last.fm needs every field before it can be enabled.",
+            credentials.ScrobblingEnabled && credentials.HasViewerCredentials
+                ? "Scrobbling also needs the API secret and password."
+                : "Last.fm needs an API key and username before it can be enabled.",
             isWarning: true);
     }
 

@@ -1,113 +1,62 @@
 # Mystral
-![Mystral logo](assets/screenshots/logo.png)
 
-Mystral is a Windows desktop music companion built with WPF. It reads the active
-Windows media session and gives you playback controls, lyrics, Last.fm links and
-optional scrobbling, and a tray-based workflow for "burning" audio files
-(re-tagging them with cover/jewel-case artwork) and optionally sharing them.
-
-![Main screen](assets/screenshots/1.png)
-![Burning screen](assets/screenshots/2.png)
-![Lyrics](assets/screenshots/3.png)
-![Fullscreen view](assets/screenshots/4.png)
-
-<!--
-  To add a screenshot: save the image to assets/screenshots/<name>.png and
-  uncomment the matching line below. Keep captions short. GitHub renders these
-  relative paths automatically.
--->
-
-## Features
-
-- Reflects the active Windows media session: title, artist, artwork, progress,
-  duration, and play state.
-- Playback controls: play/pause, next, previous, and seek.
-- System output volume control with mute.
-- Synced or plain lyrics with a scrolling and fullscreen lyrics view.
-- Last.fm track links and optional scrobbling.
-- "Burn" a track: write metadata plus composited CD and jewel-case artwork to a
-  copy of the audio file, with optional sharing.
-- Track-change and burn notifications.
-- Tray icon with close-to-tray, always-on-top, and start-with-Windows options.
-- Single-instance activation through a custom URL protocol.
+Mystral is a Windows desktop music companion built with WPF. It reads the active Windows media session, shows playback controls, lyrics, Last.fm links, optional Last.fm scrobbling, customizable player themes, and a tray menu for quick actions.
 
 ## Requirements
 
-- Windows 10 1809 (build 17763) or newer.
+- Windows 10 1809 or newer.
 - .NET SDK 8.0 or newer for development.
-- Inno Setup 6 to build the Windows installer.
-- A Last.fm API account for Last.fm links and scrobbling (optional).
+- Inno Setup 6 for creating the Windows installer.
+- A Last.fm API account for Last.fm links and scrobbling (optional)
 
-## Getting Started
+## First Setup
 
-Restore, build, and run from the repository root:
+1. Restore and build the project:
 
-```powershell
-dotnet restore .\Mystral.csproj
-dotnet build .\Mystral.csproj
-dotnet run --project .\Mystral.csproj
-```
+   ```powershell
+   dotnet restore .\Mystral.csproj
+   dotnet build .\Mystral.csproj
+   ```
 
-You can also run the project from Visual Studio or Rider.
+2. Run the app from Visual Studio, Rider, or:
 
-## Configuration
+   ```powershell
+   dotnet run --project .\Mystral.csproj
+   ```
 
-Open **Settings** from the app window or the tray menu.
+3. Open `Settings` from the app menu or tray menu.
 
-### Last.fm (optional)
+4. Turn on and configure Last.fm under the `Last.fm` category:
 
-Under the **Last.fm** category, enable Last.fm and provide:
+   - API key and Username — enough for track links and the tray profile link
+   - `Scrobble playback to Last.fm`, if wanted
+   - API secret and Password — required only when scrobbling is enabled
 
-- API key
-- API secret
-- Username
-- Password
-- `Scrobble playback to Last.fm`, if wanted
-
-Credentials are validated when settings are saved. Scrobbling uses the Last.fm
-`auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble` methods.
-
-### Social sharing (optional)
-
-Mystral can share a "burned" CD to a social profile. The default backend
-(`chat.ponkis.xyz`) is proprietary, so out-of-the-box linking only works against
-that service. The sharing layer is isolated in `Services/GlobeConnectionService.cs`
-and `Services/GlobeApiClient.cs`, so you can adapt it to your own endpoint if you
-want to self-host sharing. Configure it under **Settings → Social**:
-
-- A configurable ad field.
-- An auto-share toggle.
-- A profile area showing avatar, name, username, and "burn" count.
-
-## Settings Storage
-
-Settings are stored per build environment:
-
-```text
-# Debug builds
-%LOCALAPPDATA%\Mystral Development\settings.json
-
-# Release builds
-%LOCALAPPDATA%\Mystral\settings.json
-```
-
-Sensitive values (Last.fm credentials and the sharing token) live in a separate, per-user encrypted credential store next to the settings file.
+The app validates Last.fm credentials when settings are saved: the API key and
+username alone unlock the viewer features, while enabling scrobbling also
+requires the API secret and account password (the tray toggle enforces the same
+rule and stays in sync with an open Settings window). Scrobbling uses Last.fm
+`auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
 
 Under `Behavior`, choose how the burn editor looks up lyrics:
 
-- `MusicBrainz-assisted (default)` uses the MusicBrainz metadata match to refine
-  the LRCLIB lyric search.
-- `LRCLIB (direct)` searches LRCLIB with the title, artist, album, and duration
+- `MusicBrainz (default)` first matches the song on MusicBrainz and uses that
+  metadata to refine the LRCLIB lyric search.
+- `LRCLIB` searches LRCLIB directly with the title, artist, album, and duration
   currently shown in the burn editor.
 
-Neither burn-lyrics mode requires an API key.
+Lyrics always come from LRCLIB (MusicBrainz does not host lyric text), and
+neither burn-lyrics mode requires an API key.
 
 Under `Appearance`, the player theme can follow each track's artwork automatically
-or use a color chosen from the theme color picker. A custom color becomes the
-fixed tint for the main player and removes its cover-derived background artwork;
-the burn editor and track notifications continue using their own automatic
-artwork tint. Returning the theme to automatic restores the artwork tint and
-backgrounds.
+or use a color chosen from the theme color picker (a color wheel plus a hex
+field). The live player previews the color while picking, and an accepted color
+stays applied to the player until the settings are saved (making it permanent)
+or the settings window closes without saving (reverting it). A custom color
+becomes the fixed tint for the main player and removes its cover-derived blurred
+backgrounds while the expanded view keeps showing the cover itself; the burn
+editor and track notifications continue using their own automatic artwork tint.
+Returning the theme to automatic restores the artwork tint and backgrounds.
 
 Mystral's custom title bars place the available Close and Minimize controls on
 the left, keep window-specific actions such as Always on top and Fullscreen on
@@ -127,15 +76,20 @@ session's album artist when its primary artist field is empty.
 When the playing album has an Apple Music animated cover, Mystral downloads the
 animation once and fades it in over the static cover in the compact, expanded,
 lyrics-header, and fullscreen art views, looping it while the album keeps
-playing. Albums without an animated cover keep the regular artwork. Animated
-covers are resolved through the `artwork.m8tec.top` lookup service and cached
-locally.
+playing. When the album changes, Mystral keeps the outgoing frame only while
+Windows is still returning the previous thumbnail. As soon as the new track's
+regular cover is ready it replaces that frame directly; a new animation can
+then take over once loaded. This keeps intermediate media-session thumbnails
+from flashing without leaving the old cover behind. Animated covers are
+resolved through the `artwork.m8tec.top` lookup service and cached in the user's
+temp directory, where Windows disk cleanup can reclaim them.
 
 Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. When a looping track
 restarts after reaching its end, lyric browsing resets in both the regular and
-fullscreen views. Lyrics mode uses one cover-derived backdrop plus its header
-artwork, while a fixed custom theme continues to hide the backdrop.
+fullscreen views. Lyrics mode sits on the player's translucent glass surface and
+uses one cover-derived backdrop plus its header artwork, while a fixed custom
+theme continues to hide the backdrop.
 
 ## Burn Editor
 
@@ -147,7 +101,10 @@ back to portable timestamped LRC text otherwise.
 
 `Fetch song data` retrieves metadata and artwork through MusicBrainz and the
 Cover Art Archive, and retrieves plain or synchronized lyrics through LRCLIB.
-Fetched lyrics remain editable before the copy is saved.
+Fetched lyrics remain editable before the copy is saved. The whole fetch runs
+under one connection deadline, so a dropped connection surfaces a timeout
+message instead of stalling. The CD artwork tile's right-click menu can also
+save the transparent disc guide image for aligning artwork in an editor.
 
 ## Updates
 
@@ -160,29 +117,24 @@ release.
 
 ## Testing
 
-The automated tests live in `tests\Mystral.Tests`. Run the core suite:
+The automated tests live in `tests\Mystral.Tests`. They use a small console runner instead of a test framework, so there are no extra test packages to restore.
+
+Run the core test suite:
 
 ```powershell
 dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj
 dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj --no-restore
 ```
 
-If NuGet is unavailable but the SDK packs are cached locally, restore from the
-local package cache:
+GitHub Actions runs the same core checks on pushes and pull requests in `.github\workflows\ci.yml`.
+
+If NuGet is unavailable but the SDK packs are already cached locally, restore from the local package cache:
 
 ```powershell
 dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj --source "$env:USERPROFILE\.nuget\packages"
 ```
 
-The suite covers the headless application logic: LRC parsing, Last.fm metadata
-cleanup and API paths, LRCLIB exact lookup and fallback search, settings
-persistence and corrupt-file fallback, local scrobble history, artwork
-composition and tinting, MusicBrainz mapping and retries, and audio-tag burning.
-
-GitHub Actions runs the same build-and-test checks on every push and pull request
-(`.github\workflows\ci.yml`).
-
-### Test coverage
+The test suite covers the vital headless app logic:
 
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
@@ -194,110 +146,27 @@ GitHub Actions runs the same build-and-test checks on every push and pull reques
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling
 
-Before a release, also run the Windows-only checklist in
-[`SMOKE_TEST.md`](SMOKE_TEST.md): window and tray states, media-session controls,
-system volume, notifications, and installer output.
+Before a release, also run the Windows-only checklist in `SMOKE_TEST.md`: WPF window states, tray behavior, media session controls, system volume controls, notifications, and installer output.
 
-## Building & Releasing
+## Settings Storage
 
-### Build environments
-
-The build environment is selected through MSBuild and kept isolated on disk so a
-Development build can never be silently replaced by a Production one:
-
-- Debug defaults to `AppEnvironment=Development`.
-- Release defaults to `AppEnvironment=Production`.
-- Output goes to `bin\<Configuration>\<AppEnvironment>`.
-
-```powershell
-dotnet build .\Mystral.csproj -c Debug   /p:AppEnvironment=Development
-dotnet build .\Mystral.csproj -c Release /p:AppEnvironment=Production
-```
-
-Development builds target a local backend (`http://localhost:3000/`) and register
-the `mystral-dev://` URL protocol. Production builds target `https://chat.ponkis.xyz/`
-and register `mystral://`.
-
-Register the development URL protocol from a normal (non-elevated) Windows shell,
-because the handler is stored in the current user's `HKCU` registry hive:
-
-```powershell
-.\scripts\Register-DevProtocol.cmd
-```
-
-### Development builds
-
-Packaged development builds use Release optimizations with
-`AppEnvironment=Development`, so you can test a packaged build without touching
-production settings:
-
-```powershell
-.\scripts\Build-Dev.ps1 -Clean -Run
-```
-
-The output is written to:
+Debug builds store settings in:
 
 ```text
-artifacts\dev\Mystral-<version>-dev-win-x64-folder\Mystral.exe
+%LOCALAPPDATA%\Mystral Development\settings.json
 ```
 
-### Production releases
-
-Production releases are built by GitHub Actions from `v*.*.*` tags on `main`. The
-workflow validates that the tag matches the MSBuild Release version, publishes
-self-contained `win-x64` builds, creates the Inno Setup installer, generates
-SHA-256 checksums, and attaches everything to a GitHub Release. It can also be
-started manually from the Actions tab.
-
-Recommended branch flow:
+Release builds store settings in:
 
 ```text
-work on dev -> build locally -> commit and push dev -> merge dev into main -> vX.Y.Z tag -> GitHub Release
+%LOCALAPPDATA%\Mystral\settings.json
 ```
 
-Helper scripts:
-
-```powershell
-# Merge dev into main and push
-.\scripts\Promote-DevToMain.ps1
-
-# Merge, push main, and create the release tag in one step
-.\scripts\Promote-DevToMain.ps1 -Release
-```
-
-To produce release binaries locally, resolve the version and publish:
-
-```powershell
-$version = dotnet msbuild .\Mystral.csproj -nologo -getProperty:Version -p:Configuration=Release
-
-# Self-contained single file
-dotnet publish .\Mystral.csproj -c Release -r win-x64 --self-contained true `
-  -o ".\artifacts\publish\Mystral-$version-win-x64-single" `
-  /p:AppEnvironment=Production /p:PublishSingleFile=true `
-  /p:IncludeAllContentForSelfExtract=true /p:EnableCompressionInSingleFile=true `
-  /p:UseAppHost=true /p:DebugType=None /p:DebugSymbols=false
-
-# Self-contained folder (packaged by the installer)
-dotnet publish .\Mystral.csproj -c Release -r win-x64 --self-contained true `
-  -o ".\artifacts\publish\Mystral-$version-win-x64-folder" `
-  /p:AppEnvironment=Production /p:PublishSingleFile=false `
-  /p:UseAppHost=true /p:DebugType=None /p:DebugSymbols=false
-```
-
-### Installer
-
-Install Inno Setup, build the folder publish, then build the installer:
-
-```powershell
-winget install JRSoftware.InnoSetup
-powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Installer.ps1
-```
-
-The installer is written to:
-
-```text
-artifacts\installer\Mystral-<version>-win-x64-setup.exe
-```
+Last.fm credentials and the globe bearer token are never written to
+`settings.json`. They are stored in the environment-specific `credentials`
+directory and encrypted for the current Windows user with DPAPI. Existing
+plaintext Last.fm fields are migrated to that protected store the next time
+settings are loaded successfully.
 
 ## Versioning
 
@@ -307,48 +176,76 @@ The project version is centralized in `Directory.Build.props`:
 <VersionPrefix>2.2.0</VersionPrefix>
 ```
 
-To bump the app version, edit `VersionPrefix`. Debug builds automatically append a
-`-dev` suffix; Release builds use the plain version.
+To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.
 
-## Project Layout
+## Development And Production
+
+The build environment is selected through MSBuild:
+
+- Debug defaults to `AppEnvironment=Development`.
+- Release defaults to `AppEnvironment=Production`.
+
+Build outputs are isolated by both values under
+`bin\<Configuration>\<AppEnvironment>` so a Development executable cannot be
+silently replaced by a Production-flavored build in the same folder.
+
+Development builds connect to `http://localhost:3000/` and register
+`mystral-dev://settings/social`. Set `MYSTRAL_GLOBE_BASE_URL` when the local
+globe server uses another origin. Production builds always use
+`https://chat.ponkis.xyz/` and `mystral://settings/social`.
+
+Avatar downloads are restricted to the globe origin and globe's current
+first-party R2 origin, both embedded as exact allowlist entries. If the image
+CDN changes, set the GitHub Actions repository variable
+`GLOBE_AVATAR_CDN_URL` to the new exact public base URL before creating a
+release; the release workflow embeds that override with `GlobeAvatarCdnUrl`.
+Development can override it with `MYSTRAL_GLOBE_AVATAR_CDN_URL` when testing a
+different CDN.
+
+The development packaging script registers the published executable without
+opening a window. A regular Debug build also registers itself when launched,
+or it can be registered explicitly without starting the UI. Run this from the
+same normal Windows account as the browser (not an elevated/admin shell),
+because the handler is stored in that user's `HKCU` registry hive:
+
+```powershell
+.\scripts\Register-DevProtocol.cmd
+```
+
+```powershell
+dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development
+dotnet build .\Mystral.csproj -c Release /p:AppEnvironment=Production
+```
+
+## Release Builds
+
+Development builds are created locally from the `dev` branch. They use Release optimizations with `AppEnvironment=Development`, so you can test packaged builds without touching production settings.
+
+Build and run a local development build:
+
+```powershell
+.\scripts\Build-Dev.ps1 -Clean -Run
+```
+
+The dev build is written to:
 
 ```text
-Configuration/   App metadata, environment resolution, trusted-host checks
-Controls/        Reusable WPF controls (CD art, jewel case, social profile)
-Infrastructure/  Low-level interop (audio endpoint)
-Models/          Records and DTOs (settings, media, lyrics, Last.fm, sharing)
-Parsing/         LRC lyric parsing
-Services/        Media session, lyrics, Last.fm, volume, artwork, sharing, storage
-Views/           WPF windows (main, settings, burn, notifications, dialogs)
-Resources/       Icons, images, and audio bundled into the app
-scripts/         Dev build, release promotion, and protocol registration scripts
-installer/       Inno Setup script and installer build script
-tests/           Headless test runner (Mystral.Tests)
+artifacts\dev\Mystral-<version>-dev-win-x64-folder\Mystral.exe
 ```
-## Trailer
 
-[![Watch the trailer](assets/screenshots/trailer.png)](https://mystral.ponkis.xyz)
+Production releases are built by GitHub Actions from version tags on `main`:
 
-## Contributing & Community
+```powershell
+$version = dotnet msbuild .\Mystral.csproj -nologo -getProperty:Version -p:Configuration=Release
+git tag "v$version"
+git push origin "v$version"
+```
 
-- Report bugs and request features through the
-  [issue templates](.github/ISSUE_TEMPLATE).
-- Report security vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
-- Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
+The production release workflow validates that the tag matches the MSBuild Release version, publishes self-contained `win-x64` builds, creates the Inno Setup installer, generates SHA-256 checksums, and attaches the assets to a GitHub Release.
 
-## License
+The workflow can also be started manually from GitHub Actions if you need to rebuild a release from the current commit.
 
-Mystral's source code is licensed under the **Mozilla Public License 2.0** — see
-[`LICENSE`](LICENSE).
-
-Mystral's source code is licensed under the **Mozilla Public License 2.0** — see
-[`LICENSE`](LICENSE).
-
-> **Note:** some bundled assets (for example the Windows 7-style busy animation)
-> are Microsoft-owned and are **not** covered by the MPL-2.0 grant. If you
-> redistribute Mystral, read [`NOTICE.md`](NOTICE.md) first.
-
-## Building & Releasing
+Recommended branch flow:
 
 ```text
 work on dev -> build locally -> commit and push dev -> merge dev into main -> vX.Y.Z tag -> GitHub Release

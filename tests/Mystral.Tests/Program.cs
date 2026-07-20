@@ -1908,7 +1908,16 @@ static class LastFmServiceTests
         var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"));
         using var unconfigured = new LastFmService(settings, new HttpClient(new FakeHttpMessageHandler(_ => throw new InvalidOperationException("should not call"))));
         Check.False(unconfigured.IsConfigured);
-        Check.Equal("Fill in API key, API secret, username, and password.", unconfigured.ValidateCredentialsAsync(new LastFmCredentials()).GetAwaiter().GetResult().Message);
+        Check.Equal("Fill in the Last.fm API key and username.", unconfigured.ValidateCredentialsAsync(new LastFmCredentials()).GetAwaiter().GetResult().Message);
+        Check.Equal(
+            "Scrobbling also needs the API secret and password.",
+            unconfigured.ValidateCredentialsAsync(new LastFmCredentials
+            {
+                Enabled = true,
+                ApiKey = "api",
+                Username = "user",
+                ScrobblingEnabled = true
+            }).GetAwaiter().GetResult().Message);
         Check.Equal("Scrobbling is disabled.", unconfigured.ScrobbleAsync(Track(), DateTimeOffset.UnixEpoch).GetAwaiter().GetResult().Message);
 
         settings.Save(new AppSettings
@@ -1998,8 +2007,15 @@ static class ModelTests
 {
     public static void DefaultsAndComputedPropertiesAreStable()
     {
-        Check.False(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u" }.IsConfigured);
-        Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p" }.IsConfigured);
+        // Viewer features need only key + username; scrobbling adds secret + password.
+        Check.False(new LastFmCredentials { ApiKey = "a", Username = "u" }.HasViewerCredentials);
+        Check.False(new LastFmCredentials { Enabled = true, ApiKey = "a" }.HasViewerCredentials);
+        Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", Username = "u" }.HasViewerCredentials);
+        Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", Username = "u" }.IsConfigured);
+        Check.False(new LastFmCredentials { Enabled = true, ApiKey = "a", Username = "u" }.HasScrobblingCredentials);
+        Check.False(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", ScrobblingEnabled = true }.IsConfigured);
+        Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p", ScrobblingEnabled = true }.IsConfigured);
+        Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p" }.HasScrobblingCredentials);
         Check.True(new BehaviorSettings().CloseToTray);
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,

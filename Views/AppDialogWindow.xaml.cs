@@ -49,13 +49,16 @@ public partial class AppDialogWindow : Window
         string title,
         string message,
         string linkCaption,
-        Uri linkUri)
+        Uri linkUri,
+        string? iconPath = null)
     {
         ArgumentNullException.ThrowIfNull(linkUri);
 
         var dialog = new AppDialogWindow(
             title,
-            FromSystemIcon(System.Drawing.SystemIcons.Information),
+            iconPath is null
+                ? FromSystemIcon(System.Drawing.SystemIcons.Information)
+                : IconImageSource.LoadBestFitFrame(iconPath, 32),
             ContinueButtons());
         dialog.DialogDescriptionText.Inlines.Add(new Run(message));
         dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
@@ -121,8 +124,7 @@ public partial class AppDialogWindow : Window
         string message,
         string actionCaption,
         bool isError = false,
-        bool isWarning = false,
-        bool placeActionOnNewLine = false)
+        bool isWarning = false)
     {
         var actionSelected = false;
         var dialog = new AppDialogWindow(
@@ -135,8 +137,8 @@ public partial class AppDialogWindow : Window
                         : System.Drawing.SystemIcons.Information),
             ContinueButtons());
         dialog.DialogDescriptionText.Inlines.Add(new Run(message));
-        dialog.DialogDescriptionText.Inlines.Add(
-            placeActionOnNewLine ? new LineBreak() : new Run(" "));
+        // Action links always sit on their own line under the message text.
+        dialog.DialogDescriptionText.Inlines.Add(new LineBreak());
         var action = new Hyperlink(new Run(actionCaption));
         action.Click += (_, _) =>
         {

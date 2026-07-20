@@ -605,6 +605,10 @@
                                    Stretch="UniformToFill"
                                    Opacity="0"
                                    IsHitTestVisible="False" />
+                            <Image x:Name="ArtFrozenFrameImage"
+                                   Stretch="UniformToFill"
+                                   Opacity="0"
+                                   IsHitTestVisible="False" />
                             <Rectangle Height="30"
                                        VerticalAlignment="Top"
                                        Opacity="0.38">
@@ -830,6 +834,10 @@
                            Stretch="UniformToFill"
                            Opacity="0"
                            IsHitTestVisible="False" />
+                    <Image x:Name="ExpandedArtFrozenFrameImage"
+                           Stretch="UniformToFill"
+                           Opacity="0"
+                           IsHitTestVisible="False" />
 
                     <Border Opacity="0.92">
                         <Border.Background>
@@ -1015,7 +1023,7 @@
             <Border x:Name="LyricsPanel"
                     Grid.RowSpan="3"
                     CornerRadius="9"
-                    Background="#FF141719"
+                    Background="Transparent"
                     Visibility="Collapsed"
                     Opacity="0"
                     RenderTransformOrigin="0.5,0.5"
@@ -1134,6 +1142,10 @@
                                     <Image x:Name="LyricsHeaderArtImage"
                                            Stretch="UniformToFill" />
                                     <Image x:Name="LyricsHeaderArtVideoImage"
+                                           Stretch="UniformToFill"
+                                           Opacity="0"
+                                           IsHitTestVisible="False" />
+                                    <Image x:Name="LyricsHeaderArtFrozenFrameImage"
                                            Stretch="UniformToFill"
                                            Opacity="0"
                                            IsHitTestVisible="False" />
@@ -1452,6 +1464,10 @@
                                                 Stretch="UniformToFill"
                                                 RenderOptions.BitmapScalingMode="HighQuality" />
                                          <Image x:Name="FullscreenArtVideoImage"
+                                                Stretch="UniformToFill"
+                                                Opacity="0"
+                                                IsHitTestVisible="False" />
+                                         <Image x:Name="FullscreenArtFrozenFrameImage"
                                                 Stretch="UniformToFill"
                                                 Opacity="0"
                                                 IsHitTestVisible="False" />

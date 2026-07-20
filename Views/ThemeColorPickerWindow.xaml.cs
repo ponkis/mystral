@@ -12,7 +12,11 @@ public partial class ThemeColorPickerWindow : Window
             initialColor.R,
             initialColor.G,
             initialColor.B);
+        ThemeColorPicker.ColorChanged += (_, _) =>
+            SelectedColorChanged?.Invoke(this, SelectedColor);
     }
+
+    internal event EventHandler<Color>? SelectedColorChanged;
 
     public Color SelectedColor
     {

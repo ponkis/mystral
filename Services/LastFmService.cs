@@ -31,14 +31,21 @@ public sealed class LastFmService : IDisposable
         _settingsService.SettingsChanged += SettingsService_SettingsChanged;
     }
 
-    public bool IsConfigured => _settingsService.Settings.LastFm.IsConfigured;
-    public bool IsScrobblingEnabled => IsConfigured && _settingsService.Settings.LastFm.ScrobblingEnabled;
+    public bool IsConfigured => _settingsService.Settings.LastFm.HasViewerCredentials;
+    public bool IsScrobblingEnabled =>
+        _settingsService.Settings.LastFm.ScrobblingEnabled
+        && _settingsService.Settings.LastFm.HasScrobblingCredentials;
 
     public async Task<LastFmValidationResult> ValidateCredentialsAsync(LastFmCredentials credentials, CancellationToken cancellationToken = default)
     {
-        if (!credentials.IsConfigured)
+        if (!credentials.HasViewerCredentials)
         {
-            return new LastFmValidationResult(false, "Fill in API key, API secret, username, and password.");
+            return new LastFmValidationResult(false, "Fill in the Last.fm API key and username.");
+        }
+
+        if (credentials.ScrobblingEnabled && !credentials.HasScrobblingCredentials)
+        {
+            return new LastFmValidationResult(false, "Scrobbling also needs the API secret and password.");
         }
 
         try
@@ -92,7 +99,7 @@ public sealed class LastFmService : IDisposable
     public async Task<LastFmTrackInfo?> GetTrackInfoAsync(LastFmTrackQuery query, CancellationToken cancellationToken = default)
     {
         var credentials = _settingsService.Settings.LastFm;
-        if (!credentials.IsConfigured
+        if (!credentials.HasViewerCredentials
             || string.IsNullOrWhiteSpace(query.ArtistName)
             || string.IsNullOrWhiteSpace(query.TrackName))
         {
