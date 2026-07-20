@@ -67,11 +67,23 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _animatedArtworkCts;
     private MediaPlayer? _animatedArtPlayer;
     private DrawingImage? _animatedArtSource;
+    private MediaPlayer? _heldAnimatedArtPlayer;
+    private DrawingImage? _heldAnimatedArtSource;
     private DispatcherTimer? _animatedArtRevealTimer;
     private DispatcherTimer? _frozenArtHoldTimer;
+    private EventHandler? _animatedArtPresentationRenderingHandler;
+    private EventHandler? _heldArtStaticReleaseRenderingHandler;
+    private MediaPlayer? _pendingAnimatedArtPresentationPlayer;
+    private int _pendingAnimatedArtPresentationGeneration;
     private string _animatedArtworkKey = string.Empty;
     private string? _animatedArtworkFile;
-    private ImageSource? _frozenAnimatedArtFrame;
+    private string _lastAppliedCoverArtFingerprint = string.Empty;
+    private string _heldCoverArtFingerprint = string.Empty;
+    private int _animatedArtworkGeneration;
+    private int _heldArtFadeEpoch;
+    private int _heldArtTimerGeneration;
+    private int _heldArtStaticReleaseGeneration;
+    private bool _isAnimatedArtPresented;
     private string _lyricsTrackKey = string.Empty;
     private string _lastFmTrackKey = string.Empty;
     private string _lastFmLookupCompletedKey = string.Empty;
@@ -1720,11 +1732,17 @@ public partial class MainWindow : Window
         ExpandedDescriptionText.Text = snapshot.Description;
         LyricsArtistText.Text = snapshot.Description;
 
+        // Establish the outgoing animated-art shield before replacing the
+        // static thumbnails underneath it. WPF presents these retained visuals
+        // later, so tearing down the video first leaves a one-frame gap.
+        RefreshAnimatedArtworkForSnapshot(snapshot);
         SetImageSourceIfChanged(ArtImage, snapshot.CoverArt);
         SetImageSourceIfChanged(BlurredArtImage, snapshot.CoverArt);
         SetImageSourceIfChanged(ExpandedArtImage, snapshot.CoverArt);
         SetImageSourceIfChanged(LyricsArtImage, snapshot.CoverArt);
         SetImageSourceIfChanged(LyricsHeaderArtImage, snapshot.CoverArt);
+        _lastAppliedCoverArtFingerprint = snapshot.CoverArtFingerprint;
+        ReleaseHeldArtworkWhenStaticCoverIsReady(snapshot);
         ArtImage.BeginAnimation(OpacityProperty, null);
         ArtImage.Opacity = 1;
         ArtPlaceholderText.Visibility = snapshot.CoverArt is null ? Visibility.Visible : Visibility.Collapsed;
@@ -1792,7 +1810,6 @@ public partial class MainWindow : Window
         }
 
         RefreshCompactBurnPresentation();
-        RefreshAnimatedArtworkForSnapshot(snapshot);
         RefreshLyricsForSnapshot(snapshot);
         RefreshLastFmForSnapshot(snapshot);
         UpdateScrobblingForSnapshot(snapshot);
@@ -2191,24 +2208,32 @@ public partial class MainWindow : Window
             return;
         }
 
+        var generation = ++_animatedArtworkGeneration;
+        CancelHeldArtStaticRelease();
         _animatedArtworkKey = key;
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         _animatedArtworkCts = null;
 
-        // Track changes deliver metadata in pieces (empty or partial keys can
-        // appear for a few snapshots), so never drop straight to the static
-        // cover here. Hold the last animated frame; the new lookup or the hold
-        // timeout decides what replaces it.
-        var isShowingAnimatedArt = _animatedArtworkFile is not null
-            || _frozenAnimatedArtFrame is not null;
-        if (isShowingAnimatedArt)
+        // Keep the outgoing MediaPlayer alive on the top artwork layer. A
+        // bitmap capture plus Close/Open is not a presentation barrier in WPF:
+        // the video surface can disappear one compositor frame before the
+        // captured image is visible.
+        if (_isAnimatedArtPresented)
         {
-            FreezeAnimatedArtworkFrame();
+            HoldAnimatedArtworkFrame();
         }
         else
         {
-            StopAnimatedArtwork();
+            ReleaseActiveAnimatedArtPlayer();
+            if (_heldAnimatedArtPlayer is not null)
+            {
+                RestartFrozenArtHoldTimer();
+            }
+            else
+            {
+                ClearAnimatedArtOverlays();
+            }
         }
 
         if (string.IsNullOrWhiteSpace(key))
@@ -2219,58 +2244,74 @@ public partial class MainWindow : Window
         var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromSeconds(90));
         _animatedArtworkCts = cts;
-        _ = LoadAnimatedArtworkAsync(snapshot, key, cts.Token);
+        _ = LoadAnimatedArtworkAsync(snapshot, key, generation, cts.Token);
     }
 
-    private async Task LoadAnimatedArtworkAsync(MediaSnapshot snapshot, string key, CancellationToken cancellationToken)
+    private async Task LoadAnimatedArtworkAsync(
+        MediaSnapshot snapshot,
+        string key,
+        int generation,
+        CancellationToken cancellationToken)
     {
         try
         {
             var file = await _animatedArtworkService.GetAnimatedArtworkAsync(snapshot, cancellationToken);
             await Dispatcher.InvokeAsync(() =>
             {
-                if (_animatedArtworkKey != key || cancellationToken.IsCancellationRequested)
+                if (_animatedArtworkGeneration != generation
+                    || _animatedArtworkKey != key
+                    || cancellationToken.IsCancellationRequested)
                 {
                     return;
                 }
 
                 if (file is null)
                 {
-                    // A frozen hand-off frame belongs to the previous track; drop
-                    // it so the static cover shows when no animated art arrives.
-                    if (_frozenAnimatedArtFrame is not null)
-                    {
-                        StopAnimatedArtwork();
-                    }
-
+                    // A cached negative can belong to a provisional artist/album
+                    // pair while Windows is still settling the new metadata and
+                    // thumbnail. Static-cover readiness or the bounded hold
+                    // timeout decides when the outgoing surface may leave.
                     return;
                 }
 
-                StartAnimatedArtwork(file);
+                StartAnimatedArtwork(file, generation);
             });
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch
         {
             // Animated artwork is a best-effort enhancement; static art stays visible.
             _ = Dispatcher.InvokeAsync(() =>
             {
-                if (_animatedArtworkKey == key && _frozenAnimatedArtFrame is not null)
+                if (_animatedArtworkGeneration == generation
+                    && _animatedArtworkKey == key
+                    && _heldAnimatedArtPlayer is not null)
                 {
-                    StopAnimatedArtwork();
+                    RestartFrozenArtHoldTimer();
                 }
             });
         }
     }
 
-    private void StartAnimatedArtwork(string file)
+    private void StartAnimatedArtwork(string file, int generation)
     {
-        EnsureAnimatedArtPlayer();
+        // A resolved animated replacement takes precedence over a pending
+        // static swap. Its separate player can preroll under the held frame.
+        CancelHeldArtStaticRelease();
+        ReleaseActiveAnimatedArtPlayer();
+        EnsureAnimatedArtPlayer(generation);
         _animatedArtworkFile = file;
-        _animatedArtPlayer!.Close();
-        _animatedArtPlayer.Open(new Uri(file));
+        if (_heldAnimatedArtPlayer is not null)
+        {
+            RestartFrozenArtHoldTimer();
+        }
+
+        _animatedArtPlayer!.Open(new Uri(file));
     }
 
-    private void EnsureAnimatedArtPlayer()
+    private void EnsureAnimatedArtPlayer(int generation)
     {
         if (_animatedArtPlayer is not null)
         {
@@ -2278,19 +2319,19 @@ public partial class MainWindow : Window
         }
 
         var player = new MediaPlayer { IsMuted = true, Volume = 0, ScrubbingEnabled = true };
-        player.MediaOpened += (_, _) => OnAnimatedArtPlayerOpened();
-        player.MediaEnded += (_, _) => OnAnimatedArtPlayerEnded();
-        player.MediaFailed += (_, _) => OnAnimatedArtPlayerFailed();
+        player.MediaOpened += (_, _) => OnAnimatedArtPlayerOpened(player, generation);
+        player.MediaEnded += (_, _) => OnAnimatedArtPlayerEnded(player, generation);
+        player.MediaFailed += (_, _) => OnAnimatedArtPlayerFailed(player, generation);
         _animatedArtPlayer = player;
         _animatedArtSource = new DrawingImage(new VideoDrawing { Player = player, Rect = new Rect(0, 0, 1, 1) });
-        _animatedArtRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
-        _animatedArtRevealTimer.Tick += (_, _) => RevealAnimatedArtwork();
     }
 
-    private void OnAnimatedArtPlayerOpened()
+    private void OnAnimatedArtPlayerOpened(MediaPlayer player, int generation)
     {
-        var player = _animatedArtPlayer;
-        if (_animatedArtworkFile is null || player is null || _animatedArtSource is null)
+        if (!ReferenceEquals(player, _animatedArtPlayer)
+            || generation != _animatedArtworkGeneration
+            || _animatedArtworkFile is null
+            || _animatedArtSource is null)
         {
             return;
         }
@@ -2303,28 +2344,46 @@ public partial class MainWindow : Window
         // Scrubbing renders the first frame while paused, so the reveal fades in
         // real footage instead of a not-yet-decoded black surface.
         player.Position = TimeSpan.FromMilliseconds(1);
-        _animatedArtRevealTimer?.Start();
+        ScheduleAnimatedArtworkReveal(player, generation);
     }
 
-    private void RevealAnimatedArtwork()
+    private void ScheduleAnimatedArtworkReveal(MediaPlayer player, int generation)
     {
         _animatedArtRevealTimer?.Stop();
-        if (_animatedArtworkFile is null || _animatedArtPlayer is null || _animatedArtSource is null)
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (ReferenceEquals(timer, _animatedArtRevealTimer))
+            {
+                _animatedArtRevealTimer = null;
+            }
+
+            RevealAnimatedArtwork(player, generation);
+        };
+        _animatedArtRevealTimer = timer;
+        timer.Start();
+    }
+
+    private void RevealAnimatedArtwork(MediaPlayer player, int generation)
+    {
+        if (!ReferenceEquals(player, _animatedArtPlayer)
+            || generation != _animatedArtworkGeneration
+            || _animatedArtworkFile is null
+            || _animatedArtSource is null)
         {
             return;
         }
 
-        var isHandOff = _frozenAnimatedArtFrame is not null;
-        _frozenAnimatedArtFrame = null;
-        _frozenArtHoldTimer?.Stop();
-        _animatedArtPlayer.Play();
+        player.Play();
+        var heldPlayer = _heldAnimatedArtPlayer;
         foreach (var overlay in AnimatedArtOverlays)
         {
             overlay.Source = _animatedArtSource;
-            if (isHandOff)
+            if (heldPlayer is not null)
             {
-                // The frozen frame above covers the swap; no fade from zero, or
-                // the static cover would blink through.
+                // The held player above covers this source until WPF has
+                // presented it on actual composition frames.
                 overlay.BeginAnimation(OpacityProperty, null);
                 overlay.Opacity = 1;
             }
@@ -2334,174 +2393,404 @@ public partial class MainWindow : Window
             }
         }
 
-        if (isHandOff)
-        {
-            FadeOutFrozenArtOverlays();
-        }
+        ScheduleAnimatedArtworkPresentation(player, heldPlayer, generation);
     }
 
-    // Track-change hand-off: paint the last decoded video frame into a layer
-    // above the video overlays so the static cover never flashes while the next
-    // cached cover opens and decodes.
-    private void FreezeAnimatedArtworkFrame()
+    private void ScheduleAnimatedArtworkPresentation(
+        MediaPlayer player,
+        MediaPlayer? heldPlayer,
+        int generation)
     {
-        if (_animatedArtworkFile is not null)
+        CancelAnimatedArtworkPresentation();
+        _pendingAnimatedArtPresentationPlayer = player;
+        _pendingAnimatedArtPresentationGeneration = generation;
+        var remainingFrames = 2;
+        TimeSpan? lastRenderingTime = null;
+        EventHandler? handler = null;
+        handler = (_, eventArgs) =>
         {
-            _frozenAnimatedArtFrame = TryCaptureAnimatedArtFrame() ?? _frozenAnimatedArtFrame;
-        }
+            if (eventArgs is RenderingEventArgs renderingArgs)
+            {
+                if (lastRenderingTime == renderingArgs.RenderingTime)
+                {
+                    return;
+                }
 
-        if (_frozenAnimatedArtFrame is null)
-        {
-            StopAnimatedArtwork();
-            return;
-        }
+                lastRenderingTime = renderingArgs.RenderingTime;
+            }
 
-        _animatedArtworkFile = null;
-        _animatedArtRevealTimer?.Stop();
-        _animatedArtPlayer?.Close();
-        foreach (var overlay in FrozenArtOverlays)
-        {
-            overlay.BeginAnimation(OpacityProperty, null);
-            overlay.Opacity = 1;
-            overlay.Source = _frozenAnimatedArtFrame;
-        }
-
-        foreach (var overlay in AnimatedArtOverlays)
-        {
-            overlay.BeginAnimation(OpacityProperty, null);
-            overlay.Opacity = 0;
-            overlay.Source = null;
-        }
-
-        // A held frame must never outlive the transition: if no animated cover
-        // arrives for the new track in time, dissolve into the static cover.
-        if (_frozenArtHoldTimer is null)
-        {
-            _frozenArtHoldTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
-            _frozenArtHoldTimer.Tick += (_, _) => OnFrozenArtHoldTimeout();
-        }
-
-        _frozenArtHoldTimer.Stop();
-        _frozenArtHoldTimer.Start();
-    }
-
-    private void OnFrozenArtHoldTimeout()
-    {
-        _frozenArtHoldTimer?.Stop();
-        if (_frozenAnimatedArtFrame is null)
-        {
-            return;
-        }
-
-        _frozenAnimatedArtFrame = null;
-        var fade = new DoubleAnimation
-        {
-            To = 0,
-            Duration = TimeSpan.FromMilliseconds(280),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        fade.Completed += (_, _) =>
-        {
-            if (_frozenAnimatedArtFrame is not null)
+            if (--remainingFrames > 0)
             {
                 return;
             }
 
+            CompositionTarget.Rendering -= handler;
+            if (ReferenceEquals(_animatedArtPresentationRenderingHandler, handler))
+            {
+                _animatedArtPresentationRenderingHandler = null;
+            }
+
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (generation != _animatedArtworkGeneration
+                    || !ReferenceEquals(player, _animatedArtPlayer)
+                    || !ReferenceEquals(player, _pendingAnimatedArtPresentationPlayer)
+                    || generation != _pendingAnimatedArtPresentationGeneration)
+                {
+                    return;
+                }
+
+                _pendingAnimatedArtPresentationPlayer = null;
+                _pendingAnimatedArtPresentationGeneration = 0;
+                _isAnimatedArtPresented = true;
+                if (heldPlayer is not null
+                    && ReferenceEquals(heldPlayer, _heldAnimatedArtPlayer))
+                {
+                    FadeOutFrozenArtOverlays();
+                }
+            }, DispatcherPriority.Background);
+        };
+        _animatedArtPresentationRenderingHandler = handler;
+        CompositionTarget.Rendering += handler;
+    }
+
+    private void CancelAnimatedArtworkPresentation()
+    {
+        if (_animatedArtPresentationRenderingHandler is not null)
+        {
+            CompositionTarget.Rendering -= _animatedArtPresentationRenderingHandler;
+            _animatedArtPresentationRenderingHandler = null;
+        }
+
+        _pendingAnimatedArtPresentationPlayer = null;
+        _pendingAnimatedArtPresentationGeneration = 0;
+    }
+
+    // Track-change hand-off: pause the outgoing player and keep its live video
+    // surface on the top layer. The incoming cover gets a separate MediaPlayer,
+    // so no visible surface is ever closed or reused during the swap.
+    private void HoldAnimatedArtworkFrame()
+    {
+        var player = _animatedArtPlayer;
+        var source = _animatedArtSource;
+        if (!_isAnimatedArtPresented || player is null || source is null)
+        {
+            ReleaseActiveAnimatedArtPlayer();
+            if (_heldAnimatedArtPlayer is not null)
+            {
+                RestartFrozenArtHoldTimer();
+            }
+            return;
+        }
+
+        _animatedArtRevealTimer?.Stop();
+        var previousHeldPlayer = _heldAnimatedArtPlayer;
+        foreach (var overlay in FrozenArtOverlays)
+        {
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Source = source;
+            overlay.Opacity = 1;
+        }
+
+        _heldAnimatedArtPlayer = player;
+        _heldAnimatedArtSource = source;
+        _heldCoverArtFingerprint = _lastAppliedCoverArtFingerprint;
+        _animatedArtPlayer = null;
+        _animatedArtSource = null;
+        _animatedArtworkFile = null;
+        _isAnimatedArtPresented = false;
+        player.Pause();
+
+        // The normal video overlays deliberately keep showing this same source
+        // underneath the held layer until the destination is ready.
+        if (previousHeldPlayer is not null && !ReferenceEquals(previousHeldPlayer, player))
+        {
+            previousHeldPlayer.Close();
+        }
+
+        RestartFrozenArtHoldTimer();
+    }
+
+    private void RestartFrozenArtHoldTimer()
+    {
+        if (_heldAnimatedArtPlayer is not null && _heldAnimatedArtSource is not null)
+        {
+            // A rapid metadata change or failed incoming player can arrive while
+            // the previous fade is in flight. Restore full coverage before
+            // extending the hold for the newest generation.
             foreach (var overlay in FrozenArtOverlays)
             {
                 overlay.BeginAnimation(OpacityProperty, null);
-                overlay.Opacity = 0;
-                overlay.Source = null;
+                overlay.Source = _heldAnimatedArtSource;
+                overlay.Opacity = 1;
             }
-        };
-        foreach (var overlay in FrozenArtOverlays)
-        {
-            overlay.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
         }
+
+        _heldArtFadeEpoch++;
+        _frozenArtHoldTimer?.Stop();
+        var heldPlayer = _heldAnimatedArtPlayer;
+        if (heldPlayer is null)
+        {
+            _frozenArtHoldTimer = null;
+            return;
+        }
+
+        var timerGeneration = ++_heldArtTimerGeneration;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2500) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (ReferenceEquals(timer, _frozenArtHoldTimer))
+            {
+                _frozenArtHoldTimer = null;
+            }
+
+            OnFrozenArtHoldTimeout(heldPlayer, timerGeneration);
+        };
+        _frozenArtHoldTimer = timer;
+        timer.Start();
+    }
+
+    private void OnFrozenArtHoldTimeout(MediaPlayer heldPlayer, int timerGeneration)
+    {
+        if (timerGeneration != _heldArtTimerGeneration
+            || !ReferenceEquals(heldPlayer, _heldAnimatedArtPlayer))
+        {
+            return;
+        }
+
+        // Last-resort fallback for a provider that never publishes a distinct
+        // thumbnail. The normal path releases as soon as the new cover bytes
+        // differ, without making the user wait for this timeout.
+        if (_animatedArtPlayer is not null && !_isAnimatedArtPresented)
+        {
+            ReleaseActiveAnimatedArtPlayer();
+            ClearAnimatedArtOverlays();
+        }
+
+        ScheduleHeldArtStaticRelease(
+            heldPlayer,
+            _animatedArtworkGeneration,
+            expectedFingerprint: null,
+            force: true);
+    }
+
+    private void ReleaseHeldArtworkWhenStaticCoverIsReady(MediaSnapshot snapshot)
+    {
+        var heldPlayer = _heldAnimatedArtPlayer;
+        if (heldPlayer is null
+            || snapshot.CoverArt is null
+            || string.IsNullOrWhiteSpace(snapshot.CoverArtFingerprint)
+            || string.IsNullOrWhiteSpace(_heldCoverArtFingerprint)
+            || string.Equals(
+                snapshot.CoverArtFingerprint,
+                _heldCoverArtFingerprint,
+                StringComparison.Ordinal))
+        {
+            CancelHeldArtStaticRelease();
+            return;
+        }
+
+        ScheduleHeldArtStaticRelease(
+            heldPlayer,
+            _animatedArtworkGeneration,
+            snapshot.CoverArtFingerprint,
+            force: false);
+    }
+
+    private void ScheduleHeldArtStaticRelease(
+        MediaPlayer heldPlayer,
+        int generation,
+        string? expectedFingerprint,
+        bool force)
+    {
+        CancelHeldArtStaticRelease();
+        var releaseGeneration = _heldArtStaticReleaseGeneration;
+        var remainingFrames = 2;
+        TimeSpan? lastRenderingTime = null;
+        EventHandler? handler = null;
+        handler = (_, eventArgs) =>
+        {
+            if (eventArgs is RenderingEventArgs renderingArgs)
+            {
+                if (lastRenderingTime == renderingArgs.RenderingTime)
+                {
+                    return;
+                }
+
+                lastRenderingTime = renderingArgs.RenderingTime;
+            }
+
+            if (--remainingFrames > 0)
+            {
+                return;
+            }
+
+            CompositionTarget.Rendering -= handler;
+            if (ReferenceEquals(_heldArtStaticReleaseRenderingHandler, handler))
+            {
+                _heldArtStaticReleaseRenderingHandler = null;
+            }
+
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (generation != _animatedArtworkGeneration
+                    || releaseGeneration != _heldArtStaticReleaseGeneration
+                    || !ReferenceEquals(heldPlayer, _heldAnimatedArtPlayer))
+                {
+                    return;
+                }
+
+                if (expectedFingerprint is not null
+                    && (!string.Equals(
+                            expectedFingerprint,
+                            _lastAppliedCoverArtFingerprint,
+                            StringComparison.Ordinal)
+                        || string.Equals(
+                            expectedFingerprint,
+                            _heldCoverArtFingerprint,
+                            StringComparison.Ordinal)))
+                {
+                    return;
+                }
+
+                if (!force && _animatedArtPlayer is not null)
+                {
+                    // A cached animated destination is already opening or
+                    // crossing its presentation barrier. Keep the known-good
+                    // held surface until that player wins or fails.
+                    return;
+                }
+
+                if (!_isAnimatedArtPresented)
+                {
+                    ClearAnimatedArtOverlays();
+                }
+
+                ReleaseHeldAnimatedArtPlayer(heldPlayer);
+            }, DispatcherPriority.Background);
+        };
+        _heldArtStaticReleaseRenderingHandler = handler;
+        CompositionTarget.Rendering += handler;
+    }
+
+    private void CancelHeldArtStaticRelease()
+    {
+        _heldArtStaticReleaseGeneration++;
+        if (_heldArtStaticReleaseRenderingHandler is null)
+        {
+            return;
+        }
+
+        CompositionTarget.Rendering -= _heldArtStaticReleaseRenderingHandler;
+        _heldArtStaticReleaseRenderingHandler = null;
     }
 
     // The freshly opened video surface may not have composited a frame yet, so
-    // the frozen frame stays on top and dissolves over the already-playing
-    // video instead of exposing the static cover for even one frame.
+    // the paused outgoing player stays on top and dissolves only after the new
+    // player has been attached and playing underneath it.
     private void FadeOutFrozenArtOverlays()
     {
+        FadeOutHeldAnimatedArtwork(beginDelayMilliseconds: 160, durationMilliseconds: 360);
+    }
+
+    private void FadeOutHeldAnimatedArtwork(int beginDelayMilliseconds, int durationMilliseconds)
+    {
+        var heldPlayer = _heldAnimatedArtPlayer;
+        if (heldPlayer is null)
+        {
+            return;
+        }
+
+        _frozenArtHoldTimer?.Stop();
+        _frozenArtHoldTimer = null;
+        _heldArtTimerGeneration++;
+        var fadeEpoch = ++_heldArtFadeEpoch;
         var fade = new DoubleAnimation
         {
             To = 0,
-            BeginTime = TimeSpan.FromMilliseconds(160),
-            Duration = TimeSpan.FromMilliseconds(360),
+            BeginTime = TimeSpan.FromMilliseconds(beginDelayMilliseconds),
+            Duration = TimeSpan.FromMilliseconds(durationMilliseconds),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
-        fade.Completed += (_, _) =>
-        {
-            if (_frozenAnimatedArtFrame is not null)
-            {
-                return;
-            }
-
-            foreach (var overlay in FrozenArtOverlays)
-            {
-                overlay.BeginAnimation(OpacityProperty, null);
-                overlay.Opacity = 0;
-                overlay.Source = null;
-            }
-        };
+        fade.Completed += (_, _) => ReleaseHeldAnimatedArtPlayer(heldPlayer, fadeEpoch);
         foreach (var overlay in FrozenArtOverlays)
         {
             overlay.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
         }
     }
 
-    private ImageSource? TryCaptureAnimatedArtFrame()
+    private void ReleaseHeldAnimatedArtPlayer(MediaPlayer expectedPlayer, int? expectedFadeEpoch = null)
     {
-        if (_animatedArtSource?.Drawing is not VideoDrawing drawing
-            || drawing.Rect.Width < 1
-            || drawing.Rect.Height < 1)
+        if (!ReferenceEquals(expectedPlayer, _heldAnimatedArtPlayer)
+            || expectedFadeEpoch is not null && expectedFadeEpoch != _heldArtFadeEpoch)
         {
-            return null;
+            return;
         }
 
-        try
+        _heldArtFadeEpoch++;
+        _heldArtTimerGeneration++;
+        _heldAnimatedArtPlayer = null;
+        _heldAnimatedArtSource = null;
+        _heldCoverArtFingerprint = string.Empty;
+        _frozenArtHoldTimer?.Stop();
+        _frozenArtHoldTimer = null;
+        CancelHeldArtStaticRelease();
+        expectedPlayer.Close();
+        foreach (var overlay in FrozenArtOverlays)
         {
-            var visual = new DrawingVisual();
-            using (var context = visual.RenderOpen())
-            {
-                context.DrawDrawing(drawing);
-            }
-
-            var frame = new RenderTargetBitmap(
-                (int)Math.Round(drawing.Rect.Width),
-                (int)Math.Round(drawing.Rect.Height),
-                96,
-                96,
-                PixelFormats.Pbgra32);
-            frame.Render(visual);
-            frame.Freeze();
-            return frame;
-        }
-        catch
-        {
-            return null;
+            overlay.BeginAnimation(OpacityProperty, null);
+            overlay.Source = null;
+            overlay.Opacity = 0;
         }
     }
 
-    private void OnAnimatedArtPlayerEnded()
+    private void OnAnimatedArtPlayerEnded(MediaPlayer player, int generation)
     {
-        if (_animatedArtworkFile is null || _animatedArtPlayer is null)
+        if (!ReferenceEquals(player, _animatedArtPlayer)
+            || generation != _animatedArtworkGeneration
+            || _animatedArtworkFile is null)
         {
             return;
         }
 
         // The cached file is remuxed into a seekable MP4, so looping is a plain
         // rewind on the warm pipeline.
-        _animatedArtPlayer.Position = TimeSpan.Zero;
-        _animatedArtPlayer.Play();
+        player.Position = TimeSpan.Zero;
+        player.Play();
     }
 
-    private void OnAnimatedArtPlayerFailed()
+    private void OnAnimatedArtPlayerFailed(MediaPlayer player, int generation)
     {
+        if (ReferenceEquals(player, _heldAnimatedArtPlayer))
+        {
+            if (!_isAnimatedArtPresented)
+            {
+                ClearAnimatedArtOverlays();
+            }
+
+            ReleaseHeldAnimatedArtPlayer(player);
+            return;
+        }
+
+        if (!ReferenceEquals(player, _animatedArtPlayer)
+            || generation != _animatedArtworkGeneration)
+        {
+            return;
+        }
+
         var file = _animatedArtworkFile;
-        StopAnimatedArtwork();
+        if (_heldAnimatedArtPlayer is not null)
+        {
+            // Restore the last known-good surface before the failed incoming
+            // player is detached from the layer underneath it.
+            RestartFrozenArtHoldTimer();
+        }
+
+        ReleaseActiveAnimatedArtPlayer();
+        ClearAnimatedArtOverlays();
+        ReleaseHeldArtworkWhenStaticCoverIsReady(Snapshot);
+
         if (file is not null)
         {
             try
@@ -2514,25 +2803,52 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StopAnimatedArtwork()
+    private void ReleaseActiveAnimatedArtPlayer()
     {
-        _animatedArtworkFile = null;
-        _frozenAnimatedArtFrame = null;
         _animatedArtRevealTimer?.Stop();
-        _frozenArtHoldTimer?.Stop();
-        _animatedArtPlayer?.Close();
+        _animatedArtRevealTimer = null;
+        CancelAnimatedArtworkPresentation();
+        var player = _animatedArtPlayer;
+        _animatedArtPlayer = null;
+        _animatedArtSource = null;
+        _animatedArtworkFile = null;
+        _isAnimatedArtPresented = false;
+        player?.Close();
+    }
+
+    private void ClearAnimatedArtOverlays()
+    {
         foreach (var overlay in AnimatedArtOverlays)
         {
             overlay.BeginAnimation(OpacityProperty, null);
-            overlay.Opacity = 0;
             overlay.Source = null;
+            overlay.Opacity = 0;
         }
+    }
 
+    private void StopAnimatedArtwork()
+    {
+        _animatedArtRevealTimer?.Stop();
+        _animatedArtRevealTimer = null;
+        _frozenArtHoldTimer?.Stop();
+        _frozenArtHoldTimer = null;
+        _heldArtFadeEpoch++;
+        _heldArtTimerGeneration++;
+        CancelAnimatedArtworkPresentation();
+        CancelHeldArtStaticRelease();
+        ReleaseActiveAnimatedArtPlayer();
+        ClearAnimatedArtOverlays();
+
+        var heldPlayer = _heldAnimatedArtPlayer;
+        _heldAnimatedArtPlayer = null;
+        _heldAnimatedArtSource = null;
+        _heldCoverArtFingerprint = string.Empty;
+        heldPlayer?.Close();
         foreach (var overlay in FrozenArtOverlays)
         {
             overlay.BeginAnimation(OpacityProperty, null);
-            overlay.Opacity = 0;
             overlay.Source = null;
+            overlay.Opacity = 0;
         }
     }
 
@@ -5484,9 +5800,7 @@ public partial class MainWindow : Window
         _lastFmScrobbleCts?.Dispose();
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
-        _animatedArtRevealTimer?.Stop();
-        _frozenArtHoldTimer?.Stop();
-        _animatedArtPlayer?.Close();
+        StopAnimatedArtwork();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _globeConnectionService.LinkRevoked -= GlobeConnectionService_LinkRevoked;

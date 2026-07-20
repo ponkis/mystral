@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows.Media.Imaging;
 using Mystral.Models;
 using Windows.Media.Control;
@@ -15,6 +16,7 @@ public sealed class MediaSessionService : IDisposable
     private GlobalSystemMediaTransportControlsSession? _session;
     private string _coverArtCacheKey = string.Empty;
     private BitmapImage? _coverArtCache;
+    private string _coverArtCacheFingerprint = string.Empty;
     private CancellationTokenSource? _delayedArtworkRefreshCts;
     private bool _disposed;
 
@@ -204,36 +206,43 @@ public sealed class MediaSessionService : IDisposable
             CanNext: controls.IsNextEnabled,
             CanPrevious: controls.IsPreviousEnabled,
             CanSeek: controls.IsPlaybackPositionEnabled,
-            CoverArt: coverArt)
+            CoverArt: coverArt.Image)
         {
             TimelineUpdatedAt = timelineUpdatedAt,
-            HasReliableTimelineUpdatedAt = hasReliableTimelineUpdatedAt
+            HasReliableTimelineUpdatedAt = hasReliableTimelineUpdatedAt,
+            CoverArtFingerprint = coverArt.Fingerprint
         };
     }
 
-    private async Task<BitmapImage?> GetCoverArtAsync(IRandomAccessStreamReference? thumbnail, string cacheKey)
+    private async Task<CoverArtResult> GetCoverArtAsync(
+        IRandomAccessStreamReference? thumbnail,
+        string cacheKey)
     {
         if (thumbnail is null)
         {
             _coverArtCacheKey = cacheKey;
             _coverArtCache = null;
-            return null;
+            _coverArtCacheFingerprint = string.Empty;
+            return CoverArtResult.Empty;
         }
 
         if (cacheKey == _coverArtCacheKey)
         {
-            return _coverArtCache;
+            return new CoverArtResult(_coverArtCache, _coverArtCacheFingerprint);
         }
 
         _coverArtCacheKey = cacheKey;
-        _coverArtCache = await LoadCoverArtAsync(thumbnail);
-        return _coverArtCache;
+        var result = await LoadCoverArtAsync(thumbnail);
+        _coverArtCache = result.Image;
+        _coverArtCacheFingerprint = result.Fingerprint;
+        return result;
     }
 
     private void InvalidateCoverArtCache()
     {
         _coverArtCacheKey = string.Empty;
         _coverArtCache = null;
+        _coverArtCacheFingerprint = string.Empty;
     }
 
     private void ScheduleDelayedArtworkRefresh()
@@ -303,11 +312,11 @@ public sealed class MediaSessionService : IDisposable
         return string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
     }
 
-    private static async Task<BitmapImage?> LoadCoverArtAsync(IRandomAccessStreamReference? thumbnail)
+    private static async Task<CoverArtResult> LoadCoverArtAsync(IRandomAccessStreamReference? thumbnail)
     {
         if (thumbnail is null)
         {
-            return null;
+            return CoverArtResult.Empty;
         }
 
         try
@@ -315,7 +324,7 @@ public sealed class MediaSessionService : IDisposable
             using var stream = await thumbnail.OpenReadAsync();
             if (stream.Size == 0 || stream.Size > int.MaxValue)
             {
-                return null;
+                return CoverArtResult.Empty;
             }
 
             var bytes = new byte[stream.Size];
@@ -331,12 +340,19 @@ public sealed class MediaSessionService : IDisposable
             bitmap.StreamSource = memory;
             bitmap.EndInit();
             bitmap.Freeze();
-            return bitmap;
+            return new CoverArtResult(
+                bitmap,
+                Convert.ToHexString(SHA256.HashData(bytes)));
         }
         catch
         {
-            return null;
+            return CoverArtResult.Empty;
         }
+    }
+
+    private readonly record struct CoverArtResult(BitmapImage? Image, string Fingerprint)
+    {
+        public static CoverArtResult Empty { get; } = new(null, string.Empty);
     }
 
     public void Dispose()

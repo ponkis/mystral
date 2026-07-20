@@ -52,7 +52,8 @@ For packaged development builds:
 - Let Spotify and Chrome play across several polling intervals and confirm the elapsed time remains monotonic instead of jumping backward or resetting to zero.
 - Play a track from an album with Apple Music animated cover art (for example The Weeknd — Dawn FM) and confirm the cover fades into a looping animation in the compact, expanded, lyrics-header, and fullscreen art views.
 - Let the animated cover reach its end and confirm it loops without freezing; switch tracks and confirm the next track returns to its own static or animated art without leftovers.
-- Switch between two albums whose animated covers are both already cached and confirm the art holds the previous animation's last frame during the swap — the static cover must never appear, not even for a frame. Switch to an album without animated art and confirm the held frame dissolves into the static cover within a few seconds.
+- Switch between two albums whose animated covers are both already cached and confirm no outgoing static, blank, or black frame flashes during the swap.
+- Switch from animated art to an album without animation and confirm the new track's real static cover replaces the held frame immediately when available — the old frame must not linger beside the new title and must not fade out seconds later. Repeat with quick Next/Previous presses while metadata is still changing and confirm no provisional cover breaks through or remains behind. Use a 60 fps recording and frame-by-frame inspection for the one-frame case.
 - Pause playback and confirm the UI state updates.
 - Stop playback or close the media app and confirm Mystral returns to idle without crashing.
 

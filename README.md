@@ -76,11 +76,13 @@ session's album artist when its primary artist field is empty.
 When the playing album has an Apple Music animated cover, Mystral downloads the
 animation once and fades it in over the static cover in the compact, expanded,
 lyrics-header, and fullscreen art views, looping it while the album keeps
-playing. Switching to another album whose animated cover is already cached
-holds the last animated frame during the swap instead of flashing the static
-cover. Albums without an animated cover keep the regular artwork. Animated
-covers are resolved through the `artwork.m8tec.top` lookup service and cached
-in the user's temp directory, where Windows disk cleanup can reclaim them.
+playing. When the album changes, Mystral keeps the outgoing frame only while
+Windows is still returning the previous thumbnail. As soon as the new track's
+regular cover is ready it replaces that frame directly; a new animation can
+then take over once loaded. This keeps intermediate media-session thumbnails
+from flashing without leaving the old cover behind. Animated covers are
+resolved through the `artwork.m8tec.top` lookup service and cached in the user's
+temp directory, where Windows disk cleanup can reclaim them.
 
 Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. When a looping track
