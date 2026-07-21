@@ -86,8 +86,8 @@ temp directory, where Windows disk cleanup can reclaim them.
 
 Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. When a looping track
-restarts after reaching its end, lyric browsing resets in both the regular and
-fullscreen views. Lyrics mode sits on the player's translucent glass surface and
+restarts after reaching its end, lyric browsing resets in the regular,
+information-side, and fullscreen views. Lyrics mode sits on the player's translucent glass surface and
 uses one cover-derived backdrop plus its header artwork, while a fixed custom
 theme continues to hide the backdrop.
 
@@ -102,7 +102,11 @@ upper-right position, while the playback timeline moves into
 the open space directly beneath the details without a surrounding panel,
 divider, or a large empty footer. Equal 12-DIP spacing separates the timeline
 from both the information box and the rounded lower edge. The pill follows the selected information page's glass
-tint, including an available artist portrait. The window controls remain visible
+tint, including an available artist portrait. While information remains open,
+the Lyrics control slides a narrow glass pane out from its right side without
+changing the selected Track, Artist, or Album page. The attached pane follows
+synchronized lines, supports scrolling and seekable line clicks, and retracts
+with the reverse slide-and-fade motion. The window controls remain visible
 and move into a
 squared-bottom tab whose bottom edge sits on the top border rather than
 overlapping the sheet. The tab samples the sheet's rendered, cover-derived glass

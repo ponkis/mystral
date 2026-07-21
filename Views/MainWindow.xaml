@@ -11,7 +11,7 @@
         Height="172"
         MinWidth="218"
         MinHeight="144"
-        MaxWidth="720"
+        MaxWidth="980"
         MaxHeight="660"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -409,6 +409,143 @@
                                  VerticalAlignment="Top"
                                  Visibility="Collapsed"
                                  Panel.ZIndex="5" />
+        <Border x:Name="MusicInfoLyricsPanel"
+                Width="252"
+                Height="342"
+                Margin="710,142,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                CornerRadius="9"
+                BorderThickness="1"
+                Visibility="Collapsed"
+                Opacity="0"
+                IsHitTestVisible="False"
+                Effect="{StaticResource CardShadow}"
+                RenderTransformOrigin="0,0.5"
+                Panel.ZIndex="7">
+            <Border.BorderBrush>
+                <SolidColorBrush x:Name="MusicInfoLyricsBorderBrush" Color="#9BCFE2E8" />
+            </Border.BorderBrush>
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop x:Name="MusicInfoLyricsTopStop" Color="#A835434A" Offset="0" />
+                    <GradientStop x:Name="MusicInfoLyricsUpperStop" Color="#98263035" Offset="0.30" />
+                    <GradientStop x:Name="MusicInfoLyricsLowerStop" Color="#A8151B1F" Offset="0.67" />
+                    <GradientStop x:Name="MusicInfoLyricsBottomStop" Color="#B50C1114" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="MusicInfoLyricsPanelScale" ScaleX="0.985" ScaleY="0.985" />
+                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-22" />
+                </TransformGroup>
+            </Border.RenderTransform>
+
+            <Grid x:Name="MusicInfoLyricsSurface"
+                  ClipToBounds="True"
+                  SizeChanged="RoundedSurface_SizeChanged">
+                <Image x:Name="MusicInfoLyricsBackdropImage"
+                       Stretch="UniformToFill"
+                       Opacity="0.13"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="LowQuality">
+                    <Image.Effect>
+                        <BlurEffect Radius="24" KernelType="Gaussian" />
+                    </Image.Effect>
+                </Image>
+
+                <Border Opacity="0.40" IsHitTestVisible="False">
+                    <Border.Background>
+                        <RadialGradientBrush Center="0.12,0.04"
+                                             GradientOrigin="0.12,0.04"
+                                             RadiusX="0.92"
+                                             RadiusY="0.88">
+                            <GradientStop x:Name="MusicInfoLyricsGlowStop" Color="#70EAF7FA" Offset="0" />
+                            <GradientStop Color="#00000000" Offset="0.72" />
+                        </RadialGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <Rectangle Height="58"
+                           VerticalAlignment="Top"
+                           Opacity="0.28"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#C9FFFFFF" Offset="0" />
+                            <GradientStop Color="#20FFFFFF" Offset="0.58" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border Margin="1"
+                        CornerRadius="8"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1"
+                        IsHitTestVisible="False" />
+
+                <Grid Margin="16,12,14,12"
+                      ClipToBounds="True"
+                      PreviewMouseWheel="MusicInfoLyricsViewport_PreviewMouseWheel">
+                    <ScrollViewer x:Name="MusicInfoLyricsScrollViewer"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Hidden"
+                                  CanContentScroll="False"
+                                  PanningMode="VerticalOnly">
+                        <StackPanel x:Name="MusicInfoLyricsStackPanel"
+                                    Margin="0,110,0,110"
+                                    VerticalAlignment="Top" />
+                    </ScrollViewer>
+
+                    <Border x:Name="MusicInfoLyricsMessagePanel"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Padding="12,13"
+                            CornerRadius="7"
+                            BorderBrush="#34FFFFFF"
+                            BorderThickness="1"
+                            Background="#26000000">
+                        <Grid HorizontalAlignment="Center" MinHeight="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Image x:Name="MusicInfoLyricsLoadingIcon"
+                                   Width="28"
+                                   Height="28"
+                                   VerticalAlignment="Center"
+                                   Stretch="Uniform"
+                                   Visibility="Collapsed"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Image x:Name="MusicInfoLyricsWarningIcon"
+                                   Width="16"
+                                   Height="16"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Stretch="None"
+                                   Source="pack://siteoforigin:,,,/Resources/Images/WarningIcon.png"
+                                   Visibility="Collapsed"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor" />
+
+                            <TextBlock x:Name="MusicInfoLyricsMessageText"
+                                       Grid.Column="2"
+                                       MaxWidth="174"
+                                       VerticalAlignment="Center"
+                                       Foreground="#E6F3EB"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       Effect="{StaticResource TextShadow}"
+                                       Text="Looking for lyrics" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Border>
         <Grid x:Name="MusicInfoTimelinePanel"
               Width="646"
               Height="30"
