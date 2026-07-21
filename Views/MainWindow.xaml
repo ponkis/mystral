@@ -411,8 +411,8 @@
                                  Panel.ZIndex="5" />
         <Grid x:Name="MusicInfoTimelinePanel"
               Width="646"
-              Height="64"
-              Margin="50,446,0,0"
+              Height="30"
+              Margin="50,480,0,0"
               HorizontalAlignment="Left"
               VerticalAlignment="Top"
               Visibility="Collapsed"

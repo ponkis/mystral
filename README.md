@@ -98,7 +98,8 @@ information`, or `Album information`. The player unfolds into an attached Aero
 information surface: the current cover lifts out and grows, the existing playback
 pill stays in its upper-right position, while the playback timeline moves into
 the open space directly beneath the details without a surrounding panel,
-divider, or upper gap. The pill follows the selected information page's glass
+divider, or a large empty footer. Equal 12-DIP spacing separates the timeline
+from both the information box and the rounded lower edge. The pill follows the selected information page's glass
 tint, including an available artist portrait. The window controls remain visible
 and move into a
 squared-bottom tab whose bottom edge sits on the top border rather than
@@ -113,8 +114,9 @@ dates, genres, and a compact, divided album track list; multi-artist recordings
 also let you choose which credited artist to view. The Artist page promotes the
 artist name and first available alias into the header. In an album track list,
 only the currently playing recording receives the vertically stretched
-`cd_thing.png` highlight; the remaining rows stay plain. There is no source
-label or external-link footer.
+`cd_thing.png` highlight, framed by original-height copies of the same fade at
+its top and bottom; the remaining rows stay plain. There is no source label or
+external-link footer.
 
 The details come from MusicBrainz and do not require an account or API key.
 The Album view keeps the cover already supplied by the active player instead of

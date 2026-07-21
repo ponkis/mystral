@@ -1007,20 +1007,36 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
 
-        if (isCurrentTrack)
+        void AddCurrentTrackLayer(
+            VerticalAlignment alignment,
+            double opacity,
+            double? height = null)
         {
-            var highlight = new Image
+            var layer = new Image
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
+                VerticalAlignment = alignment,
                 Source = CurrentAlbumTrackHighlightSource,
                 Stretch = Stretch.Fill,
-                Opacity = 0.42,
+                Opacity = opacity,
+                SnapsToDevicePixels = height.HasValue,
                 IsHitTestVisible = false
             };
-            Grid.SetColumn(highlight, 1);
-            Grid.SetColumnSpan(highlight, 2);
-            row.Children.Add(highlight);
+            if (height is { } fixedHeight)
+            {
+                layer.Height = fixedHeight;
+            }
+
+            Grid.SetColumn(layer, 1);
+            Grid.SetColumnSpan(layer, 2);
+            row.Children.Add(layer);
+        }
+
+        if (isCurrentTrack)
+        {
+            AddCurrentTrackLayer(VerticalAlignment.Stretch, 0.42);
+            AddCurrentTrackLayer(VerticalAlignment.Top, 0.72, 1);
+            AddCurrentTrackLayer(VerticalAlignment.Bottom, 0.72, 1);
         }
 
         var number = !string.IsNullOrWhiteSpace(track.Number)
