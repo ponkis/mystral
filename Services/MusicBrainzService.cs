@@ -1043,9 +1043,8 @@ public sealed class MusicBrainzService : IDisposable
         ReleaseResult release,
         string recordingId)
     {
-        // Keep the recording identity in this boundary so callers can use the same
-        // selected-release contract even though the current model exposes track order,
-        // not selection state.
+        // Selection remains a presentation concern; each row carries its recording
+        // identity so the active recording can be matched without title heuristics.
         _ = recordingId;
         var albumArtist = JoinArtistCredit(release.ArtistCredit);
         var tracks = new List<MusicBrainzAlbumTrack>();
@@ -1073,6 +1072,7 @@ public sealed class MusicBrainzService : IDisposable
                 }
 
                 tracks.Add(new MusicBrainzAlbumTrack(
+                    Clean(recording?.Id),
                     mediumPosition,
                     Clean(medium.Title),
                     Clean(medium.Format),

@@ -173,6 +173,10 @@ public partial class MainWindow : Window
     private Thickness _musicInfoActionBorderThickness;
     private Thickness _musicInfoTitleBarChromeBorderThickness;
     private Thickness _musicInfoTitleBarMargin;
+    private Thickness _musicInfoProgressRowMargin;
+    private HorizontalAlignment _musicInfoProgressRowHorizontalAlignment;
+    private VerticalAlignment _musicInfoProgressRowVerticalAlignment;
+    private int _musicInfoProgressRowGridRow;
     private Visibility _musicInfoBlurredArtVisibility;
     private Visibility _musicInfoGlassGlowVisibility;
     private Visibility _musicInfoGlassGlossVisibility;
@@ -249,6 +253,7 @@ public partial class MainWindow : Window
         _artistArtworkService = new ArtistArtworkService();
         _globeConnectionService = new GlobeConnectionService(_settingsService);
         MusicInfoPanel.Initialize(_musicBrainzService, _artistArtworkService);
+        MusicInfoPanel.TintChanged += MusicInfoPanel_TintChanged;
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _globeConnectionService.LinkRevoked += GlobeConnectionService_LinkRevoked;
@@ -3811,6 +3816,7 @@ public partial class MainWindow : Window
 
     private void Window_Activated(object sender, EventArgs e)
     {
+        KeepMusicInfoChromeVisible();
         if (_isExpanded)
         {
             SetExpandedInfoVisible(true);
@@ -3819,6 +3825,7 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object sender, EventArgs e)
     {
+        KeepMusicInfoChromeVisible();
         if (_isBurnDiscPointerDown || _isBurnDiscDragging || _isBurnDiscInserting)
         {
             ResetCompactBurnDisc();
@@ -3833,7 +3840,15 @@ public partial class MainWindow : Window
 
     private void Window_MouseEnter(object sender, MouseEventArgs e)
     {
-        AnimateElementOpacity(ChromeButtons, 1, 150);
+        if (_isMusicInfoMode)
+        {
+            KeepMusicInfoChromeVisible();
+        }
+        else
+        {
+            AnimateElementOpacity(ChromeButtons, 1, 150);
+        }
+
         if (_isExpanded)
         {
             SetExpandedInfoVisible(true);
@@ -3843,12 +3858,34 @@ public partial class MainWindow : Window
 
     private void Window_MouseLeave(object sender, MouseEventArgs e)
     {
-        AnimateElementOpacity(ChromeButtons, 0, 250);
+        if (_isMusicInfoMode)
+        {
+            KeepMusicInfoChromeVisible();
+        }
+        else
+        {
+            AnimateElementOpacity(ChromeButtons, 0, 250);
+        }
+
         if (_isExpanded)
         {
             SetExpandedInfoVisible(false);
         }
         ShowVolumeSliders(false);
+    }
+
+    private void KeepMusicInfoChromeVisible()
+    {
+        if (!_isMusicInfoMode)
+        {
+            return;
+        }
+
+        TitleBar.Visibility = Visibility.Visible;
+        TitleBar.IsHitTestVisible = true;
+        ChromeButtons.BeginAnimation(OpacityProperty, null);
+        ChromeButtons.Opacity = 1;
+        ChromeButtons.IsHitTestVisible = true;
     }
 
     private void SetExpandedMode(bool isExpanded)
@@ -4112,11 +4149,7 @@ public partial class MainWindow : Window
         CompactGlassGloss.Visibility = Visibility.Collapsed;
         InnerGlassBorder.Visibility = Visibility.Collapsed;
         MediaPanel.Visibility = Visibility.Collapsed;
-        TitleBar.Visibility = Visibility.Visible;
-        TitleBar.IsHitTestVisible = true;
-        ChromeButtons.BeginAnimation(OpacityProperty, null);
-        ChromeButtons.Opacity = 1;
-        ChromeButtons.IsHitTestVisible = true;
+        KeepMusicInfoChromeVisible();
         ActionBar.BeginAnimation(OpacityProperty, null);
         ActionBar.Opacity = 1;
         ActionBar.IsHitTestVisible = true;
@@ -4167,9 +4200,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        _musicInfoProgressRowGridRow = Grid.GetRow(CompactProgressRow);
+        _musicInfoProgressRowMargin = CompactProgressRow.Margin;
+        _musicInfoProgressRowHorizontalAlignment = CompactProgressRow.HorizontalAlignment;
+        _musicInfoProgressRowVerticalAlignment = CompactProgressRow.VerticalAlignment;
         CompactMetadataGrid.Children.Remove(CompactProgressRow);
         Grid.SetRow(CompactProgressRow, 0);
         CompactProgressRow.Margin = new Thickness(0);
+        CompactProgressRow.HorizontalAlignment = HorizontalAlignment.Stretch;
+        CompactProgressRow.VerticalAlignment = VerticalAlignment.Top;
         MusicInfoTimelineHost.Children.Add(CompactProgressRow);
     }
 
@@ -4181,8 +4220,10 @@ public partial class MainWindow : Window
         }
 
         MusicInfoTimelineHost.Children.Remove(CompactProgressRow);
-        Grid.SetRow(CompactProgressRow, 3);
-        CompactProgressRow.Margin = new Thickness(0, 8, 0, 0);
+        Grid.SetRow(CompactProgressRow, _musicInfoProgressRowGridRow);
+        CompactProgressRow.Margin = _musicInfoProgressRowMargin;
+        CompactProgressRow.HorizontalAlignment = _musicInfoProgressRowHorizontalAlignment;
+        CompactProgressRow.VerticalAlignment = _musicInfoProgressRowVerticalAlignment;
         CompactMetadataGrid.Children.Add(CompactProgressRow);
     }
 
@@ -4257,15 +4298,10 @@ public partial class MainWindow : Window
         AnimateColor(GlowSecondaryStop, WithAlpha(Blend(tint, Colors.White, 0.10), 0x1C));
         AnimateColor(ActionBarTopStop, WithAlpha(Blend(tint, Colors.White, 0.20), 0x2F));
         AnimateColor(ActionBarBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.40), 0x34));
-        var playbackTop = WithAlpha(Blend(tint, Colors.Black, 0.42), 0xA8);
-        var playbackUpper = WithAlpha(Blend(tint, Colors.Black, 0.56), 0x84);
-        var playbackCrease = WithAlpha(Blend(tint, Colors.Black, 0.74), 0x7A);
-        var playbackBottom = WithAlpha(Blend(tint, Colors.Black, 0.50), 0x90);
-        var playbackBorder = WithAlpha(Blend(tint, Colors.White, 0.38), 0x74);
-        AnimateColor(LegacyPlaybackTopStop, playbackTop);
-        AnimateColor(LegacyPlaybackUpperStop, playbackUpper);
-        AnimateColor(LegacyPlaybackCreaseStop, playbackCrease);
-        AnimateColor(LegacyPlaybackBottomStop, playbackBottom);
+        if (!_isMusicInfoMode)
+        {
+            ApplyPlaybackPillTint(tint);
+        }
         AnimateColor(ExpandedTintTopStop, WithAlpha(Blend(tint, Colors.Black, 0.86), 0x18));
         AnimateColor(ExpandedTintMidStop, WithAlpha(Blend(tint, Colors.Black, 0.82), 0x2A));
         AnimateColor(ExpandedTintLowerStop, WithAlpha(Blend(tint, Colors.Black, 0.78), 0x76));
@@ -4274,7 +4310,6 @@ public partial class MainWindow : Window
         AnimateColor(ExpandedControlsTintBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.88), 0xD8));
         AnimateBrushColor(MediaPanel.Background, WithAlpha(Blend(tint, Colors.Black, 0.45), 0x30));
         AnimateBrushColor(RootCard.BorderBrush, WithAlpha(Blend(tint, Colors.White, 0.62), 0xA5));
-        AnimateBrushColor(LegacyPlaybackShell.BorderBrush, playbackBorder);
         AnimateColor(LyricsTintTopStop, WithAlpha(Blend(tint, Colors.Black, 0.72), 0xC6));
         AnimateColor(LyricsTintMidStop, WithAlpha(Blend(tint, Colors.Black, 0.68), 0xB8));
         AnimateColor(LyricsTintBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.82), 0xD3));
@@ -4282,6 +4317,25 @@ public partial class MainWindow : Window
         AnimateColor(FullscreenTintMidStop, WithAlpha(Blend(tint, Colors.Black, 0.85), 0xFF));
         AnimateColor(FullscreenTintBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.95), 0xFF));
         AnimateColor(FullscreenGlowStop, WithAlpha(Blend(tint, Colors.White, 0.40), 0xFF));
+    }
+
+    private void MusicInfoPanel_TintChanged(Color tint)
+    {
+        if (_isMusicInfoMode)
+        {
+            ApplyPlaybackPillTint(tint);
+        }
+    }
+
+    private void ApplyPlaybackPillTint(Color tint)
+    {
+        AnimateColor(LegacyPlaybackTopStop, WithAlpha(Blend(tint, Colors.Black, 0.42), 0xA8));
+        AnimateColor(LegacyPlaybackUpperStop, WithAlpha(Blend(tint, Colors.Black, 0.56), 0x84));
+        AnimateColor(LegacyPlaybackCreaseStop, WithAlpha(Blend(tint, Colors.Black, 0.74), 0x7A));
+        AnimateColor(LegacyPlaybackBottomStop, WithAlpha(Blend(tint, Colors.Black, 0.50), 0x90));
+        AnimateBrushColor(
+            LegacyPlaybackShell.BorderBrush,
+            WithAlpha(Blend(tint, Colors.White, 0.38), 0x74));
     }
 
     internal static Color ResolvePlayerTint(
@@ -5667,6 +5721,10 @@ public partial class MainWindow : Window
         Top = constrained.Y;
 
         _isMusicInfoMode = false;
+        ApplyPlaybackPillTint(ResolvePlayerTint(
+            GetEffectivePlayerThemeColor(),
+            ExtractDominantTint(Snapshot.CoverArt),
+            DefaultTint));
         _isMusicInfoTransitioning = false;
         _restoreExpandedAfterMusicInfo = false;
         _restoreLyricsAfterMusicInfo = false;
@@ -6305,6 +6363,7 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         StopAnimatedArtwork();
+        MusicInfoPanel.TintChanged -= MusicInfoPanel_TintChanged;
         MusicInfoPanel.Dispose();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;

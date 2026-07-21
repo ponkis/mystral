@@ -38,7 +38,7 @@ internal sealed record ArtistHeroPhoto(
 public partial class MusicInfoPanel : UserControl, IDisposable
 {
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
-    private static readonly ImageSource AlbumTrackSeparatorSource =
+    private static readonly ImageSource CurrentAlbumTrackHighlightSource =
         IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LookupRetryCooldown = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ArtistPhotoRetryCooldown = TimeSpan.FromMinutes(2);
@@ -89,6 +89,8 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     internal Visual ShellMaterialVisual => InfoShellSurface;
 
     internal Brush ShellBorderBrush => InfoShell.BorderBrush;
+
+    internal event Action<Color>? TintChanged;
 
     internal void Initialize(
         MusicBrainzService musicBrainzService,
@@ -158,7 +160,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         _snapshotKey = key;
         CancelLookups();
         ResetDetails();
-        UpdateHeaderFromSnapshot(snapshot);
+        UpdateHeaderForSelectedPage();
         UpdateHeroForSelectedPage();
 
         if (!_isActive || !_isLoaded)
@@ -399,8 +401,8 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             _trackLookupCompletedKey = key;
             PopulateTrackDetails(info);
             SetTrackReady();
-            UpdateHeaderFromMatch(info);
             ConfigureArtistSelector(info.ArtistCredits);
+            UpdateHeaderForSelectedPage();
             SetArtistStatus("Loading artist information...", isLoading: false, canRetry: false);
             SetAlbumStatus("Loading album information...", isLoading: false, canRetry: false);
             await EnsureSelectedPageLoadedAsync();
@@ -484,6 +486,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         {
             PopulateArtistDetails(cached, _trackInfo.Artist);
             SetArtistReady();
+            UpdateHeaderForSelectedPage();
             UpdateHeroForSelectedPage();
             await LoadArtistPhotoForCachedInfoAsync(cached);
             return;
@@ -533,6 +536,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             _artistCache[artistId] = info;
             PopulateArtistDetails(info, _trackInfo.Artist);
             SetArtistReady();
+            UpdateHeaderForSelectedPage();
             UpdateHeroForSelectedPage();
             await TryLoadArtistPhotoAsync(
                 info,
@@ -915,6 +919,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
                 .Skip(1)
                 .Any();
             var currentMedium = -1;
+            var currentRecordingId = _trackInfo?.RecordingId;
             foreach (var track in info.Tracks)
             {
                 if (showMediumHeaders && track.MediumPosition != currentMedium)
@@ -923,7 +928,12 @@ public partial class MusicInfoPanel : UserControl, IDisposable
                     AddAlbumMediumHeader(AlbumDetailsPanel, track);
                 }
 
-                AddAlbumTrack(AlbumDetailsPanel, track, info.Artist);
+                var isCurrentTrack = !string.IsNullOrWhiteSpace(currentRecordingId)
+                    && string.Equals(
+                        track.RecordingId,
+                        currentRecordingId,
+                        StringComparison.OrdinalIgnoreCase);
+                AddAlbumTrack(AlbumDetailsPanel, track, info.Artist, isCurrentTrack);
             }
         }
 
@@ -983,7 +993,11 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         panel.Children.Add(row);
     }
 
-    private static void AddAlbumTrack(Panel panel, MusicBrainzAlbumTrack track, string albumArtist)
+    private static void AddAlbumTrack(
+        Panel panel,
+        MusicBrainzAlbumTrack track,
+        string albumArtist,
+        bool isCurrentTrack)
     {
         var row = new Grid
         {
@@ -992,6 +1006,22 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
+
+        if (isCurrentTrack)
+        {
+            var highlight = new Image
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Source = CurrentAlbumTrackHighlightSource,
+                Stretch = Stretch.Fill,
+                Opacity = 0.42,
+                IsHitTestVisible = false
+            };
+            Grid.SetColumn(highlight, 1);
+            Grid.SetColumnSpan(highlight, 2);
+            row.Children.Add(highlight);
+        }
 
         var number = !string.IsNullOrWhiteSpace(track.Number)
             ? track.Number
@@ -1044,22 +1074,6 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         };
         Grid.SetColumn(duration, 2);
         row.Children.Add(duration);
-
-        var separator = new Image
-        {
-            Height = 1,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Source = AlbumTrackSeparatorSource,
-            Stretch = Stretch.Fill,
-            Opacity = 0.72,
-            SnapsToDevicePixels = true,
-            IsHitTestVisible = false
-        };
-        Grid.SetColumn(separator, 1);
-        Grid.SetColumnSpan(separator, 2);
-        Panel.SetZIndex(separator, 2);
-        row.Children.Add(separator);
         panel.Children.Add(row);
     }
 
@@ -1098,6 +1112,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             _isUpdatingArtistSelector = false;
         }
 
+        UpdateHeaderForSelectedPage();
         UpdateHeroForSelectedPage();
     }
 
@@ -1184,6 +1199,35 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     {
         HeaderTitleText.Text = FirstNonEmpty(info.Title, _snapshot.Title);
         HeaderArtistText.Text = FirstNonEmpty(info.Artist, _snapshot.Artist);
+    }
+
+    private void UpdateHeaderForSelectedPage()
+    {
+        if (InfoTabs.SelectedItem == ArtistTab)
+        {
+            var selectedCredit = ArtistSelector.SelectedItem as MusicBrainzArtistCredit
+                ?? _trackInfo?.ArtistCredits.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(selectedCredit?.ArtistId)
+                && _artistCache.TryGetValue(selectedCredit.ArtistId, out var artistInfo))
+            {
+                HeaderTitleText.Text = FirstNonEmpty(artistInfo.Name, selectedCredit.Name, _snapshot.Artist);
+                HeaderArtistText.Text = FirstNonEmpty(artistInfo.Aliases.FirstOrDefault(
+                    alias => !string.IsNullOrWhiteSpace(alias)));
+                return;
+            }
+
+            HeaderTitleText.Text = FirstNonEmpty(selectedCredit?.Name, _snapshot.Artist, "Artist");
+            HeaderArtistText.Text = string.Empty;
+            return;
+        }
+
+        if (_trackInfo is not null)
+        {
+            UpdateHeaderFromMatch(_trackInfo);
+            return;
+        }
+
+        UpdateHeaderFromSnapshot(_snapshot);
     }
 
     private void UpdateHeroForSelectedPage()
@@ -1278,6 +1322,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     private void ApplyArtworkTint(BitmapSource? cover)
     {
         var tint = ExtractDominantTint(cover) ?? DefaultTint;
+        TintChanged?.Invoke(tint);
         AnimateColor(ShellTopStop, WithAlpha(Blend(tint, Colors.White, 0.18), 0xA8));
         AnimateColor(ShellUpperStop, WithAlpha(Blend(tint, Colors.Black, 0.10), 0x98));
         AnimateColor(ShellLowerStop, WithAlpha(Blend(tint, Colors.Black, 0.48), 0xA8));
@@ -1335,6 +1380,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             return;
         }
 
+        UpdateHeaderForSelectedPage();
         UpdateHeroForSelectedPage();
         if (_isActive)
         {
@@ -1351,6 +1397,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
 
         _artistLookupCts?.Cancel();
         ArtistDetailsPanel.Children.Clear();
+        UpdateHeaderForSelectedPage();
         UpdateHeroForSelectedPage();
         _ = LoadSelectedArtistAsync();
     }

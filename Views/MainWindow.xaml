@@ -418,7 +418,8 @@
               Visibility="Collapsed"
               Panel.ZIndex="8">
             <Grid x:Name="MusicInfoTimelineHost"
-                  Margin="14,0" />
+                  Margin="14,0"
+                  VerticalAlignment="Top" />
         </Grid>
         <Border x:Name="RootCard"
             CornerRadius="9"

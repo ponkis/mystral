@@ -53,6 +53,7 @@ public sealed record MusicBrainzLabelInfo(
     string CatalogNumber);
 
 public sealed record MusicBrainzAlbumTrack(
+    string RecordingId,
     int MediumPosition,
     string MediumTitle,
     string MediumFormat,

@@ -3103,15 +3103,18 @@ static class MusicBrainzServiceTests
         Check.Equal(3, result.TrackTotal);
         Check.Sequence(new[] { "indie rock", "alternative rock", "live" }, result.Genres);
         Check.Equal(3, result.Tracks.Count);
+        Check.Equal("recording-current", result.Tracks[0].RecordingId);
         Check.Equal("Opening Song", result.Tracks[0].Title);
         Check.Equal(1, result.Tracks[0].MediumPosition);
         Check.Equal("Main program", result.Tracks[0].MediumTitle);
         Check.Equal("CD", result.Tracks[0].MediumFormat);
         Check.Equal("Lead", result.Tracks[0].Artist);
         Check.Equal(TimeSpan.FromMinutes(3), result.Tracks[0].Duration);
+        Check.Equal("recording-two", result.Tracks[1].RecordingId);
         Check.Equal("Guest Song", result.Tracks[1].Title);
         Check.Equal("Guest", result.Tracks[1].Artist);
         Check.Equal(TimeSpan.FromMilliseconds(201234), result.Tracks[1].Duration);
+        Check.Equal(string.Empty, result.Tracks[2].RecordingId);
         Check.Equal("B1", result.Tracks[2].Number);
         Check.Equal(2, result.Tracks[2].MediumPosition);
         Check.Equal("Bonus disc", result.Tracks[2].MediumTitle);
