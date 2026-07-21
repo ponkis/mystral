@@ -60,16 +60,19 @@ For packaged development builds:
 ## Music Information
 
 - Play a known track, open `More`, and confirm `Track information`, `Artist information`, and `Album information` unfold the player onto the matching tab instead of opening another taskbar window.
-- Confirm only the existing playback-controls pill remains at the right edge, with working window controls in a squared-bottom tab whose bottom edge sits exactly on the sheet's top border instead of overlapping inside it; the tab and playback pill must share the same left and right edges, the tab must not look like a detached rounded pill, and the compact cover, title, artist, and progress row must not remain duplicated.
+- Confirm the existing playback-controls pill stays in its upper-right position while the elapsed time, seek slider, and remaining time move together into the footer beneath the information content. The timeline must appear only once; the compact cover, title, and artist must not remain duplicated.
+- Confirm working window controls remain in a squared-bottom tab whose bottom edge sits exactly on the sheet's top border instead of overlapping inside it. The tab uses the same cover-derived tint as the attached sheet, and button hover fills stay square at shared and bottom edges with rounding only at the strip's outer top corners.
 - Confirm the cover animates into the larger artwork tile without a blank flash, and that its image, border, and highlight all follow the same rounded corners with no square gaps.
 - Confirm the Track, Artist, and Album tabs begin at the content's left edge below the lifted artwork, and that the selected tab opens into the content while its top outline remains visible everywhere else; tab headers use the Hand cursor while the information body uses the normal cursor.
 - Confirm the Track tab presents the matched title, full artist credit, and album prominently in aligned rows, followed only by first release date, track number, and genres when available.
 - Confirm the Artist tab shows only the name, full track credit, country, aliases, genres, and available biography without clipping long text.
 - Play a multi-artist recording and confirm the Artist tab lets you switch between credited artists without changing the track or album match.
 - Open an artist with a linked Wikimedia Commons image and confirm its actual portrait replaces the initials tile without a text band over the image and never displays the album cover as an artist portrait. Confirm source details are available on hover and an artist without an image link keeps the initials fallback.
-- Confirm the Album tab shows only title, artist, first release date, genres, and its track list, and replaces the lifted cover with Cover Art Archive artwork when available.
+- Confirm the Album tab shows only title, artist, first release date, genres, and its track list while keeping the current lifted cover unchanged; opening the tab must not trigger a replacement-artwork fetch or flash.
+- Confirm album tracks use compact number/title/artist/duration rows separated by a crisp one-pixel `cd_thing.png` line, with no blurred band or row fill and with white Album and Track list headings.
 - Open a multi-disc release and confirm disc headings keep repeated track numbers unambiguous.
-- Confirm the content continues to the bottom of the glass sheet with no footer, source label, or external-page button.
+- Confirm the content ends above the dedicated playback-timeline footer while the playback-controls pill remains above, with no source label or external-page button.
+- Try known metadata variants such as a featured artist in the title, an `Explicit` album suffix, missing accents, punctuation differences, or a renamed artist such as Kanye West / Ye; confirm the known recording still resolves without selecting a different song.
 - Open information for similarly named recordings or releases and confirm the current artist, album, and duration guide the match.
 - Play a track with missing optional fields and confirm the available details remain readable with no blank-field clutter or layout clipping.
 - Try incomplete metadata or a track with no confident MusicBrainz match and confirm a clear empty state appears.

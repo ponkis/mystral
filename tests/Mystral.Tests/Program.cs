@@ -46,6 +46,8 @@ internal static class Program
             ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
             ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
             ("MusicBrainz maps fast track information with stable entity IDs", MusicBrainzServiceTests.MapsTrackInformation),
+            ("MusicBrainz recovers featured-credit and punctuation metadata variants", MusicBrainzServiceTests.RecoversCommonMetadataVariants),
+            ("MusicBrainz finds historical credits after an artist rename", MusicBrainzServiceTests.FindsHistoricalCreditAfterArtistRename),
             ("MusicBrainz rejects mismatched titles and checks lower-ranked candidates", MusicBrainzServiceTests.ChoosesConfidentRecordingCandidate),
             ("MusicBrainz maps artist details by MBID", MusicBrainzServiceTests.MapsArtistInformation),
             ("artist artwork resolves trusted Commons photos and caches them", ArtistArtworkServiceTests.ResolvesTrustedCommonsArtwork),
@@ -2272,7 +2274,7 @@ static class MusicBrainzServiceTests
             }
 
             Check.Contains("recording:\"Requested title\"", query);
-            Check.Contains("artist:\"Lead credit feat. Guest\"", query);
+            Check.Contains("(creditname:\"Lead credit\" OR artistname:\"Lead credit\")", query);
             Check.Contains("release:\"Selected album\"", query);
             return JsonText("""
                 {
@@ -2378,7 +2380,193 @@ static class MusicBrainzServiceTests
             .GetAwaiter()
             .GetResult();
         Check.Null(empty);
-        Check.Equal(2, handler.Count);
+        Check.Equal(3, handler.Count);
+    }
+
+    public static void RecoversCommonMetadataVariants()
+    {
+        var featuredQueryCount = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            var query = Uri.UnescapeDataString(uri.Query);
+            Check.Contains("limit=15", uri.Query);
+
+            if (query.Contains("RUNITUP", StringComparison.Ordinal))
+            {
+                featuredQueryCount++;
+                Check.Contains("(creditname:\"Tyler, The Creator\" OR artistname:\"Tyler, The Creator\")", query);
+                if (query.Contains("(feat. Teezo Touchdown)", StringComparison.Ordinal))
+                {
+                    Check.Contains("release:\"CALL ME IF YOU GET LOST (Explicit)\"", query);
+                    return JsonText("""
+                        {
+                          "recordings": [{
+                            "id": "unrelated-strict-candidate",
+                            "score": 100,
+                            "title": "Run It Back",
+                            "length": 100000,
+                            "artist-credit": [{ "name": "Someone Else" }],
+                            "releases": [{ "title": "Different Album" }]
+                          }]
+                        }
+                        """);
+                }
+
+                Check.Contains("recording:\"RUNITUP\"", query);
+                Check.False(query.Contains("release:", StringComparison.Ordinal));
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "recording-runitup",
+                        "score": 100,
+                        "title": "RUNITUP",
+                        "length": 229573,
+                        "artist-credit": [
+                          {
+                            "name": "Tyler, The Creator",
+                            "joinphrase": " feat. ",
+                            "artist": { "id": "artist-tyler", "name": "Tyler, The Creator" }
+                          },
+                          {
+                            "name": "Teezo Touchdown",
+                            "artist": { "id": "artist-teezo", "name": "Teezo Touchdown" }
+                          }
+                        ],
+                        "releases": [{
+                          "id": "release-cmiygl",
+                          "title": "CALL ME IF YOU GET LOST",
+                          "release-group": { "id": "group-cmiygl", "primary-type": "Album" },
+                          "media": []
+                        }]
+                      }]
+                    }
+                    """);
+            }
+
+            Check.Contains("recording:\"TITI ME PREGUNTO\"", query);
+            Check.Contains("(creditname:\"Bad Bunny\" OR artistname:\"Bad Bunny\")", query);
+            return JsonText("""
+                {
+                  "recordings": [{
+                    "id": "recording-titi",
+                    "score": 96,
+                    "title": "Tití Me Preguntó",
+                    "length": 243717,
+                    "artist-credit": [{
+                      "name": "Bad Bunny",
+                      "artist": { "id": "artist-bad-bunny", "name": "Bad Bunny" }
+                    }],
+                    "releases": [{
+                      "id": "release-verano",
+                      "title": "Un Verano Sin Ti",
+                      "media": []
+                    }]
+                  }]
+                }
+                """);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var featured = service.FetchTrackInfoAsync(
+                "RUNITUP (feat. Teezo Touchdown)",
+                "Tyler, The Creator",
+                "CALL ME IF YOU GET LOST (Explicit)",
+                TimeSpan.FromMilliseconds(229573))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(featured);
+        Check.Equal("recording-runitup", featured!.RecordingId);
+        Check.Equal("Tyler, The Creator feat. Teezo Touchdown", featured.Artist);
+        Check.Equal("release-cmiygl", featured.ReleaseId);
+        Check.Equal(2, featuredQueryCount);
+
+        var punctuation = service.FetchTrackInfoAsync(
+                "TITI ME PREGUNTO",
+                "Bad Bunny",
+                "Un Verano Sin Ti",
+                TimeSpan.FromMilliseconds(243717))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(punctuation);
+        Check.Equal("recording-titi", punctuation!.RecordingId);
+        Check.Equal("Tití Me Preguntó", punctuation.Title);
+        Check.Equal(3, handler.Count);
+    }
+
+    public static void FindsHistoricalCreditAfterArtistRename()
+    {
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            var query = Uri.UnescapeDataString(uri.Query);
+            Check.Contains("limit=15", uri.Query);
+            Check.Contains("recording:\"Good Life\"", query);
+            Check.Contains("(creditname:\"Kanye West\" OR artistname:\"Kanye West\")", query);
+            Check.False(query.Contains("release:", StringComparison.Ordinal));
+            return JsonText("""
+                {
+                  "recordings": [
+                    {
+                      "id": "recording-live-without-duration",
+                      "score": 100,
+                      "title": "Good Life",
+                      "disambiguation": "live",
+                      "artist-credit": [{
+                        "name": "Kanye West",
+                        "artist": { "id": "artist-ye", "name": "Ye" }
+                      }],
+                      "releases": [{ "id": "release-live", "title": "Live" }]
+                    },
+                    {
+                      "id": "recording-good-life-studio",
+                      "score": 85,
+                      "title": "Good Life",
+                      "length": 207026,
+                      "disambiguation": "explicit",
+                      "artist-credit": [
+                        {
+                          "name": "Kanye West",
+                          "joinphrase": " feat. ",
+                          "artist": { "id": "artist-ye", "name": "Ye" }
+                        },
+                        {
+                          "name": "T-Pain",
+                          "artist": { "id": "artist-t-pain", "name": "T-Pain" }
+                        }
+                      ],
+                      "releases": [{
+                        "id": "release-graduation",
+                        "title": "Graduation",
+                        "release-group": { "id": "group-graduation", "primary-type": "Album" },
+                        "media": []
+                      }]
+                    }
+                  ]
+                }
+                """);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchTrackInfoAsync(
+                "Good Life",
+                "Kanye West",
+                string.Empty,
+                TimeSpan.FromMilliseconds(207026))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Equal("recording-good-life-studio", result!.RecordingId);
+        Check.Equal("Kanye West feat. T-Pain", result.Artist);
+        Check.Equal("artist-ye", result.ArtistCredits[0].ArtistId);
+        Check.Equal("Kanye West", result.ArtistCredits[0].Name);
+        Check.Equal("release-graduation", result.ReleaseId);
+        Check.Equal(1, handler.Count);
     }
 
     public static void RetriesTransientApiFailures()
@@ -2678,7 +2866,7 @@ static class MusicBrainzServiceTests
             .GetAwaiter()
             .GetResult();
         Check.Null(fuzzyDurationCollision);
-        Check.Equal(4, handler.Count);
+        Check.Equal(9, handler.Count);
     }
 
     public static void MapsArtistInformation()
@@ -2932,6 +3120,16 @@ static class MusicBrainzServiceTests
         Check.Sequence(coverBytes, result.CoverArtwork!);
         Check.Equal(ArtworkFetchOutcome.Retrieved, result.CoverOutcome);
         Check.Equal(3, handler.Count);
+
+        var withoutArtwork = service.FetchAlbumInfoAsync(
+                "release-123",
+                "recording-current",
+                includeArtwork: false)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(withoutArtwork.CoverArtwork);
+        Check.Equal(ArtworkFetchOutcome.NotAvailable, withoutArtwork.CoverOutcome);
+        Check.Equal(4, handler.Count);
     }
 
     public static void MapsRecordingAndArtworkResponses()
@@ -2948,7 +3146,7 @@ static class MusicBrainzServiceTests
                 Check.Contains("Mystral/", request.Headers.UserAgent.ToString());
                 var query = Uri.UnescapeDataString(uri.Query);
                 Check.Contains("recording:\"Requested title\"", query);
-                Check.Contains("artist:\"Lead & Guest\"", query);
+                Check.Contains("(creditname:\"Lead & Guest\" OR artistname:\"Lead & Guest\")", query);
                 Check.Contains("release:\"Wanted album\"", query);
                 return JsonText("""
                     {

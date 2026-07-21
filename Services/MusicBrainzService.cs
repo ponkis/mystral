@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mystral.Configuration;
@@ -215,7 +216,8 @@ public sealed class MusicBrainzService : IDisposable
     public async Task<MusicBrainzAlbumInfo> FetchAlbumInfoAsync(
         string releaseId,
         string recordingId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeArtwork = true)
     {
         if (string.IsNullOrWhiteSpace(releaseId))
         {
@@ -232,7 +234,9 @@ public sealed class MusicBrainzService : IDisposable
             throw new InvalidDataException("MusicBrainz returned an invalid release response.");
         }
 
-        var artwork = await FetchReleaseArtworkAsync(release, cancellationToken, includeDisc: false);
+        var artwork = includeArtwork
+            ? await FetchReleaseArtworkAsync(release, cancellationToken, includeDisc: false)
+            : (Cover: ArtworkFetch.NotAvailable, Disc: ArtworkFetch.NotAvailable);
         var tracks = MapAlbumTracks(release, recordingId);
         var labels = release.LabelInfo
             .Select(item => new MusicBrainzLabelInfo(
@@ -280,29 +284,32 @@ public sealed class MusicBrainzService : IDisposable
         TimeSpan duration,
         CancellationToken cancellationToken)
     {
-        var query = BuildRecordingQuery(title, artist, album, isrc);
-        if (query.Length == 0)
+        var queries = BuildRecordingQueries(title, artist, album, isrc);
+        if (queries.Count == 0)
         {
             return null;
         }
 
-        var searchUri = new Uri(
-            $"https://musicbrainz.org/ws/2/recording/?query={Uri.EscapeDataString(query)}&fmt=json&limit=8");
-        using var response = await SendMusicBrainzAsync(searchUri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        var payload = await ReadMusicBrainzPayloadAsync<RecordingSearchResponse>(response, cancellationToken);
-        var recording = payload.Recordings
-            .OrderByDescending(item => ScoreRecording(item, artist, album, duration))
-            .FirstOrDefault(item => IsConfidentRecording(item, title, artist, album, isrc, duration));
-        if (recording is null)
+        foreach (var query in queries)
         {
-            return null;
+            var searchUri = new Uri(
+                $"https://musicbrainz.org/ws/2/recording/?query={Uri.EscapeDataString(query)}&fmt=json&limit=15");
+            using var response = await SendMusicBrainzAsync(searchUri, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var payload = await ReadMusicBrainzPayloadAsync<RecordingSearchResponse>(response, cancellationToken);
+            var recording = payload.Recordings
+                .OrderByDescending(item => ScoreRecording(item, title, artist, album, duration))
+                .FirstOrDefault(item => IsConfidentRecording(item, title, artist, album, isrc, duration));
+            if (recording is not null)
+            {
+                var release = recording.Releases
+                    .OrderByDescending(item => ScoreRelease(item, album))
+                    .FirstOrDefault();
+                return new MatchedRecording(recording, release);
+            }
         }
 
-        var release = recording.Releases
-            .OrderByDescending(item => ScoreRelease(item, album))
-            .FirstOrDefault();
-        return new MatchedRecording(recording, release);
+        return null;
     }
 
     private static async Task<T> ReadMusicBrainzPayloadAsync<T>(
@@ -1160,6 +1167,47 @@ public sealed class MusicBrainzService : IDisposable
         return value?.Trim() ?? string.Empty;
     }
 
+    private static IReadOnlyList<string> BuildRecordingQueries(
+        string title,
+        string artist,
+        string album,
+        string isrc)
+    {
+        var queries = new List<string>();
+
+        static void AddDistinct(List<string> target, string query)
+        {
+            if (query.Length > 0 && !target.Contains(query, StringComparer.Ordinal))
+            {
+                target.Add(query);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(isrc))
+        {
+            AddDistinct(queries, BuildRecordingQuery(title, artist, album, isrc));
+            return queries;
+        }
+
+        var primaryArtist = StripFeaturingQualifier(artist);
+        var coreTitle = StripFeaturingQualifier(title);
+
+        // Prefer all available metadata first. The artist constraint covers both
+        // the credited recording name and the artist entity's current name. This
+        // matters when an artist has been renamed (for example, older recordings
+        // credited to "Kanye West" now point at the artist entity named "Ye").
+        AddDistinct(queries, BuildRecordingQuery(title, primaryArtist, album, string.Empty));
+
+        // Media sessions often append a featured artist to the title and expose
+        // store-specific album editions. MusicBrainz keeps guest artists in the
+        // artist credit and commonly stores the recording under its core title,
+        // so retry without those two brittle constraints when the strict search
+        // does not yield a confident match.
+        AddDistinct(queries, BuildRecordingQuery(coreTitle, primaryArtist, string.Empty, string.Empty));
+        AddDistinct(queries, BuildRecordingQuery(coreTitle, string.Empty, string.Empty, string.Empty));
+        return queries;
+    }
+
     private static string BuildRecordingQuery(string title, string artist, string album, string isrc)
     {
         if (!string.IsNullOrWhiteSpace(isrc))
@@ -1175,7 +1223,8 @@ public sealed class MusicBrainzService : IDisposable
         var parts = new List<string> { $"recording:{QuoteQueryValue(title)}" };
         if (!string.IsNullOrWhiteSpace(artist))
         {
-            parts.Add($"artist:{QuoteQueryValue(artist)}");
+            var quotedArtist = QuoteQueryValue(artist);
+            parts.Add($"(creditname:{quotedArtist} OR artistname:{quotedArtist})");
         }
 
         if (!string.IsNullOrWhiteSpace(album))
@@ -1194,27 +1243,41 @@ public sealed class MusicBrainzService : IDisposable
 
     private static double ScoreRecording(
         RecordingResult recording,
+        string requestedTitle,
         string requestedArtist,
         string requestedAlbum,
         TimeSpan requestedDuration)
     {
         double score = recording.Score;
-        if (!string.IsNullOrWhiteSpace(requestedArtist)
-            && TextEquals(JoinArtistCredit(recording.ArtistCredit), requestedArtist))
+        if (TitleMatches(recording.Title, requestedTitle))
+        {
+            score += 30;
+        }
+
+        if (ArtistMatches(recording.ArtistCredit, requestedArtist))
         {
             score += 20;
         }
 
         if (!string.IsNullOrWhiteSpace(requestedAlbum)
-            && recording.Releases.Any(release => TextEquals(release.Title, requestedAlbum)))
+            && recording.Releases.Any(release => MetadataTextEquals(release.Title, requestedAlbum)))
         {
             score += 18;
         }
 
-        if (requestedDuration > TimeSpan.Zero && recording.Length is > 0)
+        if (requestedDuration > TimeSpan.Zero)
         {
-            var difference = Math.Abs(recording.Length.Value - requestedDuration.TotalMilliseconds) / 1000;
-            score -= Math.Min(25, difference / 2);
+            if (recording.Length is > 0)
+            {
+                var difference = Math.Abs(recording.Length.Value - requestedDuration.TotalMilliseconds) / 1000;
+                score -= Math.Min(25, difference / 2);
+            }
+            else
+            {
+                // A durationless result must not outrank a known studio recording
+                // merely because MusicBrainz assigned the former a higher text score.
+                score -= 25;
+            }
         }
 
         return score;
@@ -1238,14 +1301,13 @@ public sealed class MusicBrainzService : IDisposable
             return true;
         }
 
-        var titleMatches = TextEquals(recording.Title, requestedTitle);
+        var titleMatches = TitleMatches(recording.Title, requestedTitle);
         var artistProvided = !string.IsNullOrWhiteSpace(requestedArtist);
         var albumProvided = !string.IsNullOrWhiteSpace(requestedAlbum);
         var durationProvided = requestedDuration > TimeSpan.Zero;
-        var artistMatches = !string.IsNullOrWhiteSpace(requestedArtist)
-            && TextEquals(JoinArtistCredit(recording.ArtistCredit), requestedArtist);
+        var artistMatches = ArtistMatches(recording.ArtistCredit, requestedArtist);
         var albumMatches = !string.IsNullOrWhiteSpace(requestedAlbum)
-            && recording.Releases.Any(release => TextEquals(release.Title, requestedAlbum));
+            && recording.Releases.Any(release => MetadataTextEquals(release.Title, requestedAlbum));
         var durationMatches = requestedDuration > TimeSpan.Zero
             && recording.Length is > 0
             && Math.Abs(recording.Length.Value - requestedDuration.TotalMilliseconds) <= 5000;
@@ -1271,7 +1333,8 @@ public sealed class MusicBrainzService : IDisposable
     private static double ScoreRelease(ReleaseResult release, string requestedAlbum)
     {
         double score = 0;
-        if (!string.IsNullOrWhiteSpace(requestedAlbum) && TextEquals(release.Title, requestedAlbum))
+        if (!string.IsNullOrWhiteSpace(requestedAlbum)
+            && MetadataTextEquals(release.Title, requestedAlbum))
         {
             score += 100;
         }
@@ -1303,6 +1366,99 @@ public sealed class MusicBrainzService : IDisposable
     private static bool TextEquals(string? left, string? right)
     {
         return string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TitleMatches(string? candidate, string? requested)
+    {
+        return MetadataTextEquals(candidate, requested)
+            || MetadataTextEquals(
+                StripFeaturingQualifier(candidate ?? string.Empty),
+                StripFeaturingQualifier(requested ?? string.Empty));
+    }
+
+    private static bool ArtistMatches(
+        IReadOnlyList<ArtistCredit> candidateCredits,
+        string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return false;
+        }
+
+        if (MetadataTextEquals(JoinArtistCredit(candidateCredits), requested))
+        {
+            return true;
+        }
+
+        var requestedPrimary = StripFeaturingQualifier(requested);
+        return candidateCredits.Any(credit =>
+        {
+            var creditedName = credit.Name ?? credit.Artist?.Name;
+            return MetadataTextEquals(creditedName, requested)
+                || MetadataTextEquals(creditedName, requestedPrimary);
+        });
+    }
+
+    private static bool MetadataTextEquals(string? left, string? right)
+    {
+        var normalizedLeft = NormalizeMetadataText(left);
+        return normalizedLeft.Length > 0
+            && string.Equals(normalizedLeft, NormalizeMetadataText(right), StringComparison.Ordinal);
+    }
+
+    private static string NormalizeMetadataText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var decomposed = value.Trim().Normalize(NormalizationForm.FormD);
+        var normalized = new StringBuilder(decomposed.Length);
+        foreach (var character in decomposed)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(character);
+            if (category is UnicodeCategory.NonSpacingMark
+                or UnicodeCategory.SpacingCombiningMark
+                or UnicodeCategory.EnclosingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(character))
+            {
+                normalized.Append(char.ToUpperInvariant(character));
+            }
+        }
+
+        return normalized.ToString();
+    }
+
+    private static string StripFeaturingQualifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        string[] markers =
+        [
+            " (feat.", " (feat ", " [feat.", " [feat ",
+            " (ft.", " (ft ", " [ft.", " [ft ",
+            " (featuring ", " [featuring ",
+            " feat.", " feat ", " ft.", " ft ", " featuring "
+        ];
+        var end = value.Length;
+        foreach (var marker in markers)
+        {
+            var index = value.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index > 0 && index < end)
+            {
+                end = index;
+            }
+        }
+
+        return value[..end].Trim().TrimEnd('-', '\u2013', '\u2014', ':').TrimEnd();
     }
 
     private static string ExtractYear(string? date)

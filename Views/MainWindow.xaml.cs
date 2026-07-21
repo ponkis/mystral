@@ -189,7 +189,7 @@ public partial class MainWindow : Window
     private const double LyricsWidth = ExpandedSize;
     private const double LyricsHeight = 620;
     private const double MusicInfoWidth = 720;
-    private const double MusicInfoHeight = 456;
+    private const double MusicInfoHeight = 520;
     private const double MusicInfoPlayerOffsetX = MusicInfoWidth - CompactWidth - 12;
     private const double MusicInfoPlayerOffsetY = 10;
     private const double MusicInfoControlsOffsetY = 91;
@@ -249,6 +249,7 @@ public partial class MainWindow : Window
         _artistArtworkService = new ArtistArtworkService();
         _globeConnectionService = new GlobeConnectionService(_settingsService);
         MusicInfoPanel.Initialize(_musicBrainzService, _artistArtworkService);
+        MusicInfoPanel.TintChanged += MusicInfoPanel_TintChanged;
 
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
@@ -1812,6 +1813,7 @@ public partial class MainWindow : Window
 
         var canGoFullscreen = snapshot.HasSession && !string.IsNullOrWhiteSpace(snapshot.Title) && snapshot.CoverArt != null;
         FullscreenButton.Visibility = canGoFullscreen ? Visibility.Visible : Visibility.Collapsed;
+        CollapseExpandedButton.Tag = canGoFullscreen ? null : "ChromeRightEdge";
 
         if (_isFullscreen && !canGoFullscreen)
         {
@@ -1846,6 +1848,9 @@ public partial class MainWindow : Window
         UpdateSyncedLyricLineSeekability(snapshot);
 
         CompactProgressRow.Visibility = snapshot.HasSession ? Visibility.Visible : Visibility.Collapsed;
+        MusicInfoTimelinePanel.Visibility = _isMusicInfoMode && snapshot.HasSession
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         CompactBurnSlot.Visibility = snapshot.HasSession ? Visibility.Collapsed : Visibility.Visible;
         if (!snapshot.HasSession)
         {
@@ -4087,14 +4092,13 @@ public partial class MainWindow : Window
         CompactTitleRow.Height = new GridLength(25);
         CompactMediaRow.Height = new GridLength(MusicInfoTitleBarGapHeight);
         CompactControlsRow.Height = new GridLength(1, GridUnitType.Star);
-        RootCard.Background = Brushes.Transparent;
+        RootCard.Background = null;
         RootCard.BorderThickness = new Thickness(0);
-        GlassSurface.Background = Brushes.Transparent;
-        ActionBar.Background = Brushes.Transparent;
+        GlassSurface.Background = null;
+        ActionBar.Background = null;
         ActionBar.BorderThickness = new Thickness(0);
         TitleBar.Margin = new Thickness(12, 0, 12, 0);
-        InfoTitleBarChrome.Background = new SolidColorBrush(Color.FromArgb(0x78, 0x10, 0x18, 0x1D));
-        InfoTitleBarChrome.BorderBrush = new SolidColorBrush(Color.FromArgb(0x72, 0xCF, 0xE2, 0xE8));
+        ApplyMusicInfoTitleBarTint(MusicInfoPanel.CurrentTint, animate: false);
         InfoTitleBarChrome.BorderThickness = new Thickness(1, 1, 1, 0);
         BlurredArtImage.Visibility = Visibility.Collapsed;
         CompactGlassGlowOverlay.Visibility = Visibility.Collapsed;
@@ -4109,6 +4113,48 @@ public partial class MainWindow : Window
         ActionBar.BeginAnimation(OpacityProperty, null);
         ActionBar.Opacity = 1;
         ActionBar.IsHitTestVisible = true;
+        MoveCompactTimelineToMusicInfoFooter();
+        MusicInfoTimelinePanel.Visibility = Snapshot.HasSession
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void MusicInfoPanel_TintChanged(Color tint)
+    {
+        if (_musicInfoControlsOnlyPresentation)
+        {
+            ApplyMusicInfoTitleBarTint(tint, animate: true);
+        }
+    }
+
+    private void ApplyMusicInfoTitleBarTint(Color tint, bool animate)
+    {
+        var background = WithAlpha(Blend(tint, Colors.White, 0.18), 0xA8);
+        var border = WithAlpha(Blend(tint, Colors.White, 0.60), 0x9B);
+        if (!animate)
+        {
+            InfoTitleBarChrome.Background = new SolidColorBrush(background);
+            InfoTitleBarChrome.BorderBrush = new SolidColorBrush(border);
+            return;
+        }
+
+        if (InfoTitleBarChrome.Background is not SolidColorBrush)
+        {
+            InfoTitleBarChrome.Background = new SolidColorBrush(background);
+        }
+        else
+        {
+            AnimateBrushColor(InfoTitleBarChrome.Background, background);
+        }
+
+        if (InfoTitleBarChrome.BorderBrush is not SolidColorBrush)
+        {
+            InfoTitleBarChrome.BorderBrush = new SolidColorBrush(border);
+        }
+        else
+        {
+            AnimateBrushColor(InfoTitleBarChrome.BorderBrush, border);
+        }
     }
 
     private void RestoreCompactPresentationAfterMusicInfo()
@@ -4135,12 +4181,40 @@ public partial class MainWindow : Window
         CompactTitleRow.Height = new GridLength(25);
         CompactMediaRow.Height = new GridLength(88);
         CompactControlsRow.Height = new GridLength(1, GridUnitType.Star);
+        MusicInfoTimelinePanel.Visibility = Visibility.Collapsed;
+        RestoreCompactTimelineToMediaPanel();
         _musicInfoRootBackground = null;
         _musicInfoGlassBackground = null;
         _musicInfoActionBackground = null;
         _musicInfoTitleBarChromeBackground = null;
         _musicInfoTitleBarChromeBorderBrush = null;
         _musicInfoControlsOnlyPresentation = false;
+    }
+
+    private void MoveCompactTimelineToMusicInfoFooter()
+    {
+        if (ReferenceEquals(CompactProgressRow.Parent, MusicInfoTimelineHost))
+        {
+            return;
+        }
+
+        CompactMetadataGrid.Children.Remove(CompactProgressRow);
+        Grid.SetRow(CompactProgressRow, 0);
+        CompactProgressRow.Margin = new Thickness(0);
+        MusicInfoTimelineHost.Children.Add(CompactProgressRow);
+    }
+
+    private void RestoreCompactTimelineToMediaPanel()
+    {
+        if (!ReferenceEquals(CompactProgressRow.Parent, MusicInfoTimelineHost))
+        {
+            return;
+        }
+
+        MusicInfoTimelineHost.Children.Remove(CompactProgressRow);
+        Grid.SetRow(CompactProgressRow, 3);
+        CompactProgressRow.Margin = new Thickness(0, 8, 0, 0);
+        CompactMetadataGrid.Children.Add(CompactProgressRow);
     }
 
     private void SetWindowSize(double width, double height)
@@ -6262,6 +6336,7 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         StopAnimatedArtwork();
+        MusicInfoPanel.TintChanged -= MusicInfoPanel_TintChanged;
         MusicInfoPanel.Dispose();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -6350,7 +6425,7 @@ public partial class MainWindow : Window
         var succeeded = false;
         try
         {
-            UnionRoundedRegion(combinedRegion, new Rect(28, 106, 692, 350), 19, scaleX, scaleY);
+            UnionRoundedRegion(combinedRegion, new Rect(28, 106, 692, 414), 19, scaleX, scaleY);
             UnionRoundedRegion(combinedRegion, new Rect(10, 20, 176, 176), 17, scaleX, scaleY);
             UnionRoundedRegion(combinedRegion, new Rect(346, 88, 372, 104), 19, scaleX, scaleY);
             succeeded = SetWindowRgn(handle, combinedRegion, true) != 0;

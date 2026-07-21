@@ -96,19 +96,27 @@ theme continues to hide the backdrop.
 While a track is playing, open `More` and choose `Track information`, `Artist
 information`, or `Album information`. The player unfolds into an attached Aero
 information surface: the current cover lifts out and grows, the existing playback
-pill stays in place, and the window controls move into a squared-bottom tab
-whose bottom edge sits on the top border rather than overlapping the sheet. The
-tab remains aligned to the pill's width. The more transparent glass sheet places the Track, Artist,
-and Album tabs along the content's left edge below the lifted artwork, with the
-selected tab opening into the otherwise outlined content area. Track identity
-and matched details use a larger, aligned presentation. The views focus on essential credits,
-dates, genres, and the album track list; multi-artist recordings also let you
-choose which credited artist to view. There is no separate information footer.
+pill stays in its upper-right position, while the playback timeline moves into a
+dedicated footer beneath the details. The window controls move into a
+squared-bottom tab whose bottom edge sits on the top border rather than
+overlapping the sheet. The tab is tinted with the same cover-derived glass color,
+and its button highlights remain joined to the strip with rounding only at the
+two outer top corners. The more transparent glass sheet places the Track,
+Artist, and Album tabs along the content's left edge below the lifted artwork,
+with the selected tab opening into the otherwise outlined content area. Track identity and matched
+details use a larger, aligned presentation. The views focus on essential credits,
+dates, genres, and a compact, divided album track list; multi-artist recordings
+also let you choose which credited artist to view. There is no source label or
+external-link footer.
 
 The details come from MusicBrainz and do not require an account or API key.
-Release artwork comes from the Cover Art Archive when available. Temporary
-lookup failures can be retried immediately and are tried again automatically
-after a short pause while the information surface remains open. When an artist
+The Album view keeps the cover already supplied by the active player instead of
+downloading a nearly identical replacement. Searches consider both an artist's
+current name and the name credited on the recording, and tolerate common
+featured-credit, punctuation, accent, and store-edition differences while still
+requiring a confident match. Temporary lookup failures can be retried
+immediately and are tried again automatically after a short pause while the
+information surface remains open. When an artist
 has a MusicBrainz image link, Mystral shows its validated Wikimedia Commons
 thumbnail without overlaying a caption; source details remain available on
 hover. Otherwise it keeps a simple initials tile.

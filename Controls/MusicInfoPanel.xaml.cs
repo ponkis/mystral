@@ -38,6 +38,8 @@ internal sealed record ArtistHeroPhoto(
 public partial class MusicInfoPanel : UserControl, IDisposable
 {
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
+    private static readonly ImageSource AlbumTrackSeparatorSource =
+        IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LookupRetryCooldown = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ArtistPhotoRetryCooldown = TimeSpan.FromMinutes(2);
     private const int MaxArtistPhotoCacheEntries = 24;
@@ -56,7 +58,6 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     private MediaSnapshot _snapshot = MediaSnapshot.Empty;
     private MusicBrainzTrackInfo? _trackInfo;
     private MusicBrainzAlbumInfo? _albumInfo;
-    private BitmapSource? _albumArtwork;
     private string _snapshotKey = string.Empty;
     private string _trackLookupInFlightKey = string.Empty;
     private string _trackLookupCompletedKey = string.Empty;
@@ -84,6 +85,10 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     internal Image AnimatedArtworkOverlay => HeroArtVideoImage;
 
     internal Image FrozenArtworkOverlay => HeroArtFrozenFrameImage;
+
+    internal Color CurrentTint { get; private set; } = DefaultTint;
+
+    internal event Action<Color>? TintChanged;
 
     internal void Initialize(
         MusicBrainzService musicBrainzService,
@@ -788,36 +793,14 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             var info = await musicBrainzService.FetchAlbumInfoAsync(
                 releaseId,
                 recordingId,
-                cancellation.Token);
-            if (!IsCurrentAlbumLookup(cancellation, generation, trackGeneration, releaseId))
-            {
-                return;
-            }
-
-            BitmapSource? albumArtwork = null;
-            if (info.CoverArtwork is { Length: > 0 } artworkBytes)
-            {
-                try
-                {
-                    var artwork = await _artworkLoader.LoadAsync(artworkBytes, cancellation.Token);
-                    if (IsCurrentAlbumLookup(cancellation, generation, trackGeneration, releaseId))
-                    {
-                        albumArtwork = artwork.Preview;
-                    }
-                }
-                catch (InvalidDataException)
-                {
-                }
-            }
-
+                includeArtwork: false,
+                cancellationToken: cancellation.Token);
             if (!IsCurrentAlbumLookup(cancellation, generation, trackGeneration, releaseId))
             {
                 return;
             }
 
             _albumInfo = info;
-            _albumArtwork = albumArtwork;
-            UpdateHeroForSelectedPage();
             PopulateAlbumDetails(info);
             SetAlbumReady();
         }
@@ -953,7 +936,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             Margin = panel.Children.Count == 0 ? new Thickness(0, 0, 0, 8) : new Thickness(0, 12, 0, 8),
             FontSize = 18,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(180, 224, 235)),
+            Foreground = Brushes.White,
             Effect = new DropShadowEffect
             {
                 BlurRadius = 2,
@@ -1004,42 +987,46 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     {
         var row = new Grid
         {
-            Margin = new Thickness(0, 0, 0, 1),
-            Background = new SolidColorBrush(Color.FromArgb(0x31, 0x86, 0xA4, 0xB0))
+            MinHeight = 38
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(46) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
 
         var number = !string.IsNullOrWhiteSpace(track.Number)
             ? track.Number
             : track.Position > 0 ? track.Position.ToString() : string.Empty;
         row.Children.Add(new TextBlock
         {
-            Margin = new Thickness(9, 8, 7, 8),
+            Margin = new Thickness(3, 7, 8, 8),
             HorizontalAlignment = HorizontalAlignment.Right,
-            Foreground = new SolidColorBrush(Color.FromRgb(157, 177, 182)),
+            VerticalAlignment = VerticalAlignment.Top,
+            Foreground = new SolidColorBrush(Color.FromRgb(183, 197, 200)),
+            FontSize = 11.5,
             Text = number
         });
 
-        var titlePanel = new StackPanel { Margin = new Thickness(0, 7, 10, 7) };
+        var titlePanel = new StackPanel { Margin = new Thickness(0, 5, 10, 6) };
         titlePanel.Children.Add(new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(239, 244, 242)),
+            FontSize = 12.5,
             FontWeight = FontWeights.SemiBold,
             Text = track.Title,
-            TextWrapping = TextWrapping.Wrap
+            TextTrimming = TextTrimming.CharacterEllipsis
         });
-        if (!string.IsNullOrWhiteSpace(track.Artist)
-            && !string.Equals(track.Artist, albumArtist, StringComparison.OrdinalIgnoreCase))
+
+        var trackArtist = !string.IsNullOrWhiteSpace(track.Artist)
+            ? track.Artist.Trim()
+            : albumArtist?.Trim();
+        if (!string.IsNullOrWhiteSpace(trackArtist))
         {
             titlePanel.Children.Add(new TextBlock
             {
-                Margin = new Thickness(0, 2, 0, 0),
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(166, 185, 188)),
-                Text = track.Artist,
-                TextWrapping = TextWrapping.Wrap
+                FontSize = 10.5,
+                Foreground = new SolidColorBrush(Color.FromRgb(183, 198, 201)),
+                Text = trackArtist,
+                TextTrimming = TextTrimming.CharacterEllipsis
             });
         }
 
@@ -1048,13 +1035,30 @@ public partial class MusicInfoPanel : UserControl, IDisposable
 
         var duration = new TextBlock
         {
-            Margin = new Thickness(8, 8, 10, 8),
+            Margin = new Thickness(4, 7, 9, 8),
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Foreground = new SolidColorBrush(Color.FromRgb(166, 185, 188)),
+            Foreground = new SolidColorBrush(Color.FromRgb(190, 203, 205)),
+            FontSize = 11.5,
             Text = FormatDuration(track.Duration)
         };
         Grid.SetColumn(duration, 2);
         row.Children.Add(duration);
+
+        var separator = new Image
+        {
+            Height = 1,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Source = AlbumTrackSeparatorSource,
+            Stretch = Stretch.Fill,
+            Opacity = 0.72,
+            SnapsToDevicePixels = true,
+            IsHitTestVisible = false
+        };
+        Grid.SetColumnSpan(separator, 3);
+        Panel.SetZIndex(separator, 2);
+        row.Children.Add(separator);
         panel.Children.Add(row);
     }
 
@@ -1072,7 +1076,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         panel.Children.Add(new TextBlock
         {
             Margin = new Thickness(2, 11, 0, 6),
-            Foreground = new SolidColorBrush(Color.FromRgb(180, 205, 210)),
+            Foreground = Brushes.White,
             FontSize = 11.5,
             FontWeight = FontWeights.SemiBold,
             Text = title
@@ -1100,7 +1104,6 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     {
         _trackInfo = null;
         _albumInfo = null;
-        _albumArtwork = null;
         _artistCache.Clear();
         _artistLookupErrors.Clear();
         _trackLookupInFlightKey = string.Empty;
@@ -1213,10 +1216,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             return;
         }
 
-        var usesReleaseArtwork = InfoTabs.SelectedItem == AlbumTab && _albumArtwork is not null;
-        ShowArtworkHero(
-            usesReleaseArtwork ? _albumArtwork : _snapshot.CoverArt,
-            showAnimatedArtwork: !usesReleaseArtwork);
+        ShowArtworkHero(_snapshot.CoverArt);
     }
 
     private void ShowArtworkHero(BitmapSource? artwork, bool showAnimatedArtwork = true)
@@ -1277,6 +1277,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     private void ApplyArtworkTint(BitmapSource? cover)
     {
         var tint = ExtractDominantTint(cover) ?? DefaultTint;
+        CurrentTint = tint;
         AnimateColor(ShellTopStop, WithAlpha(Blend(tint, Colors.White, 0.18), 0xA8));
         AnimateColor(ShellUpperStop, WithAlpha(Blend(tint, Colors.Black, 0.10), 0x98));
         AnimateColor(ShellLowerStop, WithAlpha(Blend(tint, Colors.Black, 0.48), 0xA8));
@@ -1288,6 +1289,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         AnimateBrushColor(InfoShell.BorderBrush, shellBorder);
         AnimateBrushColor(InfoShellTopBorder.Background, shellBorder);
         AnimateBrushColor(InfoShellTopRightBorder.Background, shellBorder);
+        TintChanged?.Invoke(tint);
     }
 
     private void AnimateColor(GradientStop stop, Color color)
