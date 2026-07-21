@@ -42,6 +42,13 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LookupRetryCooldown = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ArtistPhotoRetryCooldown = TimeSpan.FromMinutes(2);
+    private const int InformationTransitionDurationMilliseconds = 255;
+    internal const int InformationShellFadeDurationMilliseconds = 210;
+    private const int InformationEntranceShellDelayMilliseconds = 25;
+    internal const int InformationExitShellDelayMilliseconds =
+        InformationTransitionDurationMilliseconds
+        - InformationEntranceShellDelayMilliseconds
+        - InformationShellFadeDurationMilliseconds;
     private const int MaxArtistPhotoCacheEntries = 24;
     private const long MaxArtistPhotoCachePixels = 16_000_000;
     private readonly ImageArtworkLoader _artworkLoader = new();
@@ -195,11 +202,14 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         var targetScale = HeroArtworkFrame.ActualWidth > 0
             ? Math.Clamp(artworkTarget.Width / HeroArtworkFrame.ActualWidth, 0.05, 1)
             : 1;
-        var duration = TimeSpan.FromMilliseconds(235);
-        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var duration = TimeSpan.FromMilliseconds(InformationTransitionDurationMilliseconds);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
 
-        InfoShell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(175))
+        InfoShell.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            0,
+            TimeSpan.FromMilliseconds(InformationShellFadeDurationMilliseconds))
         {
+            BeginTime = TimeSpan.FromMilliseconds(InformationExitShellDelayMilliseconds),
             EasingFunction = easing
         }, HandoffBehavior.SnapshotAndReplace);
         InfoShellScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.985, duration)
@@ -254,7 +264,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         var startScale = HeroArtworkFrame.ActualWidth > 0
             ? Math.Clamp(artworkOrigin.Width / HeroArtworkFrame.ActualWidth, 0.05, 1)
             : 1;
-        var duration = TimeSpan.FromMilliseconds(255);
+        var duration = TimeSpan.FromMilliseconds(InformationTransitionDurationMilliseconds);
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
 
         InfoShell.BeginAnimation(OpacityProperty, null);
@@ -274,9 +284,11 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         HeroArtworkTranslate.X = artworkOrigin.X - heroPosition.X;
         HeroArtworkTranslate.Y = artworkOrigin.Y - heroPosition.Y;
 
-        InfoShell.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(210))
+        InfoShell.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            1,
+            TimeSpan.FromMilliseconds(InformationShellFadeDurationMilliseconds))
         {
-            BeginTime = TimeSpan.FromMilliseconds(25),
+            BeginTime = TimeSpan.FromMilliseconds(InformationEntranceShellDelayMilliseconds),
             EasingFunction = easing
         }, HandoffBehavior.SnapshotAndReplace);
         InfoShellScale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, duration)

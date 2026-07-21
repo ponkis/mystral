@@ -95,8 +95,9 @@ theme continues to hide the backdrop.
 
 While a track is playing, open `More` and choose `Track information`, `Artist
 information`, or `Album information`. The player unfolds into an attached Aero
-information surface: the current cover lifts out and grows, the existing playback
-pill stays in its upper-right position, while the playback timeline moves into
+information surface: the current cover lifts out and grows, then retraces that
+motion cleanly when the surface closes. The existing playback pill stays in its
+upper-right position, while the playback timeline moves into
 the open space directly beneath the details without a surrounding panel,
 divider, or a large empty footer. Equal 12-DIP spacing separates the timeline
 from both the information box and the rounded lower edge. The pill follows the selected information page's glass

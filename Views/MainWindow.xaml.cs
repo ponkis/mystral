@@ -4184,6 +4184,8 @@ public partial class MainWindow : Window
         CompactMediaRow.Height = new GridLength(88);
         CompactControlsRow.Height = new GridLength(1, GridUnitType.Star);
         MusicInfoTimelinePanel.Visibility = Visibility.Collapsed;
+        MusicInfoTimelinePanel.BeginAnimation(OpacityProperty, null);
+        MusicInfoTimelinePanel.Opacity = 1;
         RestoreCompactTimelineToMediaPanel();
         _musicInfoRootBackground = null;
         _musicInfoGlassBackground = null;
@@ -5666,6 +5668,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_isMusicInfoTransitioning && animate)
+        {
+            return;
+        }
+
         var generation = ++_musicInfoTransitionGeneration;
         _isMusicInfoTransitioning = true;
         UpdateLayout();
@@ -5680,6 +5687,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        MusicInfoTimelinePanel.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            0,
+            TimeSpan.FromMilliseconds(MusicInfoPanel.InformationShellFadeDurationMilliseconds))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(MusicInfoPanel.InformationExitShellDelayMilliseconds),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        }, HandoffBehavior.SnapshotAndReplace);
+        ApplyMusicInfoWindowRegion(artworkTarget);
         MusicInfoPanel.PlayExitAnimation(
             artworkTarget,
             Snapshot.CoverArt,
@@ -6426,7 +6441,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyMusicInfoWindowRegion()
+    private void ApplyMusicInfoWindowRegion(Rect? artworkTransitionTarget = null)
     {
         if (!_isMusicInfoMode)
         {
@@ -6453,8 +6468,18 @@ public partial class MainWindow : Window
         try
         {
             UnionRoundedRegion(combinedRegion, new Rect(28, 106, 692, 414), 19, scaleX, scaleY);
-            UnionRoundedRegion(combinedRegion, new Rect(10, 20, 176, 176), 17, scaleX, scaleY);
+            var heroRegion = new Rect(10, 20, 176, 176);
+            UnionRoundedRegion(combinedRegion, heroRegion, 17, scaleX, scaleY);
             UnionRoundedRegion(combinedRegion, new Rect(346, 88, 372, 104), 19, scaleX, scaleY);
+            if (artworkTransitionTarget is { } target
+                && target.Width > 0
+                && target.Height > 0)
+            {
+                target.Inflate(8, 8);
+                var sweptHeroRegion = Rect.Union(heroRegion, target);
+                UnionRoundedRegion(combinedRegion, sweptHeroRegion, 17, scaleX, scaleY);
+            }
+
             succeeded = SetWindowRgn(handle, combinedRegion, true) != 0;
         }
         finally
