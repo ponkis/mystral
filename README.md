@@ -1,6 +1,6 @@
 # Mystral
 
-Mystral is a Windows desktop music companion built with WPF. It reads the active Windows media session, shows playback controls, lyrics, Last.fm links, optional Last.fm scrobbling, customizable player themes, and a tray menu for quick actions.
+Mystral is a Windows desktop music companion built with WPF. It reads the active Windows media session, shows playback controls, lyrics, MusicBrainz track, artist, and album information, Last.fm links, optional Last.fm scrobbling, customizable player themes, and a tray menu for quick actions.
 
 ## Requirements
 
@@ -91,6 +91,28 @@ fullscreen views. Lyrics mode sits on the player's translucent glass surface and
 uses one cover-derived backdrop plus its header artwork, while a fixed custom
 theme continues to hide the backdrop.
 
+## Music Information
+
+While a track is playing, open `More` and choose `Track information`, `Artist
+information`, or `Album information`. The player unfolds into an attached Aero
+information surface: the current cover lifts out and grows, the existing playback
+pill stays in place, and the window controls move into a squared-bottom tab
+whose bottom edge sits on the top border rather than overlapping the sheet. The
+tab remains aligned to the pill's width. The more transparent glass sheet places the Track, Artist,
+and Album tabs along the content's left edge below the lifted artwork, with the
+selected tab opening into the otherwise outlined content area. Track identity
+and matched details use a larger, aligned presentation. The views focus on essential credits,
+dates, genres, and the album track list; multi-artist recordings also let you
+choose which credited artist to view. There is no separate information footer.
+
+The details come from MusicBrainz and do not require an account or API key.
+Release artwork comes from the Cover Art Archive when available. Temporary
+lookup failures can be retried immediately and are tried again automatically
+after a short pause while the information surface remains open. When an artist
+has a MusicBrainz image link, Mystral shows its validated Wikimedia Commons
+thumbnail without overlaying a caption; source details remain available on
+hover. Otherwise it keeps a simple initials tile.
+
 ## Burn Editor
 
 The burn editor always writes a separate copy of the selected audio file. It can
@@ -143,6 +165,7 @@ The test suite covers the vital headless app logic:
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - media-session timestamp projection, stale-position filtering, seek reconciliation, and loop-restart detection
 - model defaults and artwork tint edge cases
+- MusicBrainz recording, artist/image-relation, and multi-disc release mapping, confidence selection, artist/release artwork security bounds, outcomes, and failure handling
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling
 
@@ -173,7 +196,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.2.0</VersionPrefix>
+<VersionPrefix>2.2.2</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

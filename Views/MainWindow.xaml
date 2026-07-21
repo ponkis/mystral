@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:Mystral.Controls"
         mc:Ignorable="d"
         Title="Mystral"
         Icon="pack://siteoforigin:,,,/Resources/ico.ico"
@@ -10,7 +11,7 @@
         Height="172"
         MinWidth="218"
         MinHeight="144"
-        MaxWidth="430"
+        MaxWidth="720"
         MaxHeight="660"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -394,11 +395,20 @@
 
     <Grid x:Name="WindowSurface"
           ClipToBounds="False">
-    <Border x:Name="RootCard"
+        <Grid.LayoutTransform>
+            <ScaleTransform x:Name="MusicInfoSurfaceScale" ScaleX="1" ScaleY="1" />
+        </Grid.LayoutTransform>
+        <controls:MusicInfoPanel x:Name="MusicInfoPanel"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Top"
+                                 Visibility="Collapsed"
+                                 Panel.ZIndex="5" />
+        <Border x:Name="RootCard"
             CornerRadius="9"
             BorderBrush="#A9E2EEF2"
             BorderThickness="1"
             Effect="{StaticResource CardShadow}"
+            Panel.ZIndex="10"
             RenderTransformOrigin="0.5,0.5"
             SizeChanged="RoundedSurface_SizeChanged">
         <Border.RenderTransform>
@@ -417,9 +427,9 @@
               ClipToBounds="True"
               SizeChanged="RoundedSurface_SizeChanged">
             <Grid.RowDefinitions>
-                <RowDefinition Height="25" />
-                <RowDefinition Height="88" />
-                <RowDefinition Height="*" />
+                <RowDefinition x:Name="CompactTitleRow" Height="25" />
+                <RowDefinition x:Name="CompactMediaRow" Height="88" />
+                <RowDefinition x:Name="CompactControlsRow" Height="*" />
             </Grid.RowDefinitions>
 
             <Grid.Background>
@@ -448,7 +458,8 @@
                 </Image.Effect>
             </Image>
 
-            <Border Grid.RowSpan="3"
+            <Border x:Name="CompactGlassGlowOverlay"
+                    Grid.RowSpan="3"
                     Opacity="0.20"
                     IsHitTestVisible="False">
                 <Border.Background>
@@ -463,7 +474,8 @@
                 </Border.Background>
             </Border>
 
-            <Rectangle Grid.RowSpan="3"
+            <Rectangle x:Name="CompactGlassGloss"
+                       Grid.RowSpan="3"
                        Height="66"
                        VerticalAlignment="Top"
                        Opacity="0.55">
@@ -488,6 +500,12 @@
                   Panel.ZIndex="100"
                   Margin="0"
                   MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
+                <Border x:Name="InfoTitleBarChrome"
+                        CornerRadius="8,8,0,0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        IsHitTestVisible="False" />
                 <Grid x:Name="ChromeButtons">
                     <StackPanel HorizontalAlignment="Left"
                                 Orientation="Horizontal">

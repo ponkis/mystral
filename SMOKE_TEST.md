@@ -30,7 +30,7 @@ For packaged development builds:
 - Confirm the Mystral icon and name are visually centered in custom title bars where they are shown, including the burn editor and track notification.
 - Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
 - Toggle always-on-top and confirm the setting sticks after restart.
-- With always-on-top enabled, open the burn editor and the settings window; confirm the player stays above other apps the whole time (the child windows themselves are not topmost) and remains topmost after closing them.
+- With always-on-top enabled, expand music information, then open the burn editor and settings window; confirm the player stays above other apps the whole time (the child windows themselves are not topmost) and remains topmost after closing them.
 - Minimize the app and confirm restore works.
 - Enter fullscreen and confirm Close is hidden, then exit with Escape or the fullscreen control and confirm Close returns.
 - Close with `Close to tray` enabled and confirm the tray icon remains.
@@ -56,6 +56,29 @@ For packaged development builds:
 - Switch from animated art to an album without animation and confirm the new track's real static cover replaces the held frame immediately when available — the old frame must not linger beside the new title and must not fade out seconds later. Repeat with quick Next/Previous presses while metadata is still changing and confirm no provisional cover breaks through or remains behind. Use a 60 fps recording and frame-by-frame inspection for the one-frame case.
 - Pause playback and confirm the UI state updates.
 - Stop playback or close the media app and confirm Mystral returns to idle without crashing.
+
+## Music Information
+
+- Play a known track, open `More`, and confirm `Track information`, `Artist information`, and `Album information` unfold the player onto the matching tab instead of opening another taskbar window.
+- Confirm only the existing playback-controls pill remains at the right edge, with working window controls in a squared-bottom tab whose bottom edge sits exactly on the sheet's top border instead of overlapping inside it; the tab and playback pill must share the same left and right edges, the tab must not look like a detached rounded pill, and the compact cover, title, artist, and progress row must not remain duplicated.
+- Confirm the cover animates into the larger artwork tile without a blank flash, and that its image, border, and highlight all follow the same rounded corners with no square gaps.
+- Confirm the Track, Artist, and Album tabs begin at the content's left edge below the lifted artwork, and that the selected tab opens into the content while its top outline remains visible everywhere else; tab headers use the Hand cursor while the information body uses the normal cursor.
+- Confirm the Track tab presents the matched title, full artist credit, and album prominently in aligned rows, followed only by first release date, track number, and genres when available.
+- Confirm the Artist tab shows only the name, full track credit, country, aliases, genres, and available biography without clipping long text.
+- Play a multi-artist recording and confirm the Artist tab lets you switch between credited artists without changing the track or album match.
+- Open an artist with a linked Wikimedia Commons image and confirm its actual portrait replaces the initials tile without a text band over the image and never displays the album cover as an artist portrait. Confirm source details are available on hover and an artist without an image link keeps the initials fallback.
+- Confirm the Album tab shows only title, artist, first release date, genres, and its track list, and replaces the lifted cover with Cover Art Archive artwork when available.
+- Open a multi-disc release and confirm disc headings keep repeated track numbers unambiguous.
+- Confirm the content continues to the bottom of the glass sheet with no footer, source label, or external-page button.
+- Open information for similarly named recordings or releases and confirm the current artist, album, and duration guide the match.
+- Play a track with missing optional fields and confirm the available details remain readable with no blank-field clutter or layout clipping.
+- Try incomplete metadata or a track with no confident MusicBrainz match and confirm a clear empty state appears.
+- Disconnect the network, retry a lookup, and confirm the information surface reports a readable availability or timeout error and offers `Try again`; reconnect and confirm the same track recovers after retrying instead of retaining the failure.
+- If the information lookup receives a temporary busy or server response, confirm the message does not blame the network and the lookup tries again after a short pause.
+- Change tracks rapidly while a lookup is running, then collapse the information surface during another lookup; confirm stale details never replace the current track and the app does not crash.
+- Open information from compact, expanded, lyrics, and fullscreen modes; collapse it, minimize, and restore, confirming the player returns to a valid mode with working controls.
+- Move the compact player near each monitor edge before opening information and confirm the combined surface stays usable and collapses back to the visible compact-player position.
+- At 100% and 150% display scaling, confirm the desktop remains visible through the attached glass surface and that the tabs, scrolling, lifted artwork, window controls, and playback pill remain aligned.
 
 ## Lyrics
 
@@ -172,5 +195,5 @@ For packaged development builds:
 - No stuck tray process after exit.
 - Settings persist across restart.
 - Media controls match the active Windows media session.
-- Lyrics and Last.fm failures degrade to readable UI states.
+- Lyrics, MusicBrainz, and Last.fm failures degrade to readable UI states.
 - Installer creates a launchable app with expected resources.

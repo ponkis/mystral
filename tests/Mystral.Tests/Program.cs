@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Mystral.Controls;
 using Mystral.Models;
 using Mystral.Parsing;
 using Mystral.Services;
@@ -44,7 +45,16 @@ internal static class Program
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
             ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
             ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
+            ("MusicBrainz maps fast track information with stable entity IDs", MusicBrainzServiceTests.MapsTrackInformation),
+            ("MusicBrainz rejects mismatched titles and checks lower-ranked candidates", MusicBrainzServiceTests.ChoosesConfidentRecordingCandidate),
+            ("MusicBrainz maps artist details by MBID", MusicBrainzServiceTests.MapsArtistInformation),
+            ("artist artwork resolves trusted Commons photos and caches them", ArtistArtworkServiceTests.ResolvesTrustedCommonsArtwork),
+            ("artist artwork rejects unsafe URLs and invalid responses", ArtistArtworkServiceTests.RejectsUnsafeAndInvalidResponses),
+            ("MusicBrainz maps release details, tracks, labels, genres, and cover art", MusicBrainzServiceTests.MapsAlbumInformation),
+            ("MusicBrainz retries transient API and transport failures", MusicBrainzServiceTests.RetriesTransientApiFailures),
+            ("music information failures keep accurate retry states", MusicBrainzServiceTests.ClassifiesLookupFailures),
             ("MusicBrainz retries transient artwork responses and gives up gracefully", MusicBrainzServiceTests.RetriesTransientArtworkResponses),
+            ("MusicBrainz enforces artwork hosts, redirect limits, and size bounds", MusicBrainzServiceTests.EnforcesArtworkBoundaries),
             ("MusicBrainz reports artwork outcomes and records failure diagnostics", MusicBrainzServiceTests.ReportsArtworkOutcomesAndDiagnostics),
             ("artwork diagnostics write a bounded, rotating, failure-tolerant log", ArtworkDiagnosticsTests.WritesAndRotatesBoundedLog),
             ("GitHub update links compare valid release tags safely", GitHubReleaseLinksTests.BuildsSafeCompareUris),
@@ -2223,6 +2233,707 @@ static class ImageArtworkLoaderTests
 
 static class MusicBrainzServiceTests
 {
+    private const string MatchedRecordingJson = """
+        {
+          "recordings": [{
+            "id": "recording-recovered",
+            "score": 100,
+            "title": "Recovered title",
+            "artist-credit": [{
+              "name": "Recovered artist",
+              "artist": { "id": "artist-recovered", "name": "Recovered artist" }
+            }],
+            "releases": []
+          }]
+        }
+        """;
+
+    public static void MapsTrackInformation()
+    {
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            Check.Equal(HttpMethod.Get, request.Method);
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            Check.Equal("musicbrainz.org", uri.Host);
+            Check.Contains("Mystral/", request.Headers.UserAgent.ToString());
+            var query = Uri.UnescapeDataString(uri.Query);
+            if (query.Contains("Uncertain title", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "recording-low",
+                        "score": 69,
+                        "title": "Uncertain title",
+                        "artist-credit": [{ "name": "Artist" }]
+                      }]
+                    }
+                    """);
+            }
+
+            Check.Contains("recording:\"Requested title\"", query);
+            Check.Contains("artist:\"Lead credit feat. Guest\"", query);
+            Check.Contains("release:\"Selected album\"", query);
+            return JsonText("""
+                {
+                  "recordings": [
+                    {
+                      "id": "recording-other",
+                      "score": 100,
+                      "title": "Another song",
+                      "artist-credit": [{ "artist": { "id": "artist-other", "name": "Other" } }]
+                    },
+                    {
+                      "id": "recording-good",
+                      "score": "92",
+                      "title": "Requested title",
+                      "length": 211234,
+                      "first-release-date": "1998-04-01",
+                      "disambiguation": "studio master",
+                      "isrcs": [
+                        { "id": " USAAA0100001 " },
+                        "USAAA0100002",
+                        { "id": "usaaa0100001" }
+                      ],
+                      "artist-credit": [
+                        {
+                          "name": "Lead credit",
+                          "joinphrase": " feat. ",
+                          "artist": { "id": "artist-lead", "name": "Lead legal" }
+                        },
+                        {
+                          "artist": { "id": "artist-guest", "name": "Guest" }
+                        }
+                      ],
+                      "genres": [{ "count": 4, "name": "art pop" }],
+                      "tags": [
+                        { "count": 9, "name": "alternative rock" },
+                        { "count": 1, "name": "Art Pop" }
+                      ],
+                      "releases": [
+                        {
+                          "id": "release-other",
+                          "title": "Other album",
+                          "media": []
+                        },
+                        {
+                          "id": "release-selected",
+                          "title": "Selected album",
+                          "status": "Official",
+                          "release-group": { "id": "group-selected", "primary-type": "Album" },
+                          "media": [{
+                            "format": "CD",
+                            "track-count": "13",
+                            "track": [
+                              { "number": "01", "recording": { "id": "some-other-recording" } },
+                              { "number": "07", "recording": { "id": "recording-good" } }
+                            ]
+                          }]
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchTrackInfoAsync(
+                "Requested title",
+                "Lead credit feat. Guest",
+                "Selected album",
+                TimeSpan.FromMilliseconds(211234))
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Equal("recording-good", result!.RecordingId);
+        Check.Equal("Requested title", result.Title);
+        Check.Equal("Lead credit feat. Guest", result.Artist);
+        Check.Equal(2, result.ArtistCredits.Count);
+        Check.Equal("artist-lead", result.ArtistCredits[0].ArtistId);
+        Check.Equal("Lead credit", result.ArtistCredits[0].Name);
+        Check.Equal(" feat. ", result.ArtistCredits[0].JoinPhrase);
+        Check.Equal("artist-guest", result.ArtistCredits[1].ArtistId);
+        Check.Equal(TimeSpan.FromMilliseconds(211234), result.Duration);
+        Check.Equal("1998-04-01", result.FirstReleaseDate);
+        Check.Sequence(new[] { "USAAA0100001", "USAAA0100002" }, result.Isrcs);
+        Check.Sequence(new[] { "alternative rock", "art pop" }, result.Genres);
+        Check.Equal("studio master", result.Disambiguation);
+        Check.Equal("release-selected", result.ReleaseId);
+        Check.Equal("group-selected", result.ReleaseGroupId);
+        Check.Equal("Selected album", result.Album);
+        Check.Equal("07", result.TrackNumber);
+        Check.Equal("13", result.TrackTotal);
+
+        var uncertain = service.FetchTrackInfoAsync(
+                "Uncertain title", "Artist", string.Empty, TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(uncertain);
+
+        var empty = service.FetchTrackInfoAsync(
+                string.Empty, "Artist", "Album", TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(empty);
+        Check.Equal(2, handler.Count);
+    }
+
+    public static void RetriesTransientApiFailures()
+    {
+        var responseAttempt = 0;
+        var transientHandler = new FakeHttpMessageHandler(_ =>
+        {
+            responseAttempt++;
+            if (responseAttempt == 1)
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+                return response;
+            }
+
+            return responseAttempt == 2
+                ? new HttpResponseMessage(HttpStatusCode.BadGateway)
+                : JsonText(MatchedRecordingJson);
+        });
+        using (var client = new HttpClient(transientHandler))
+        using (var service = new MusicBrainzService(client))
+        {
+            var result = service.FetchTrackInfoAsync(
+                    "Recovered title",
+                    "Recovered artist",
+                    string.Empty,
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+
+            Check.NotNull(result);
+            Check.Equal("recording-recovered", result!.RecordingId);
+            Check.Equal(3, transientHandler.Count);
+        }
+
+        var transportAttempt = 0;
+        var transportHandler = new FakeHttpMessageHandler(_ =>
+        {
+            transportAttempt++;
+            return transportAttempt == 1
+                ? throw new HttpRequestException("The connection was reset.")
+                : JsonText(MatchedRecordingJson);
+        });
+        using (var client = new HttpClient(transportHandler))
+        using (var service = new MusicBrainzService(client))
+        {
+            var result = service.FetchTrackInfoAsync(
+                    "Recovered title",
+                    "Recovered artist",
+                    string.Empty,
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+
+            Check.NotNull(result);
+            Check.Equal(2, transportHandler.Count);
+        }
+
+        var exhaustedHandler = new FakeHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+            return response;
+        });
+        using (var client = new HttpClient(exhaustedHandler))
+        using (var service = new MusicBrainzService(client))
+        {
+            Check.Throws<HttpRequestException>(() =>
+                service.FetchTrackInfoAsync(
+                        "Unavailable title",
+                        "Artist",
+                        string.Empty,
+                        TimeSpan.Zero)
+                    .GetAwaiter()
+                    .GetResult());
+            Check.Equal(3, exhaustedHandler.Count);
+        }
+
+        var permanentHandler = new FakeHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.BadRequest));
+        using var permanentClient = new HttpClient(permanentHandler);
+        using var permanentService = new MusicBrainzService(permanentClient);
+        Check.Throws<HttpRequestException>(() =>
+            permanentService.FetchTrackInfoAsync(
+                    "Rejected title",
+                    "Artist",
+                    string.Empty,
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult());
+        Check.Equal(1, permanentHandler.Count);
+
+        var oversizedHandler = new FakeHttpMessageHandler(_ =>
+        {
+            var response = JsonText(MatchedRecordingJson);
+            response.Content.Headers.ContentLength = 9L * 1024 * 1024;
+            return response;
+        });
+        using var oversizedClient = new HttpClient(oversizedHandler);
+        using var oversizedService = new MusicBrainzService(oversizedClient);
+        Check.Throws<InvalidDataException>(() =>
+            oversizedService.FetchTrackInfoAsync(
+                    "Oversized title",
+                    "Artist",
+                    string.Empty,
+                    TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult());
+        Check.Equal(1, oversizedHandler.Count);
+    }
+
+    public static void ClassifiesLookupFailures()
+    {
+        foreach (var status in new[]
+                 {
+                     HttpStatusCode.RequestTimeout,
+                     HttpStatusCode.TooManyRequests,
+                     HttpStatusCode.InternalServerError,
+                     HttpStatusCode.BadGateway,
+                     HttpStatusCode.ServiceUnavailable,
+                     HttpStatusCode.GatewayTimeout
+                 })
+        {
+            Check.True(MusicBrainzService.IsTransientMusicBrainzStatus(status));
+            var failure = MusicInfoPanel.ClassifyLookupFailure(
+                new HttpRequestException("Transient failure.", null, status));
+            Check.Equal("These details aren't available right now. Try again.", failure.Message);
+            Check.True(failure.CanRetry);
+            Check.True(failure.IsTransient);
+        }
+
+        foreach (var status in new[]
+                 {
+                     HttpStatusCode.BadRequest,
+                     HttpStatusCode.Unauthorized,
+                     HttpStatusCode.Forbidden,
+                     HttpStatusCode.NotFound
+                 })
+        {
+            Check.False(MusicBrainzService.IsTransientMusicBrainzStatus(status));
+        }
+
+        var missing = MusicInfoPanel.ClassifyLookupFailure(
+            new HttpRequestException("Missing.", null, HttpStatusCode.NotFound));
+        Check.Equal("These details are no longer available.", missing.Message);
+        Check.False(missing.CanRetry);
+        Check.False(missing.IsTransient);
+
+        var missingSearch = MusicInfoPanel.ClassifyLookupFailure(
+            new HttpRequestException("Missing search route.", null, HttpStatusCode.NotFound),
+            isEntityLookup: false);
+        Check.Equal("These details aren't available right now. Try again.", missingSearch.Message);
+        Check.True(missingSearch.CanRetry);
+        Check.True(missingSearch.IsTransient);
+
+        var blocked = MusicInfoPanel.ClassifyLookupFailure(
+            new HttpRequestException("Blocked.", null, HttpStatusCode.Forbidden));
+        Check.Equal("These details aren't available right now. Try again.", blocked.Message);
+        Check.True(blocked.CanRetry);
+        Check.True(blocked.IsTransient);
+
+        var connection = MusicInfoPanel.ClassifyLookupFailure(
+            new HttpRequestException("Connection reset."));
+        Check.Equal("These details aren't available right now. Try again.", connection.Message);
+        Check.True(connection.CanRetry);
+        Check.True(connection.IsTransient);
+
+        var timeout = MusicInfoPanel.ClassifyLookupFailure(new TaskCanceledException());
+        Check.Equal("These details took too long to load. Try again.", timeout.Message);
+        Check.True(timeout.CanRetry);
+        Check.True(timeout.IsTransient);
+
+        var interrupted = MusicInfoPanel.ClassifyLookupFailure(new IOException("The response ended early."));
+        Check.Equal("These details aren't available right now. Try again.", interrupted.Message);
+        Check.True(interrupted.CanRetry);
+        Check.True(interrupted.IsTransient);
+
+        var invalid = MusicInfoPanel.ClassifyLookupFailure(new InvalidDataException());
+        Check.Equal("These details couldn't be read. Try again.", invalid.Message);
+        Check.True(invalid.CanRetry);
+        Check.True(invalid.IsTransient);
+
+        var rejected = MusicInfoPanel.ClassifyLookupFailure(
+            new HttpRequestException("Rejected.", null, HttpStatusCode.BadRequest));
+        Check.Equal("These details couldn't be loaded.", rejected.Message);
+        Check.False(rejected.CanRetry);
+        Check.False(rejected.IsTransient);
+
+        var retryAt = DateTimeOffset.UtcNow.AddSeconds(10);
+        var cachedTransient = new CachedMusicInfoLookupFailure(connection, retryAt);
+        Check.False(MusicInfoPanel.IsLookupRetryDue(cachedTransient, retryAt.AddTicks(-1)));
+        Check.True(MusicInfoPanel.IsLookupRetryDue(cachedTransient, retryAt));
+        var cachedPermanent = new CachedMusicInfoLookupFailure(rejected, DateTimeOffset.MinValue);
+        Check.False(MusicInfoPanel.IsLookupRetryDue(cachedPermanent, retryAt));
+    }
+
+    public static void ChoosesConfidentRecordingCandidate()
+    {
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            var query = Uri.UnescapeDataString(uri.Query);
+            if (query.Contains("Common title", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [
+                        {
+                          "id": "wrong-high-score",
+                          "score": 100,
+                          "title": "Common title",
+                          "artist-credit": [{ "name": "Wrong artist" }]
+                        },
+                        {
+                          "id": "right-lower-score",
+                          "score": 75,
+                          "title": "Common title",
+                          "artist-credit": [{ "artist": { "id": "right-artist", "name": "Right artist" } }]
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (query.Contains("Wrong-only title", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "wrong-only",
+                        "score": 100,
+                        "title": "Wrong-only title",
+                        "artist-credit": [{ "name": "Someone else" }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (query.Contains("Exact collision", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "wrong-exact-duration",
+                        "score": 100,
+                        "title": "Exact collision",
+                        "length": 180000,
+                        "artist-credit": [{ "name": "Wrong artist" }],
+                        "releases": [{ "title": "Wrong album" }]
+                      }]
+                    }
+                    """);
+            }
+
+            if (query.Contains("Fuzzy collision", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "wrong-fuzzy-duration",
+                        "score": 100,
+                        "title": "Fuzzy collisian",
+                        "length": 60000,
+                        "artist-credit": [{ "name": "Right artist" }],
+                        "releases": [{ "title": "Target album" }]
+                      }]
+                    }
+                    """);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var selected = service.FetchTrackInfoAsync(
+                "Common title", "Right artist", string.Empty, TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.NotNull(selected);
+        Check.Equal("right-lower-score", selected!.RecordingId);
+
+        var rejected = service.FetchTrackInfoAsync(
+                "Wrong-only title", "Expected artist", string.Empty, TimeSpan.Zero)
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(rejected);
+
+        var exactDurationCollision = service.FetchTrackInfoAsync(
+                "Exact collision", "Expected artist", "Expected album", TimeSpan.FromMinutes(3))
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(exactDurationCollision);
+
+        var fuzzyDurationCollision = service.FetchTrackInfoAsync(
+                "Fuzzy collision", "Right artist", "Target album", TimeSpan.FromMinutes(3))
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(fuzzyDurationCollision);
+        Check.Equal(4, handler.Count);
+    }
+
+    public static void MapsArtistInformation()
+    {
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            Check.Equal("/ws/2/artist/artist-123", uri.AbsolutePath);
+            Check.Contains("aliases+annotation+genres+tags", uri.Query);
+            Check.Contains("url-rels", uri.Query);
+            return JsonText("""
+                {
+                  "id": "artist-123",
+                  "name": "The Artist",
+                  "sort-name": "Artist, The",
+                  "type": "Person",
+                  "gender": "Female",
+                  "country": "GB",
+                  "area": { "name": "United Kingdom" },
+                  "begin-area": { "name": "London" },
+                  "end-area": { "name": "Paris" },
+                  "life-span": { "begin": "1980-04-03", "end": "2020", "ended": true },
+                  "disambiguation": "English songwriter",
+                  "annotation": " Long-form artist note. ",
+                  "relations": [
+                    {
+                      "type": "image",
+                      "ended": true,
+                      "url": { "resource": "https://commons.wikimedia.org/wiki/File:Old_photo.jpg" }
+                    },
+                    {
+                      "type": "image",
+                      "ended": false,
+                      "url": { "resource": "http://commons.wikimedia.org/wiki/File:Insecure_photo.jpg" }
+                    },
+                    {
+                      "type": "image",
+                      "ended": false,
+                      "url": { "resource": "https://commons.wikimedia.org.example/wiki/File:Lookalike.jpg" }
+                    },
+                    {
+                      "type": "official homepage",
+                      "ended": false,
+                      "url": { "resource": "https://commons.wikimedia.org/wiki/File:Wrong_relation.jpg" }
+                    },
+                    {
+                      "type": "image",
+                      "ended": false,
+                      "url": { "resource": "https://commons.wikimedia.org/wiki/File:The_Artist_live.jpg" }
+                    }
+                  ],
+                  "aliases": [
+                    { "name": "Stage Name" },
+                    { "name": "stage name" },
+                    { "name": "Real Name" }
+                  ],
+                  "genres": [
+                    { "count": "7", "name": "art pop" },
+                    { "count": 3, "name": "electronic" }
+                  ],
+                  "tags": [{ "count": 1, "name": "singer-songwriter" }]
+                }
+                """);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchArtistInfoAsync(" artist-123 ")
+            .GetAwaiter()
+            .GetResult();
+
+        Check.Equal("artist-123", result.ArtistId);
+        Check.Equal("The Artist", result.Name);
+        Check.Equal("Artist, The", result.SortName);
+        Check.Equal("Person", result.Type);
+        Check.Equal("Female", result.Gender);
+        Check.Equal("GB", result.Country);
+        Check.Equal("United Kingdom", result.Area);
+        Check.Equal("London", result.BeginArea);
+        Check.Equal("Paris", result.EndArea);
+        Check.Equal("1980-04-03", result.BeginDate);
+        Check.Equal("2020", result.EndDate);
+        Check.True(result.Ended);
+        Check.Equal("English songwriter", result.Disambiguation);
+        Check.Equal("Long-form artist note.", result.Annotation);
+        Check.Equal(
+            "https://commons.wikimedia.org/wiki/File:The_Artist_live.jpg",
+            result.ImagePageUrl);
+        Check.Sequence(new[] { "Stage Name", "Real Name" }, result.Aliases);
+        Check.Sequence(new[] { "art pop", "electronic", "singer-songwriter" }, result.Genres);
+        Check.Equal(1, handler.Count);
+        Check.Throws<ArgumentException>(() =>
+            service.FetchArtistInfoAsync(" ").GetAwaiter().GetResult());
+        Check.Equal(1, handler.Count);
+    }
+
+    public static void MapsAlbumInformation()
+    {
+        var coverBytes = new byte[] { 8, 6, 7, 5, 3, 0, 9 };
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Equal("/ws/2/release/release-123", uri.AbsolutePath);
+                Check.Contains("artist-credits+labels+recordings+release-groups+genres+tags", uri.Query);
+                return JsonText("""
+                    {
+                      "id": "release-123",
+                      "title": "Album Title",
+                      "status": "Official",
+                      "date": "2004-05-06",
+                      "country": "US",
+                      "barcode": "0123456789012",
+                      "packaging": "Jewel Case",
+                      "disambiguation": "deluxe edition",
+                      "artist-credit": [
+                        { "name": "Lead", "joinphrase": " & ", "artist": { "id": "artist-lead", "name": "Lead" } },
+                        { "artist": { "id": "artist-guest", "name": "Guest" } }
+                      ],
+                      "label-info": [
+                        { "catalog-number": "CAT-42", "label": { "name": "Example Records" } },
+                        { "catalog-number": "SELF-1", "label": null }
+                      ],
+                      "release-group": {
+                        "id": "group-123",
+                        "primary-type": "Album",
+                        "secondary-types": ["Compilation", "Live"],
+                        "first-release-date": "2003-11",
+                        "genres": [{ "count": 10, "name": "indie rock" }],
+                        "tags": [{ "count": 2, "name": "live" }]
+                      },
+                      "genres": [{ "count": 5, "name": "alternative rock" }],
+                      "media": [
+                        {
+                          "position": 1,
+                          "title": "Main program",
+                          "format": "CD",
+                          "track-count": "2",
+                          "tracks": [
+                            {
+                              "position": "1",
+                              "number": "1",
+                              "title": "Opening Song",
+                              "length": 180000,
+                              "recording": {
+                                "id": "recording-current",
+                                "title": "Opening Song",
+                                "artist-credit": [{ "name": "Lead" }]
+                              }
+                            },
+                            {
+                              "position": 2,
+                              "number": "2",
+                              "recording": {
+                                "id": "recording-two",
+                                "title": "Guest Song",
+                                "length": 201234,
+                                "artist-credit": [{ "name": "Guest" }]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "position": 2,
+                          "title": "Bonus disc",
+                          "format": "Digital Media",
+                          "track-count": 1,
+                          "tracks": [{ "position": 1, "number": "B1", "title": "Bonus Track" }]
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase)
+                && uri.AbsolutePath.Equals("/release/release-123/", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "images": [
+                        {
+                          "approved": true,
+                          "front": true,
+                          "types": ["Front"],
+                          "image": "https://assets.test/album-cover-original",
+                          "thumbnails": { "500": "https://assets.test/album-cover-500" }
+                        },
+                        {
+                          "approved": true,
+                          "front": false,
+                          "types": ["Medium"],
+                          "image": "https://assets.test/disc-that-must-not-download",
+                          "thumbnails": {}
+                        }
+                      ]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/album-cover-500")))
+            {
+                return Bytes(coverBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+        var result = service.FetchAlbumInfoAsync("release-123", "recording-current")
+            .GetAwaiter()
+            .GetResult();
+
+        Check.Equal("release-123", result.ReleaseId);
+        Check.Equal("group-123", result.ReleaseGroupId);
+        Check.Equal("Album Title", result.Title);
+        Check.Equal("Lead & Guest", result.Artist);
+        Check.Equal("2003-11", result.FirstReleaseDate);
+        Check.Equal("2004-05-06", result.ReleaseDate);
+        Check.Equal("Album", result.PrimaryType);
+        Check.Sequence(new[] { "Compilation", "Live" }, result.SecondaryTypes);
+        Check.Equal("Official", result.Status);
+        Check.Equal("US", result.Country);
+        Check.Equal("0123456789012", result.Barcode);
+        Check.Equal("Jewel Case", result.Packaging);
+        Check.Equal("deluxe edition", result.Disambiguation);
+        Check.Equal(2, result.Labels.Count);
+        Check.Equal("Example Records", result.Labels[0].Name);
+        Check.Equal("CAT-42", result.Labels[0].CatalogNumber);
+        Check.Equal(string.Empty, result.Labels[1].Name);
+        Check.Equal("SELF-1", result.Labels[1].CatalogNumber);
+        Check.Sequence(new[] { "CD", "Digital Media" }, result.Formats);
+        Check.Equal(3, result.TrackTotal);
+        Check.Sequence(new[] { "indie rock", "alternative rock", "live" }, result.Genres);
+        Check.Equal(3, result.Tracks.Count);
+        Check.Equal("Opening Song", result.Tracks[0].Title);
+        Check.Equal(1, result.Tracks[0].MediumPosition);
+        Check.Equal("Main program", result.Tracks[0].MediumTitle);
+        Check.Equal("CD", result.Tracks[0].MediumFormat);
+        Check.Equal("Lead", result.Tracks[0].Artist);
+        Check.Equal(TimeSpan.FromMinutes(3), result.Tracks[0].Duration);
+        Check.Equal("Guest Song", result.Tracks[1].Title);
+        Check.Equal("Guest", result.Tracks[1].Artist);
+        Check.Equal(TimeSpan.FromMilliseconds(201234), result.Tracks[1].Duration);
+        Check.Equal("B1", result.Tracks[2].Number);
+        Check.Equal(2, result.Tracks[2].MediumPosition);
+        Check.Equal("Bonus disc", result.Tracks[2].MediumTitle);
+        Check.Equal("Digital Media", result.Tracks[2].MediumFormat);
+        Check.Equal("Lead & Guest", result.Tracks[2].Artist);
+        Check.Sequence(coverBytes, result.CoverArtwork!);
+        Check.Equal(ArtworkFetchOutcome.Retrieved, result.CoverOutcome);
+        Check.Equal(3, handler.Count);
+    }
+
     public static void MapsRecordingAndArtworkResponses()
     {
         var coverBytes = new byte[] { 1, 3, 5, 7 };
@@ -2384,9 +3095,9 @@ static class MusicBrainzServiceTests
 
             if (uri.Equals(new Uri("https://assets.test/failing-cover")))
             {
-                // A non-transient failure so this stays a fallback test (503/429 are
-                // retried; that path is covered by RetriesTransientArtworkResponses).
-                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+                // A permanent failure keeps this a fallback test; transient status
+                // retries are covered by RetriesTransientArtworkResponses.
+                return new HttpResponseMessage(HttpStatusCode.Forbidden);
             }
 
             // When the indexed front thumbnail fails, the release/front-500 endpoint
@@ -2466,10 +3177,13 @@ static class MusicBrainzServiceTests
             if (uri.Equals(new Uri("https://assets.test/retry-cover")))
             {
                 coverHits++;
-                // Transient 503 on the first hit, then the image; the service retries.
-                return coverHits == 1
-                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
-                    : Bytes(coverBytes);
+                // Standard transient failures are retried before falling back.
+                return coverHits switch
+                {
+                    1 => new HttpResponseMessage(HttpStatusCode.RequestTimeout),
+                    2 => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+                    _ => Bytes(coverBytes)
+                };
             }
 
             throw new InvalidOperationException("Unexpected request: " + uri);
@@ -2483,9 +3197,50 @@ static class MusicBrainzServiceTests
 
         Check.NotNull(result);
         Check.Sequence(coverBytes, result!.CoverArtwork!);
-        Check.Equal(2, coverHits);
+        Check.Equal(3, coverHits);
 
-        // A cover URL that is always 503 is retried up to the cap, then gives up
+        var transportHits = 0;
+        var transportBytes = new byte[] { 7, 7, 7 };
+        var transportHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return RecordingReleaseResponse("Transport title", "Transport artist", "transport-release");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/transport-release/", StringComparison.Ordinal))
+            {
+                return FrontArtworkResponse("https://assets.test/transport-cover");
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/transport-cover")))
+            {
+                transportHits++;
+                if (transportHits == 1)
+                {
+                    throw new HttpRequestException("Simulated connection reset.");
+                }
+
+                return Bytes(transportBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using (var transportClient = new HttpClient(transportHandler))
+        using (var transportService = new MusicBrainzService(transportClient))
+        {
+            var transportResult = transportService.FetchTrackDataAsync(
+                    "Transport title", "Transport artist", string.Empty, string.Empty, TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+            Check.NotNull(transportResult);
+            Check.Sequence(transportBytes, transportResult!.CoverArtwork!);
+            Check.Equal(2, transportHits);
+        }
+
+        // A cover URL that stays transiently unavailable is retried up to the cap, then gives up
         // gracefully (null cover) without throwing.
         var exhaustedHits = 0;
         var exhaustedHandler = new FakeHttpMessageHandler(request =>
@@ -2519,7 +3274,7 @@ static class MusicBrainzServiceTests
             if (uri.Equals(new Uri("https://assets.test/exhausted-cover")))
             {
                 exhaustedHits++;
-                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                return new HttpResponseMessage(HttpStatusCode.GatewayTimeout);
             }
 
             // release/front-500 and release-group fallbacks are also unavailable.
@@ -2537,6 +3292,206 @@ static class MusicBrainzServiceTests
         Check.Null(exhaustedResult!.CoverArtwork);
         // The indexed cover URL was attempted the full number of times before falling back.
         Check.Equal(3, exhaustedHits);
+    }
+
+    public static void EnforcesArtworkBoundaries()
+    {
+        var upgradedBytes = new byte[] { 2, 0, 2, 6 };
+        var upgradeHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return RecordingReleaseResponse("Upgrade title", "Boundary artist", "upgrade-release");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/upgrade-release/", StringComparison.Ordinal))
+            {
+                return FrontArtworkResponse("http://coverartarchive.org/release/upgrade-release/front-custom");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/upgrade-release/front-custom", StringComparison.Ordinal))
+            {
+                Check.Equal(Uri.UriSchemeHttps, uri.Scheme);
+                return Bytes(upgradedBytes);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using (var client = new HttpClient(upgradeHandler))
+        using (var service = new MusicBrainzService(client, enforceTrustedArtworkHosts: true))
+        {
+            var result = service.FetchTrackDataAsync(
+                    "Upgrade title", "Boundary artist", string.Empty, string.Empty, TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+            Check.NotNull(result);
+            Check.Sequence(upgradedBytes, result!.CoverArtwork!);
+            Check.Equal(ArtworkFetchOutcome.Retrieved, result.CoverOutcome);
+        }
+
+        var untrustedHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return RecordingReleaseResponse("Untrusted title", "Boundary artist", "untrusted-release");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/untrusted-release/", StringComparison.Ordinal))
+            {
+                return FrontArtworkResponse("https://untrusted.example/cover");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/untrusted-release/front-500", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            throw new InvalidOperationException("An untrusted artwork host was contacted: " + uri);
+        });
+
+        using (var client = new HttpClient(untrustedHandler))
+        using (var service = new MusicBrainzService(client, enforceTrustedArtworkHosts: true))
+        {
+            var result = service.FetchTrackDataAsync(
+                    "Untrusted title", "Boundary artist", string.Empty, string.Empty, TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+            Check.NotNull(result);
+            Check.Null(result!.CoverArtwork);
+            Check.Equal(ArtworkFetchOutcome.Failed, result.CoverOutcome);
+        }
+
+        var redirectHits = 0;
+        var redirectHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return RecordingReleaseResponse("Redirect title", "Boundary artist", "redirect-release");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/redirect-release/", StringComparison.Ordinal))
+            {
+                return FrontArtworkResponse("https://coverartarchive.org/release/redirect-release/loop");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/redirect-release/loop", StringComparison.Ordinal))
+            {
+                redirectHits++;
+                var response = new HttpResponseMessage(HttpStatusCode.Found);
+                response.Headers.Location = new Uri("/release/redirect-release/loop", UriKind.Relative);
+                return response;
+            }
+
+            if (uri.AbsolutePath.Equals("/release/redirect-release/front-500", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using (var client = new HttpClient(redirectHandler))
+        using (var service = new MusicBrainzService(client, enforceTrustedArtworkHosts: true))
+        {
+            var result = service.FetchTrackDataAsync(
+                    "Redirect title", "Boundary artist", string.Empty, string.Empty, TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+            Check.NotNull(result);
+            Check.Equal(ArtworkFetchOutcome.Failed, result!.CoverOutcome);
+            Check.Equal(9, redirectHits);
+        }
+
+        var oversizedHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("musicbrainz.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return RecordingReleaseResponse("Oversized title", "Boundary artist", "oversized-release");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/oversized-release/", StringComparison.Ordinal))
+            {
+                return FrontArtworkResponse("https://coverartarchive.org/release/oversized-release/front-custom");
+            }
+
+            if (uri.AbsolutePath.Equals("/release/oversized-release/front-custom", StringComparison.Ordinal))
+            {
+                var response = Bytes([1]);
+                response.Content.Headers.ContentLength = 21L * 1024 * 1024;
+                response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+                return response;
+            }
+
+            if (uri.AbsolutePath.Equals("/release/oversized-release/front-500", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + uri);
+        });
+
+        using (var client = new HttpClient(oversizedHandler))
+        using (var service = new MusicBrainzService(client, enforceTrustedArtworkHosts: true))
+        {
+            var result = service.FetchTrackDataAsync(
+                    "Oversized title", "Boundary artist", string.Empty, string.Empty, TimeSpan.Zero)
+                .GetAwaiter()
+                .GetResult();
+            Check.NotNull(result);
+            Check.Null(result!.CoverArtwork);
+            Check.Equal(ArtworkFetchOutcome.Failed, result.CoverOutcome);
+        }
+    }
+
+    private static HttpResponseMessage RecordingReleaseResponse(string title, string artist, string releaseId)
+    {
+        return Json(new Dictionary<string, object?>
+        {
+            ["recordings"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["score"] = 100,
+                    ["title"] = title,
+                    ["artist-credit"] = new object[]
+                    {
+                        new Dictionary<string, object?> { ["name"] = artist }
+                    },
+                    ["releases"] = new object[]
+                    {
+                        new Dictionary<string, object?>
+                        {
+                            ["id"] = releaseId,
+                            ["title"] = title,
+                            ["media"] = Array.Empty<object>()
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    private static HttpResponseMessage FrontArtworkResponse(string imageUri)
+    {
+        return Json(new Dictionary<string, object?>
+        {
+            ["images"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["approved"] = true,
+                    ["front"] = true,
+                    ["types"] = new[] { "Front" },
+                    ["image"] = imageUri,
+                    ["thumbnails"] = new Dictionary<string, string>()
+                }
+            }
+        });
     }
 
     public static void ReportsArtworkOutcomesAndDiagnostics()
@@ -2621,6 +3576,188 @@ static class MusicBrainzServiceTests
         Check.Null(absent!.CoverArtwork);
         Check.Equal(ArtworkFetchOutcome.NotAvailable, absent.CoverOutcome);
         Check.Equal(0, absentDiagnostics.Entries.Count);
+    }
+}
+
+static class ArtistArtworkServiceTests
+{
+    public static void ResolvesTrustedCommonsArtwork()
+    {
+        var png = Png(
+            2,
+            1,
+            [
+                10, 20, 30, 255,
+                40, 50, 60, 255
+            ]);
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            Check.Contains("Mystral/", request.Headers.UserAgent.ToString());
+            if (uri.Host.Equals("commons.wikimedia.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Equal("/w/api.php", uri.AbsolutePath);
+                var query = Uri.UnescapeDataString(uri.Query);
+                Check.Contains("prop=imageinfo", query);
+                Check.Contains("iiurlwidth=512", query);
+                Check.Contains("titles=File:Artist Photo.png", query);
+                return CommonsMetadata("https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Artist_Photo.png/512px-Artist_Photo.png");
+            }
+
+            Check.Equal("upload.wikimedia.org", uri.Host);
+            Check.Contains("image/*", request.Headers.Accept.ToString());
+            var response = Bytes(png);
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            return response;
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new ArtistArtworkService(client);
+        const string sourcePage = "https://commons.wikimedia.org/wiki/File:Artist%20Photo.png";
+        var result = service.FetchAsync(" artist-123 ", sourcePage)
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Equal("artist-123", result!.ArtistId);
+        Check.Sequence(png, result.Data);
+        Check.Equal(sourcePage, result.SourcePageUrl);
+        Check.Equal("Jane & Doe", result.Attribution);
+        Check.Equal("CC BY-SA 4.0", result.LicenseName);
+        Check.Equal("https://creativecommons.org/licenses/by-sa/4.0/", result.LicenseUrl);
+
+        var cached = service.FetchAsync("ARTIST-123", sourcePage)
+            .GetAwaiter()
+            .GetResult();
+        Check.Same(result, cached);
+        Check.Equal(2, handler.Count);
+    }
+
+    public static void RejectsUnsafeAndInvalidResponses()
+    {
+        var untouchedHandler = new FakeHttpMessageHandler(_ =>
+            throw new InvalidOperationException("Unsafe input must not start a request."));
+        using (var untouchedClient = new HttpClient(untouchedHandler))
+        using (var service = new ArtistArtworkService(untouchedClient))
+        {
+            Check.Null(service.FetchAsync("artist", "http://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Null(service.FetchAsync("artist", "https://commons.wikimedia.org.example/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Null(service.FetchAsync("artist", "https://commons.wikimedia.org/wiki/File:Photo.png?download=1")
+                .GetAwaiter().GetResult());
+            Check.Null(service.FetchAsync("artist", "https://commons.wikimedia.org/wiki/Category:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Null(service.FetchAsync(" ", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(0, untouchedHandler.Count);
+        }
+
+        var untrustedThumbHandler = new FakeHttpMessageHandler(_ =>
+            CommonsMetadata("https://evil.example/artist.png"));
+        using (var untrustedThumbClient = new HttpClient(untrustedThumbHandler))
+        using (var service = new ArtistArtworkService(untrustedThumbClient))
+        {
+            Check.Null(service.FetchAsync("artist-untrusted", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, untrustedThumbHandler.Count);
+        }
+
+        var redirectHandler = new FakeHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Found);
+            response.Headers.Location = new Uri("https://evil.example/w/api.php");
+            return response;
+        });
+        using (var redirectClient = new HttpClient(redirectHandler))
+        using (var service = new ArtistArtworkService(redirectClient))
+        {
+            Check.Null(service.FetchAsync("artist-redirect", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, redirectHandler.Count);
+        }
+
+        var invalidImageHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("commons.wikimedia.org", StringComparison.OrdinalIgnoreCase))
+            {
+                return CommonsMetadata("https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Photo.png/512px-Photo.png");
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("not really an image", Encoding.UTF8, "image/png")
+            };
+        });
+        using (var invalidImageClient = new HttpClient(invalidImageHandler))
+        using (var service = new ArtistArtworkService(invalidImageClient))
+        {
+            Check.Null(service.FetchAsync("artist-invalid", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(2, invalidImageHandler.Count);
+        }
+
+        var oversizedHandler = new FakeHttpMessageHandler(_ =>
+        {
+            var response = CommonsMetadata("https://upload.wikimedia.org/wikipedia/commons/photo.png");
+            response.Content.Headers.ContentLength = 600_000;
+            return response;
+        });
+        using (var oversizedClient = new HttpClient(oversizedHandler))
+        using (var service = new ArtistArtworkService(oversizedClient))
+        {
+            Check.Null(service.FetchAsync("artist-oversized", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, oversizedHandler.Count);
+        }
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        using var cancellationClient = new HttpClient(new FakeHttpMessageHandler(_ =>
+            throw new InvalidOperationException("Cancelled input must not start a request.")));
+        using var cancellationService = new ArtistArtworkService(cancellationClient);
+        Check.Throws<OperationCanceledException>(() =>
+            cancellationService.FetchAsync(
+                    "artist-cancelled",
+                    "https://commons.wikimedia.org/wiki/File:Photo.png",
+                    cancelled.Token)
+                .GetAwaiter()
+                .GetResult());
+    }
+
+    private static HttpResponseMessage CommonsMetadata(string thumbnailUrl)
+    {
+        return Json(new
+        {
+            query = new
+            {
+                pages = new[]
+                {
+                    new
+                    {
+                        imageinfo = new[]
+                        {
+                            new
+                            {
+                                thumburl = thumbnailUrl,
+                                thumbwidth = 2,
+                                thumbheight = 1,
+                                mime = "image/png",
+                                thumbmime = "image/png",
+                                extmetadata = new Dictionary<string, object>
+                                {
+                                    ["Artist"] = new { value = "<b>Jane &amp; Doe</b>" },
+                                    ["Credit"] = new { value = "Alternate credit" },
+                                    ["LicenseShortName"] = new { value = "CC BY-SA 4.0" },
+                                    ["LicenseUrl"] = new { value = "https://creativecommons.org/licenses/by-sa/4.0/" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 
