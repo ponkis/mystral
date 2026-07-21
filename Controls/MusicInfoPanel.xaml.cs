@@ -42,13 +42,14 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LookupRetryCooldown = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ArtistPhotoRetryCooldown = TimeSpan.FromMinutes(2);
-    private const int InformationTransitionDurationMilliseconds = 255;
+    internal const int InformationTransitionDurationMilliseconds = 255;
     internal const int InformationShellFadeDurationMilliseconds = 210;
     private const int InformationEntranceShellDelayMilliseconds = 25;
     internal const int InformationExitShellDelayMilliseconds =
         InformationTransitionDurationMilliseconds
         - InformationEntranceShellDelayMilliseconds
         - InformationShellFadeDurationMilliseconds;
+    private const int InformationExitHandoffFadeDurationMilliseconds = 70;
     private const int MaxArtistPhotoCacheEntries = 24;
     private const long MaxArtistPhotoCachePixels = 16_000_000;
     private readonly ImageArtworkLoader _artworkLoader = new();
@@ -203,7 +204,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             ? Math.Clamp(artworkTarget.Width / HeroArtworkFrame.ActualWidth, 0.05, 1)
             : 1;
         var duration = TimeSpan.FromMilliseconds(InformationTransitionDurationMilliseconds);
-        var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
+        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
 
         InfoShell.BeginAnimation(OpacityProperty, new DoubleAnimation(
             0,
@@ -231,6 +232,14 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         HeroArtworkTranslate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(artworkTarget.X - heroPosition.X, duration)
         {
             EasingFunction = easing
+        }, HandoffBehavior.SnapshotAndReplace);
+        HeroArtworkFrame.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            0,
+            TimeSpan.FromMilliseconds(InformationExitHandoffFadeDurationMilliseconds))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(
+                InformationTransitionDurationMilliseconds
+                - InformationExitHandoffFadeDurationMilliseconds)
         }, HandoffBehavior.SnapshotAndReplace);
         var translateY = new DoubleAnimation(artworkTarget.Y - heroPosition.Y, duration)
         {

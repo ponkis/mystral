@@ -160,9 +160,12 @@ public partial class MainWindow : Window
     private int _musicInfoTransitionGeneration;
     private bool _isMusicInfoMode;
     private bool _isMusicInfoTransitioning;
+    private EventHandler? _musicInfoExitRenderingHandler;
+    private DispatcherTimer? _musicInfoExitRenderingFallbackTimer;
     private MusicInfoPage? _pendingMusicInfoPageAfterFullscreen;
     private Rect _musicInfoCompactBounds = Rect.Empty;
     private Rect _musicInfoArtworkTarget = Rect.Empty;
+    private Rect _musicInfoCompactArtworkBounds = Rect.Empty;
     private double _musicInfoScale = 1;
     private Brush? _musicInfoRootBackground;
     private Brush? _musicInfoGlassBackground;
@@ -199,6 +202,11 @@ public partial class MainWindow : Window
     private const double MusicInfoControlsOffsetY = 91;
     private const double MusicInfoControlsHeight = 91;
     private const double MusicInfoTitleBarGapHeight = 7;
+    private const int MusicInfoExitHandoffFadeDurationMilliseconds = 70;
+    private const int MusicInfoExitHandoffFadeDelayMilliseconds =
+        MusicInfoPanel.InformationTransitionDurationMilliseconds
+        - MusicInfoExitHandoffFadeDurationMilliseconds;
+    private const int MusicInfoCompactRevealDurationMilliseconds = 90;
     private const double BurnDiscRetractedOffsetY = 1.30;
     private const double BurnDiscEjectedOffsetY = 1.03;
     private const double BurnDiscMaxPulledOffsetY = 0.28;
@@ -4677,6 +4685,11 @@ public partial class MainWindow : Window
 
     private void DragMoveSafely()
     {
+        if (_isMusicInfoTransitioning)
+        {
+            return;
+        }
+
         try
         {
             DragMove();
@@ -5642,6 +5655,7 @@ public partial class MainWindow : Window
         AnimateElementOpacity(CompactBurnSlot, 0, 100);
         MusicInfoPanel.Visibility = Visibility.Visible;
         UpdateLayout();
+        _musicInfoCompactArtworkBounds = GetBoundsRelativeTo(AlbumArtSurface, RootCard);
         _musicInfoArtworkTarget = GetBoundsRelativeTo(AlbumArtSurface, MusicInfoPanel);
 
         ApplyMusicInfoControlsOnlyPresentation();
@@ -5657,6 +5671,23 @@ public partial class MainWindow : Window
 
     private void CloseMusicInfoMode(bool animate = true, bool restorePreviousMode = true)
     {
+        if (!animate
+            && (_isMusicInfoMode
+                || _isMusicInfoTransitioning
+                || _musicInfoExitRenderingHandler is not null
+                || _musicInfoExitRenderingFallbackTimer is not null))
+        {
+            CancelMusicInfoExitRenderingWait();
+            RootCard.BeginAnimation(OpacityProperty, null);
+            RootCard.Opacity = 1;
+            RootCard.IsHitTestVisible = true;
+            if (!_isMusicInfoMode && _isMusicInfoTransitioning)
+            {
+                _musicInfoTransitionGeneration++;
+                _isMusicInfoTransitioning = false;
+            }
+        }
+
         if (!_isMusicInfoMode)
         {
             if (_pendingMusicInfoPageAfterFullscreen is not null)
@@ -5675,33 +5706,85 @@ public partial class MainWindow : Window
 
         var generation = ++_musicInfoTransitionGeneration;
         _isMusicInfoTransitioning = true;
-        UpdateLayout();
-        var artworkTarget = !_musicInfoArtworkTarget.IsEmpty
-            ? _musicInfoArtworkTarget
-            : GetBoundsRelativeTo(AlbumArtSurface, MusicInfoPanel);
-        AnimateElementOpacity(AlbumArtSurface, 1, animate ? 190 : 0);
+        RootCard.IsHitTestVisible = false;
+        MusicInfoPanel.IsHitTestVisible = false;
 
         if (!animate || !IsLoaded)
         {
-            CompleteMusicInfoExit(generation, restorePreviousMode);
+            CompleteMusicInfoExit(generation, restorePreviousMode, animate: false);
             return;
         }
 
+        UpdateLayout();
+        var artworkTarget = GetMusicInfoExitArtworkTarget();
+        RootCard.BeginAnimation(OpacityProperty, new DoubleAnimation(
+            0,
+            TimeSpan.FromMilliseconds(MusicInfoExitHandoffFadeDurationMilliseconds))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(MusicInfoExitHandoffFadeDelayMilliseconds)
+        }, HandoffBehavior.SnapshotAndReplace);
         MusicInfoTimelinePanel.BeginAnimation(OpacityProperty, new DoubleAnimation(
             0,
             TimeSpan.FromMilliseconds(MusicInfoPanel.InformationShellFadeDurationMilliseconds))
         {
             BeginTime = TimeSpan.FromMilliseconds(MusicInfoPanel.InformationExitShellDelayMilliseconds),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
         }, HandoffBehavior.SnapshotAndReplace);
         ApplyMusicInfoWindowRegion(artworkTarget);
         MusicInfoPanel.PlayExitAnimation(
             artworkTarget,
             Snapshot.CoverArt,
-            () => CompleteMusicInfoExit(generation, restorePreviousMode));
+            () => ContinueMusicInfoExitAfterRenderingPass(
+                generation,
+                () => CompleteMusicInfoExit(generation, restorePreviousMode, animate: true)));
     }
 
-    private void CompleteMusicInfoExit(int generation, bool restorePreviousMode)
+    private Rect GetMusicInfoExitArtworkTarget()
+    {
+        if (_musicInfoCompactArtworkBounds.IsEmpty)
+        {
+            return !_musicInfoArtworkTarget.IsEmpty
+                ? _musicInfoArtworkTarget
+                : GetBoundsRelativeTo(AlbumArtSurface, MusicInfoPanel);
+        }
+
+        var compactLeft = !_musicInfoCompactBounds.IsEmpty
+            ? _musicInfoCompactBounds.Left
+            : Left + MusicInfoPlayerOffsetX * _musicInfoScale;
+        var compactTop = !_musicInfoCompactBounds.IsEmpty
+            ? _musicInfoCompactBounds.Top
+            : Top + MusicInfoPlayerOffsetY * _musicInfoScale;
+        var minimumLeft = Left + 8 - _musicInfoCompactArtworkBounds.Left;
+        var maximumLeft = Left + ActualWidth - 8 - _musicInfoCompactArtworkBounds.Right;
+        var minimumTop = Top + 8 - _musicInfoCompactArtworkBounds.Top;
+        var maximumTop = Top + ActualHeight - 8 - _musicInfoCompactArtworkBounds.Bottom;
+        if (minimumLeft <= maximumLeft)
+        {
+            compactLeft = Math.Clamp(compactLeft, minimumLeft, maximumLeft);
+        }
+        if (minimumTop <= maximumTop)
+        {
+            compactTop = Math.Clamp(compactTop, minimumTop, maximumTop);
+        }
+
+        var constrained = ConstrainToVirtualScreen(compactLeft, compactTop, CompactWidth, CompactHeight);
+        _musicInfoCompactBounds = new Rect(
+            constrained.X,
+            constrained.Y,
+            CompactWidth,
+            CompactHeight);
+        var scale = Math.Max(0.01, _musicInfoScale);
+        return new Rect(
+            (constrained.X + _musicInfoCompactArtworkBounds.Left - Left) / scale,
+            (constrained.Y + _musicInfoCompactArtworkBounds.Top - Top) / scale,
+            _musicInfoCompactArtworkBounds.Width / scale,
+            _musicInfoCompactArtworkBounds.Height / scale);
+    }
+
+    private void CompleteMusicInfoExit(
+        int generation,
+        bool restorePreviousMode,
+        bool animate)
     {
         if (generation != _musicInfoTransitionGeneration || !_isMusicInfoMode)
         {
@@ -5721,6 +5804,7 @@ public partial class MainWindow : Window
 
         MusicInfoPanel.Deactivate();
         MusicInfoPanel.Visibility = Visibility.Collapsed;
+        MusicInfoPanel.IsHitTestVisible = true;
         MusicInfoSurfaceScale.ScaleX = 1;
         MusicInfoSurfaceScale.ScaleY = 1;
         _musicInfoScale = 1;
@@ -5735,18 +5819,20 @@ public partial class MainWindow : Window
         Left = constrained.X;
         Top = constrained.Y;
 
-        _isMusicInfoMode = false;
+        RootCard.BeginAnimation(OpacityProperty, null);
+        RootCard.Opacity = animate ? 0 : 1;
+        RootCard.IsHitTestVisible = !animate;
         ApplyPlaybackPillTint(ResolvePlayerTint(
             GetEffectivePlayerThemeColor(),
             ExtractDominantTint(Snapshot.CoverArt),
             DefaultTint));
-        _isMusicInfoTransitioning = false;
         _restoreExpandedAfterMusicInfo = false;
         _restoreLyricsAfterMusicInfo = false;
         _restoreExpandedBehindLyricsAfterMusicInfo = false;
         _restoreFullscreenAfterMusicInfo = false;
         _musicInfoCompactBounds = Rect.Empty;
         _musicInfoArtworkTarget = Rect.Empty;
+        _musicInfoCompactArtworkBounds = Rect.Empty;
         CollapseExpandedButton.Visibility = Visibility.Collapsed;
         CollapseExpandedButton.ToolTip = "Collapse";
         AlbumArtSurface.BeginAnimation(OpacityProperty, null);
@@ -5757,29 +5843,141 @@ public partial class MainWindow : Window
         CompactBurnSlot.IsHitTestVisible = true;
         CompactBurnSlot.BeginAnimation(OpacityProperty, null);
         CompactBurnSlot.Opacity = 1;
-        UpdateCompactBlurredArtVisibility();
+        MediaPanel.BeginAnimation(OpacityProperty, null);
+        MediaPanel.Opacity = 1;
+        MediaPanel.IsHitTestVisible = true;
+        ActionBar.BeginAnimation(OpacityProperty, null);
+        ActionBar.Opacity = 1;
+        ActionBar.IsHitTestVisible = true;
         UpdateLayout();
+        _isMusicInfoMode = false;
+        UpdateCompactBlurredArtVisibility();
         ApplyRoundedWindowRegion();
         RefreshCompactBurnPresentation();
 
-        if (restoreLyrics)
+        void RestorePreviousMode()
         {
-            SetLyricsMode(true);
-            _restoreExpandedAfterLyrics = restoreExpandedBehindLyrics;
-        }
-        else if (restoreExpanded && Snapshot.CoverArt is not null)
-        {
-            SetExpandedMode(true);
-        }
-        else
-        {
-            SetCompactChromeVisible(true);
+            if (generation != _musicInfoTransitionGeneration)
+            {
+                return;
+            }
+
+            _isMusicInfoTransitioning = false;
+
+            if (restoreLyrics)
+            {
+                SetLyricsMode(true);
+                _restoreExpandedAfterLyrics = restoreExpandedBehindLyrics;
+            }
+            else if (restoreExpanded && Snapshot.CoverArt is not null)
+            {
+                SetExpandedMode(true);
+            }
+            else
+            {
+                SetCompactChromeVisible(true);
+            }
+
+            if (restoreFullscreen)
+            {
+                SetFullscreenMode(true);
+            }
+
+            RootCard.BeginAnimation(OpacityProperty, null);
+            RootCard.Opacity = 1;
+            RootCard.IsHitTestVisible = true;
         }
 
-        if (restoreFullscreen)
+        var restoresAnotherMode = restoreLyrics
+            || (restoreExpanded && Snapshot.CoverArt is not null)
+            || restoreFullscreen;
+        if (animate && !restoresAnotherMode)
         {
-            SetFullscreenMode(true);
+            BeginMusicInfoCompactReveal(generation, RestorePreviousMode);
+            return;
         }
+
+        RestorePreviousMode();
+    }
+
+    private void BeginMusicInfoCompactReveal(int generation, Action completed)
+    {
+        var reveal = new DoubleAnimation(
+            1,
+            TimeSpan.FromMilliseconds(MusicInfoCompactRevealDurationMilliseconds))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        reveal.Completed += (_, _) =>
+        {
+            if (generation == _musicInfoTransitionGeneration)
+            {
+                completed();
+            }
+        };
+        RootCard.BeginAnimation(
+            OpacityProperty,
+            reveal,
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void ContinueMusicInfoExitAfterRenderingPass(int generation, Action completed)
+    {
+        CancelMusicInfoExitRenderingWait();
+        if (!IsVisible)
+        {
+            completed();
+            return;
+        }
+
+        var renderingPasses = 0;
+        var continued = false;
+        void Continue()
+        {
+            if (continued)
+            {
+                return;
+            }
+
+            continued = true;
+            CancelMusicInfoExitRenderingWait();
+            if (generation != _musicInfoTransitionGeneration)
+            {
+                return;
+            }
+
+            completed();
+        }
+
+        _musicInfoExitRenderingHandler = (_, _) =>
+        {
+            renderingPasses++;
+            // Animation completion can precede Rendering in the same pulse.
+            // The second event guarantees one presented zero-opacity frame.
+            if (renderingPasses >= 2)
+            {
+                Continue();
+            }
+        };
+        CompositionTarget.Rendering += _musicInfoExitRenderingHandler;
+        _musicInfoExitRenderingFallbackTimer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(80),
+            DispatcherPriority.Background,
+            (_, _) => Continue(),
+            Dispatcher);
+        _musicInfoExitRenderingFallbackTimer.Start();
+    }
+
+    private void CancelMusicInfoExitRenderingWait()
+    {
+        if (_musicInfoExitRenderingHandler is not null)
+        {
+            CompositionTarget.Rendering -= _musicInfoExitRenderingHandler;
+            _musicInfoExitRenderingHandler = null;
+        }
+
+        _musicInfoExitRenderingFallbackTimer?.Stop();
+        _musicInfoExitRenderingFallbackTimer = null;
     }
 
     private void CollapseLyricsImmediatelyForMusicInfo()
@@ -6358,6 +6556,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         CompositionTarget.Rendering -= TimelineCompositionTarget_Rendering;
+        CancelMusicInfoExitRenderingWait();
         _burnDiscArtworkCts.Cancel();
         _burnDiscArtworkCts.Dispose();
         CancelBurnDiscReading();
