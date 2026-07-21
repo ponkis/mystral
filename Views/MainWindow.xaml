@@ -409,20 +409,17 @@
                                  VerticalAlignment="Top"
                                  Visibility="Collapsed"
                                  Panel.ZIndex="5" />
-        <Border x:Name="MusicInfoTimelinePanel"
-                Width="646"
-                Height="64"
-                Margin="50,446,0,0"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                BorderBrush="#42FFFFFF"
-                BorderThickness="0,1,0,0"
-                Background="#12000000"
-                Visibility="Collapsed"
-                Panel.ZIndex="8">
+        <Grid x:Name="MusicInfoTimelinePanel"
+              Width="646"
+              Height="64"
+              Margin="50,446,0,0"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Top"
+              Visibility="Collapsed"
+              Panel.ZIndex="8">
             <Grid x:Name="MusicInfoTimelineHost"
                   Margin="14,0" />
-        </Border>
+        </Grid>
         <Border x:Name="RootCard"
             CornerRadius="9"
             BorderBrush="#A9E2EEF2"

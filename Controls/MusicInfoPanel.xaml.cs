@@ -86,9 +86,9 @@ public partial class MusicInfoPanel : UserControl, IDisposable
 
     internal Image FrozenArtworkOverlay => HeroArtFrozenFrameImage;
 
-    internal Color CurrentTint { get; private set; } = DefaultTint;
+    internal Visual ShellMaterialVisual => InfoShellSurface;
 
-    internal event Action<Color>? TintChanged;
+    internal Brush ShellBorderBrush => InfoShell.BorderBrush;
 
     internal void Initialize(
         MusicBrainzService musicBrainzService,
@@ -1056,7 +1056,8 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             SnapsToDevicePixels = true,
             IsHitTestVisible = false
         };
-        Grid.SetColumnSpan(separator, 3);
+        Grid.SetColumn(separator, 1);
+        Grid.SetColumnSpan(separator, 2);
         Panel.SetZIndex(separator, 2);
         row.Children.Add(separator);
         panel.Children.Add(row);
@@ -1277,7 +1278,6 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     private void ApplyArtworkTint(BitmapSource? cover)
     {
         var tint = ExtractDominantTint(cover) ?? DefaultTint;
-        CurrentTint = tint;
         AnimateColor(ShellTopStop, WithAlpha(Blend(tint, Colors.White, 0.18), 0xA8));
         AnimateColor(ShellUpperStop, WithAlpha(Blend(tint, Colors.Black, 0.10), 0x98));
         AnimateColor(ShellLowerStop, WithAlpha(Blend(tint, Colors.Black, 0.48), 0xA8));
@@ -1289,7 +1289,6 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         AnimateBrushColor(InfoShell.BorderBrush, shellBorder);
         AnimateBrushColor(InfoShellTopBorder.Background, shellBorder);
         AnimateBrushColor(InfoShellTopRightBorder.Background, shellBorder);
-        TintChanged?.Invoke(tint);
     }
 
     private void AnimateColor(GradientStop stop, Color color)

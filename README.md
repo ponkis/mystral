@@ -99,9 +99,10 @@ information surface: the current cover lifts out and grows, the existing playbac
 pill stays in its upper-right position, while the playback timeline moves into a
 dedicated footer beneath the details. The window controls move into a
 squared-bottom tab whose bottom edge sits on the top border rather than
-overlapping the sheet. The tab is tinted with the same cover-derived glass color,
-and its button highlights remain joined to the strip with rounding only at the
-two outer top corners. The more transparent glass sheet places the Track,
+overlapping the sheet. The tab samples the sheet's rendered, cover-derived glass
+material and reuses its border instead of drawing a separate solid tint, and its button
+highlights remain joined to the strip with rounding only at the two outer top
+corners. The more transparent glass sheet places the Track,
 Artist, and Album tabs along the content's left edge below the lifted artwork,
 with the selected tab opening into the otherwise outlined content area. Track identity and matched
 details use a larger, aligned presentation. The views focus on essential credits,

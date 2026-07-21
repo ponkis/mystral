@@ -249,8 +249,6 @@ public partial class MainWindow : Window
         _artistArtworkService = new ArtistArtworkService();
         _globeConnectionService = new GlobeConnectionService(_settingsService);
         MusicInfoPanel.Initialize(_musicBrainzService, _artistArtworkService);
-        MusicInfoPanel.TintChanged += MusicInfoPanel_TintChanged;
-
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _globeConnectionService.LinkRevoked += GlobeConnectionService_LinkRevoked;
@@ -4098,7 +4096,16 @@ public partial class MainWindow : Window
         ActionBar.Background = null;
         ActionBar.BorderThickness = new Thickness(0);
         TitleBar.Margin = new Thickness(12, 0, 12, 0);
-        ApplyMusicInfoTitleBarTint(MusicInfoPanel.CurrentTint, animate: false);
+        InfoTitleBarChrome.Background = new VisualBrush(MusicInfoPanel.ShellMaterialVisual)
+        {
+            ViewboxUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(329, 0, CompactWidth - 24, 25),
+            ViewportUnits = BrushMappingMode.RelativeToBoundingBox,
+            Viewport = new Rect(0, 0, 1, 1),
+            Stretch = Stretch.Fill,
+            TileMode = TileMode.None
+        };
+        InfoTitleBarChrome.BorderBrush = MusicInfoPanel.ShellBorderBrush;
         InfoTitleBarChrome.BorderThickness = new Thickness(1, 1, 1, 0);
         BlurredArtImage.Visibility = Visibility.Collapsed;
         CompactGlassGlowOverlay.Visibility = Visibility.Collapsed;
@@ -4117,44 +4124,6 @@ public partial class MainWindow : Window
         MusicInfoTimelinePanel.Visibility = Snapshot.HasSession
             ? Visibility.Visible
             : Visibility.Collapsed;
-    }
-
-    private void MusicInfoPanel_TintChanged(Color tint)
-    {
-        if (_musicInfoControlsOnlyPresentation)
-        {
-            ApplyMusicInfoTitleBarTint(tint, animate: true);
-        }
-    }
-
-    private void ApplyMusicInfoTitleBarTint(Color tint, bool animate)
-    {
-        var background = WithAlpha(Blend(tint, Colors.White, 0.18), 0xA8);
-        var border = WithAlpha(Blend(tint, Colors.White, 0.60), 0x9B);
-        if (!animate)
-        {
-            InfoTitleBarChrome.Background = new SolidColorBrush(background);
-            InfoTitleBarChrome.BorderBrush = new SolidColorBrush(border);
-            return;
-        }
-
-        if (InfoTitleBarChrome.Background is not SolidColorBrush)
-        {
-            InfoTitleBarChrome.Background = new SolidColorBrush(background);
-        }
-        else
-        {
-            AnimateBrushColor(InfoTitleBarChrome.Background, background);
-        }
-
-        if (InfoTitleBarChrome.BorderBrush is not SolidColorBrush)
-        {
-            InfoTitleBarChrome.BorderBrush = new SolidColorBrush(border);
-        }
-        else
-        {
-            AnimateBrushColor(InfoTitleBarChrome.BorderBrush, border);
-        }
     }
 
     private void RestoreCompactPresentationAfterMusicInfo()
@@ -6336,7 +6305,6 @@ public partial class MainWindow : Window
         _animatedArtworkCts?.Cancel();
         _animatedArtworkCts?.Dispose();
         StopAnimatedArtwork();
-        MusicInfoPanel.TintChanged -= MusicInfoPanel_TintChanged;
         MusicInfoPanel.Dispose();
         _settingsWindow?.Close();
         _settingsService.SettingsChanged -= OnSettingsChanged;
