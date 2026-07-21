@@ -43,6 +43,12 @@ public partial class MainWindow : Window
         public bool OwnsMouseCapture { get; set; }
     }
 
+    private sealed record MusicInfoLyricVisual(
+        Grid Row,
+        Image FillLayer,
+        Image TopEdgeLayer,
+        Image BottomEdgeLayer);
+
     private readonly MediaSessionService _mediaService;
     private readonly LyricsService _lyricsService;
     private readonly AnimatedArtworkService _animatedArtworkService;
@@ -64,6 +70,7 @@ public partial class MainWindow : Window
     private readonly List<TextBlock> _lyricBlocks = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
     private readonly List<TextBlock> _musicInfoLyricBlocks = [];
+    private readonly List<MusicInfoLyricVisual> _musicInfoLyricVisuals = [];
     private readonly List<LyricWaitIndicator> _musicInfoLyricWaitIndicators = [];
     private readonly List<BitmapImage> _loadingIconFrames = [];
     private CancellationTokenSource? _lyricsRefreshCts;
@@ -219,7 +226,14 @@ public partial class MainWindow : Window
     private const double MusicInfoLyricsPanelTop = 142;
     private const double MusicInfoLyricsPanelWidth = 252;
     private const double MusicInfoLyricsPanelHeight = 342;
-    private const double MusicInfoLyricsStackVerticalPadding = 110;
+    private const double MusicInfoLyricsShadowPadding = 17;
+    private const double MusicInfoLyricsStackTopPadding = 10;
+    private const double MusicInfoLyricsEndTailSpacerHeight = 180;
+    private const double MusicInfoLyricsTuckedTranslateX =
+        MusicInfoWidth
+        - MusicInfoLyricsPanelLeft
+        - MusicInfoLyricsPanelWidth
+        - MusicInfoLyricsShadowPadding;
     private const int MusicInfoLyricsEntranceDurationMilliseconds = 230;
     private const int MusicInfoLyricsExitDurationMilliseconds = 180;
     private const double MusicInfoPlayerOffsetX = MusicInfoWidth - CompactWidth - 12;
@@ -258,6 +272,8 @@ public partial class MainWindow : Window
         AppMetadata.LocalApplicationDataDirectory,
         "last-version.txt");
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
+    private static readonly ImageSource MusicInfoActiveLyricHighlightSource =
+        IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LyricActivationLead = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan LyricRegressionTolerance = TimeSpan.FromMilliseconds(1750);
     private bool _hasAppliedArtworkTint;
@@ -447,6 +463,9 @@ public partial class MainWindow : Window
             ToolTipService.SetInitialShowDelay(slider, 0);
             ToolTipService.SetBetweenShowDelay(slider, 0);
             ToolTipService.SetShowDuration(slider, 60000);
+            slider.ToolTipOpening += InteractiveSlider_ToolTipOpening;
+            slider.SizeChanged += InteractiveSlider_SizeChanged;
+            slider.ValueChanged += InteractiveSlider_ValueChanged;
             slider.AddHandler(
                 UIElement.PreviewMouseLeftButtonDownEvent,
                 new MouseButtonEventHandler(InteractiveSlider_PreviewMouseLeftButtonDown),
@@ -461,6 +480,35 @@ public partial class MainWindow : Window
                 handledEventsToo: true);
             slider.MouseLeave += InteractiveSlider_MouseLeave;
             slider.LostMouseCapture += InteractiveSlider_LostMouseCapture;
+        }
+    }
+
+    private static void InteractiveSlider_ToolTipOpening(object sender, ToolTipEventArgs e)
+    {
+        if (sender is Slider slider && slider.ToolTip is ToolTip toolTip)
+        {
+            toolTip.PlacementTarget = slider;
+            UpdateSliderToolTipPlacement(slider, toolTip);
+        }
+    }
+
+    private static void InteractiveSlider_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is Slider slider
+            && slider.ToolTip is ToolTip { IsOpen: true } toolTip)
+        {
+            UpdateSliderToolTipPlacement(slider, toolTip);
+        }
+    }
+
+    private static void InteractiveSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (sender is Slider slider
+            && slider.ToolTip is ToolTip { IsOpen: true } toolTip)
+        {
+            UpdateSliderToolTipPlacement(slider, toolTip);
         }
     }
 
@@ -1582,11 +1630,58 @@ public partial class MainWindow : Window
         return toolTip;
     }
 
-    // The thumb is laid out by value fraction across (width - thumb width); mirror
-    // that so the tooltip rides the pill instead of hovering over the whole bar.
+    // Anchor to the real template thumb whenever possible. The fallback mirrors
+    // its value fraction for templates that have not completed layout yet.
     private static void UpdateSliderToolTipPlacement(Slider slider, ToolTip toolTip)
     {
         const double thumbWidth = 16;
+        slider.ApplyTemplate();
+        if (slider.Template.FindName("PART_Track", slider)
+                is System.Windows.Controls.Primitives.Track
+                {
+                    Orientation: Orientation.Horizontal,
+                    Thumb: { } thumb
+                } track)
+        {
+            try
+            {
+                var trackOrigin = track
+                    .TransformToAncestor(slider)
+                    .Transform(new Point(0, 0));
+                var trackRange = slider.Maximum - slider.Minimum;
+                var trackFraction = trackRange > 0
+                    ? Math.Clamp((slider.Value - slider.Minimum) / trackRange, 0, 1)
+                    : 0;
+                if (track.IsDirectionReversed)
+                {
+                    trackFraction = 1 - trackFraction;
+                }
+
+                if (track.ActualWidth > 0
+                    && track.ActualHeight > 0
+                    && thumb.ActualWidth > 0
+                    && thumb.ActualHeight > 0
+                    && IsFinite(trackOrigin.X)
+                    && IsFinite(trackOrigin.Y))
+                {
+                    var thumbLeft = trackOrigin.X
+                        + (trackFraction * Math.Max(0, track.ActualWidth - thumb.ActualWidth));
+                    var top = trackOrigin.Y
+                        + Math.Max(0, (track.ActualHeight - thumb.ActualHeight) * 0.5);
+                    toolTip.PlacementRectangle = new Rect(
+                        thumbLeft,
+                        top,
+                        thumb.ActualWidth,
+                        thumb.ActualHeight);
+                    NudgeOpenToolTip(toolTip);
+                    return;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
         var range = slider.Maximum - slider.Minimum;
         var fraction = range > 0
             ? Math.Clamp((slider.Value - slider.Minimum) / range, 0, 1)
@@ -1594,6 +1689,11 @@ public partial class MainWindow : Window
         var width = Math.Max(slider.ActualWidth, thumbWidth);
         var left = fraction * (width - thumbWidth);
         toolTip.PlacementRectangle = new Rect(left, 0, thumbWidth, slider.ActualHeight);
+        NudgeOpenToolTip(toolTip);
+    }
+
+    private static void NudgeOpenToolTip(ToolTip toolTip)
+    {
         if (toolTip.IsOpen)
         {
             // Popups only re-place themselves when an offset changes; nudge it so
@@ -3046,6 +3146,10 @@ public partial class MainWindow : Window
             _musicInfoLyricsFooterPanel = AddLyricsInfoFooter(
                 MusicInfoLyricsStackPanel,
                 isFullscreen: false);
+            if (_musicInfoLyricsFooterPanel is not null)
+            {
+                AddMusicInfoLyricsEndTailSpacer();
+            }
             Dispatcher.BeginInvoke(
                 () => UpdateMusicInfoSyncedLyricsUi(GetCurrentPosition()),
                 DispatcherPriority.Loaded);
@@ -3059,6 +3163,10 @@ public partial class MainWindow : Window
             _musicInfoLyricsFooterPanel = AddLyricsInfoFooter(
                 MusicInfoLyricsStackPanel,
                 isFullscreen: false);
+            if (_musicInfoLyricsFooterPanel is not null)
+            {
+                AddMusicInfoLyricsEndTailSpacer();
+            }
             return;
         }
 
@@ -3073,6 +3181,7 @@ public partial class MainWindow : Window
     {
         MusicInfoLyricsStackPanel.Children.Clear();
         _musicInfoLyricBlocks.Clear();
+        _musicInfoLyricVisuals.Clear();
         _musicInfoLyricWaitIndicators.Clear();
         _musicInfoLyricsFooterPanel = null;
         _activeMusicInfoLyricIndex = -1;
@@ -3111,9 +3220,7 @@ public partial class MainWindow : Window
                 MusicInfoLyricsStackPanel,
                 _musicInfoLyricWaitIndicators,
                 isFullscreen: false);
-            var block = AddLyricBlock(
-                MusicInfoLyricsStackPanel,
-                _musicInfoLyricBlocks,
+            var block = AddMusicInfoLyricBlock(
                 line.Text,
                 15.5,
                 0.28,
@@ -3127,9 +3234,7 @@ public partial class MainWindow : Window
     {
         foreach (var line in Lyrics.PlainLines)
         {
-            AddLyricBlock(
-                MusicInfoLyricsStackPanel,
-                _musicInfoLyricBlocks,
+            AddMusicInfoLyricBlock(
                 line,
                 14.5,
                 0.72,
@@ -3141,6 +3246,73 @@ public partial class MainWindow : Window
         {
             block.FontWeight = FontWeights.SemiBold;
         }
+    }
+
+    private TextBlock AddMusicInfoLyricBlock(
+        string text,
+        double fontSize,
+        double opacity,
+        Thickness margin,
+        Color foreground)
+    {
+        var row = new Grid
+        {
+            Margin = new Thickness(-6, 0, -4, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+
+        static Image CreateHighlightLayer(VerticalAlignment alignment, double? height = null)
+        {
+            var layer = new Image
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = alignment,
+                Source = MusicInfoActiveLyricHighlightSource,
+                Stretch = Stretch.Fill,
+                Opacity = 0,
+                SnapsToDevicePixels = height.HasValue,
+                IsHitTestVisible = false
+            };
+            if (height is { } fixedHeight)
+            {
+                layer.Height = fixedHeight;
+            }
+
+            return layer;
+        }
+
+        var fillLayer = CreateHighlightLayer(VerticalAlignment.Stretch);
+        var topEdgeLayer = CreateHighlightLayer(VerticalAlignment.Top, 1);
+        var bottomEdgeLayer = CreateHighlightLayer(VerticalAlignment.Bottom, 1);
+        row.Children.Add(fillLayer);
+        row.Children.Add(topEdgeLayer);
+        row.Children.Add(bottomEdgeLayer);
+
+        var block = AddLyricBlock(
+            row,
+            _musicInfoLyricBlocks,
+            text,
+            fontSize,
+            opacity,
+            new Thickness(6, margin.Top, 4, margin.Bottom),
+            foreground);
+        MusicInfoLyricsStackPanel.Children.Add(row);
+        _musicInfoLyricVisuals.Add(new MusicInfoLyricVisual(
+            row,
+            fillLayer,
+            topEdgeLayer,
+            bottomEdgeLayer));
+        return block;
+    }
+
+    private void AddMusicInfoLyricsEndTailSpacer()
+    {
+        MusicInfoLyricsStackPanel.Children.Add(new Border
+        {
+            Height = MusicInfoLyricsEndTailSpacerHeight,
+            IsHitTestVisible = false,
+            Opacity = 0
+        });
     }
 
     private void LoadLoadingIconFrames()
@@ -3749,12 +3921,17 @@ public partial class MainWindow : Window
 
     private void ApplyMusicInfoLyricBlockVisualState(int activeIndex)
     {
+        var shouldHidePreviousFinalLine = !_isUserBrowsingMusicInfoLyrics
+            && activeIndex == _musicInfoLyricBlocks.Count - 1;
+
         for (var i = 0; i < _musicInfoLyricBlocks.Count; i++)
         {
             var block = _musicInfoLyricBlocks[i];
             var distance = activeIndex < 0 ? 4 : Math.Abs(i - activeIndex);
             var isActive = i == activeIndex;
-            var targetOpacity = isActive ? 1.0 : distance == 1 ? 0.50 : distance == 2 ? 0.30 : 0.18;
+            var targetOpacity = shouldHidePreviousFinalLine && i == activeIndex - 1
+                ? 0.0
+                : isActive ? 1.0 : distance == 1 ? 0.50 : distance == 2 ? 0.30 : 0.18;
             var targetColor = isActive
                 ? Color.FromRgb(246, 249, 244)
                 : distance == 1
@@ -3772,6 +3949,14 @@ public partial class MainWindow : Window
 
             block.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
             AnimateDouble(block, OpacityProperty, targetOpacity, _isUserBrowsingMusicInfoLyrics ? 150 : 320);
+
+            if (i < _musicInfoLyricVisuals.Count)
+            {
+                var visual = _musicInfoLyricVisuals[i];
+                AnimateDouble(visual.FillLayer, OpacityProperty, isActive ? 0.42 : 0, 220);
+                AnimateDouble(visual.TopEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
+                AnimateDouble(visual.BottomEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
+            }
         }
     }
 
@@ -3845,12 +4030,19 @@ public partial class MainWindow : Window
         try
         {
             MusicInfoLyricsStackPanel.UpdateLayout();
-            var block = _musicInfoLyricBlocks[activeIndex];
-            var elementTop = block.TransformToVisual(MusicInfoLyricsStackPanel).Transform(new Point(0, 0)).Y;
-            var target = MusicInfoLyricsStackVerticalPadding
-                + elementTop
-                + (block.ActualHeight * 0.5)
-                - (MusicInfoLyricsScrollViewer.ViewportHeight * 0.47);
+            FrameworkElement element = activeIndex < _musicInfoLyricVisuals.Count
+                ? _musicInfoLyricVisuals[activeIndex].Row
+                : _musicInfoLyricBlocks[activeIndex];
+            var elementTop = element
+                .TransformToVisual(MusicInfoLyricsStackPanel)
+                .Transform(new Point(0, 0))
+                .Y;
+            var target = activeIndex == _musicInfoLyricBlocks.Count - 1
+                ? MusicInfoLyricsStackTopPadding + elementTop - 12
+                : MusicInfoLyricsStackTopPadding
+                    + elementTop
+                    + (element.ActualHeight * 0.5)
+                    - (MusicInfoLyricsScrollViewer.ViewportHeight * 0.47);
             AnimateMusicInfoLyricsScrollTo(
                 Math.Clamp(target, 0, GetMusicInfoLyricsScrollMaxOffset()));
         }
@@ -4460,10 +4652,10 @@ public partial class MainWindow : Window
                 MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
                 MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
                 MusicInfoLyricsPanelTranslate.BeginAnimation(TranslateTransform.XProperty, null);
-                MusicInfoLyricsPanel.Opacity = 0;
-                MusicInfoLyricsPanelScale.ScaleX = 0.985;
-                MusicInfoLyricsPanelScale.ScaleY = 0.985;
-                MusicInfoLyricsPanelTranslate.X = _musicInfoLyricsRestingTranslateX - 22;
+                MusicInfoLyricsPanel.Opacity = 1;
+                MusicInfoLyricsPanelScale.ScaleX = 1;
+                MusicInfoLyricsPanelScale.ScaleY = 1;
+                MusicInfoLyricsPanelTranslate.X = GetMusicInfoLyricsTuckedTranslateX();
             }
             else if (!wasRequestedVisible && !IsFinite(_musicInfoLyricsWindowLeftWhenOpen))
             {
@@ -4472,8 +4664,18 @@ public partial class MainWindow : Window
                 _musicInfoLyricsRestingTranslateX = placement.PanelTranslateX;
             }
 
+            var revealClip = PrepareMusicInfoLyricsRevealClip(
+                GetMusicInfoLyricsCollapsedClipRect());
+            if (_musicInfoLyricsRestingTranslateX < -0.5)
+            {
+                Panel.SetZIndex(MusicInfoLyricsPanel, 7);
+            }
+            else
+            {
+                SetMusicInfoLyricsAnimatingLayer();
+            }
             MusicInfoLyricsPanel.Visibility = Visibility.Visible;
-            MusicInfoLyricsPanel.IsHitTestVisible = true;
+            MusicInfoLyricsPanel.IsHitTestVisible = false;
             UpdateLayout();
             ApplyMusicInfoWindowRegion();
             UpdateMusicInfoSyncedLyricsUi(GetCurrentPosition());
@@ -4484,8 +4686,11 @@ public partial class MainWindow : Window
                 _musicInfoLyricsWindowLeftWhenOpen,
                 duration,
                 easing);
-            var fade = new DoubleAnimation(1, duration) { EasingFunction = easing };
-            fade.Completed += (_, _) =>
+            var slide = new DoubleAnimation(_musicInfoLyricsRestingTranslateX, duration)
+            {
+                EasingFunction = easing
+            };
+            void CompleteEntrance()
             {
                 if (generation != _musicInfoLyricsTransitionGeneration || !_isMusicInfoLyricsVisible)
                 {
@@ -4495,21 +4700,27 @@ public partial class MainWindow : Window
                 _isMusicInfoLyricsTransitioning = false;
                 MusicInfoLyricsPanel.IsHitTestVisible = true;
                 FinalizeMusicInfoWindowLeft(_musicInfoLyricsWindowLeftWhenOpen);
+                FreezeMusicInfoLyricsRevealClip(revealClip, GetMusicInfoLyricsFullClipRect());
+                SetMusicInfoLyricsRestingLayer();
                 ApplyMusicInfoWindowRegion();
                 UpdateMusicInfoSyncedLyricsUi(GetCurrentPosition());
+            }
+
+            var reveal = new RectAnimation
+            {
+                To = GetMusicInfoLyricsFullClipRect(),
+                Duration = duration,
+                EasingFunction = easing
             };
-            MusicInfoLyricsPanel.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
-            MusicInfoLyricsPanelScale.BeginAnimation(
-                ScaleTransform.ScaleXProperty,
-                new DoubleAnimation(1, duration) { EasingFunction = easing },
+            reveal.Completed += (_, _) => CompleteEntrance();
+            revealClip.BeginAnimation(
+                RectangleGeometry.RectProperty,
+                reveal,
                 HandoffBehavior.SnapshotAndReplace);
-            MusicInfoLyricsPanelScale.BeginAnimation(
-                ScaleTransform.ScaleYProperty,
-                new DoubleAnimation(1, duration) { EasingFunction = easing },
-                HandoffBehavior.SnapshotAndReplace);
+
             MusicInfoLyricsPanelTranslate.BeginAnimation(
                 TranslateTransform.XProperty,
-                new DoubleAnimation(_musicInfoLyricsRestingTranslateX, duration) { EasingFunction = easing },
+                slide,
                 HandoffBehavior.SnapshotAndReplace);
             return;
         }
@@ -4533,8 +4744,21 @@ public partial class MainWindow : Window
                 ? _musicInfoLyricsWindowLeftBeforeOpen
                 : Left;
         AnimateMusicInfoWindowLeft(restoreLeft, exitDuration, exitEasing);
-        var exitFade = new DoubleAnimation(0, exitDuration) { EasingFunction = exitEasing };
-        exitFade.Completed += (_, _) =>
+        var concealClip = PrepareMusicInfoLyricsRevealClip(
+            GetMusicInfoLyricsFullClipRect());
+        if (_musicInfoLyricsRestingTranslateX < -0.5)
+        {
+            Panel.SetZIndex(MusicInfoLyricsPanel, 7);
+        }
+        else
+        {
+            SetMusicInfoLyricsAnimatingLayer();
+        }
+        var exitSlide = new DoubleAnimation(GetMusicInfoLyricsTuckedTranslateX(), exitDuration)
+        {
+            EasingFunction = exitEasing
+        };
+        void CompleteExit()
         {
             if (generation != _musicInfoLyricsTransitionGeneration || _isMusicInfoLyricsVisible)
             {
@@ -4546,11 +4770,12 @@ public partial class MainWindow : Window
             MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
             MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
             MusicInfoLyricsPanelTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+            ClearMusicInfoLyricsRevealClip();
             MusicInfoLyricsPanel.Opacity = 0;
             _isMusicInfoLyricsTransitioning = false;
-            MusicInfoLyricsPanelScale.ScaleX = 0.985;
-            MusicInfoLyricsPanelScale.ScaleY = 0.985;
-            MusicInfoLyricsPanelTranslate.X = -22;
+            MusicInfoLyricsPanelScale.ScaleX = 1;
+            MusicInfoLyricsPanelScale.ScaleY = 1;
+            MusicInfoLyricsPanelTranslate.X = MusicInfoLyricsTuckedTranslateX;
             MusicInfoLyricsPanel.Visibility = Visibility.Collapsed;
             _musicInfoLyricsWindowLeftBeforeOpen = double.NaN;
             _musicInfoLyricsWindowLeftWhenOpen = double.NaN;
@@ -4561,20 +4786,92 @@ public partial class MainWindow : Window
                 ClearMusicInfoLyricsContent();
             }
             ApplyMusicInfoWindowRegion();
+        }
+
+        var conceal = new RectAnimation
+        {
+            To = GetMusicInfoLyricsCollapsedClipRect(),
+            Duration = exitDuration,
+            EasingFunction = exitEasing
         };
-        MusicInfoLyricsPanel.BeginAnimation(OpacityProperty, exitFade, HandoffBehavior.SnapshotAndReplace);
-        MusicInfoLyricsPanelScale.BeginAnimation(
-            ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.985, exitDuration) { EasingFunction = exitEasing },
+        conceal.Completed += (_, _) => CompleteExit();
+        concealClip.BeginAnimation(
+            RectangleGeometry.RectProperty,
+            conceal,
             HandoffBehavior.SnapshotAndReplace);
-        MusicInfoLyricsPanelScale.BeginAnimation(
-            ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.985, exitDuration) { EasingFunction = exitEasing },
-            HandoffBehavior.SnapshotAndReplace);
+
         MusicInfoLyricsPanelTranslate.BeginAnimation(
             TranslateTransform.XProperty,
-            new DoubleAnimation(_musicInfoLyricsRestingTranslateX - 18, exitDuration) { EasingFunction = exitEasing },
+            exitSlide,
             HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private double GetMusicInfoLyricsTuckedTranslateX()
+    {
+        return Math.Min(_musicInfoLyricsRestingTranslateX, MusicInfoLyricsTuckedTranslateX);
+    }
+
+    private static Rect GetMusicInfoLyricsCollapsedClipRect()
+    {
+        var right = MusicInfoLyricsPanelWidth + MusicInfoLyricsShadowPadding;
+        return new Rect(
+            right,
+            -MusicInfoLyricsShadowPadding,
+            0,
+            MusicInfoLyricsPanelHeight + (MusicInfoLyricsShadowPadding * 2));
+    }
+
+    private static Rect GetMusicInfoLyricsFullClipRect()
+    {
+        return new Rect(
+            -MusicInfoLyricsShadowPadding,
+            -MusicInfoLyricsShadowPadding,
+            MusicInfoLyricsPanelWidth + (MusicInfoLyricsShadowPadding * 2),
+            MusicInfoLyricsPanelHeight + (MusicInfoLyricsShadowPadding * 2));
+    }
+
+    private RectangleGeometry PrepareMusicInfoLyricsRevealClip(Rect initialRect)
+    {
+        if (MusicInfoLyricsPanel.Clip is RectangleGeometry clip && !clip.IsFrozen)
+        {
+            var currentRect = clip.Rect;
+            clip.BeginAnimation(RectangleGeometry.RectProperty, null);
+            clip.Rect = currentRect;
+            return clip;
+        }
+
+        var revealClip = new RectangleGeometry(initialRect);
+        MusicInfoLyricsPanel.Clip = revealClip;
+        return revealClip;
+    }
+
+    private static void FreezeMusicInfoLyricsRevealClip(RectangleGeometry clip, Rect rect)
+    {
+        clip.BeginAnimation(RectangleGeometry.RectProperty, null);
+        clip.Rect = rect;
+    }
+
+    private void ClearMusicInfoLyricsRevealClip()
+    {
+        if (MusicInfoLyricsPanel.Clip is RectangleGeometry clip && !clip.IsFrozen)
+        {
+            clip.BeginAnimation(RectangleGeometry.RectProperty, null);
+        }
+
+        MusicInfoLyricsPanel.Clip = null;
+    }
+
+    private void SetMusicInfoLyricsAnimatingLayer()
+    {
+        Panel.SetZIndex(MusicInfoLyricsPanel, 4);
+    }
+
+    private void SetMusicInfoLyricsRestingLayer()
+    {
+        // The outer-host clip gives both paths a clean edge reveal. Ordinary
+        // layouts remain literally below the sheet; only narrow fallback rests
+        // above it so the translated pane remains usable.
+        Panel.SetZIndex(MusicInfoLyricsPanel, _musicInfoLyricsRestingTranslateX < -0.5 ? 7 : 4);
     }
 
     private (double WindowLeft, double PanelTranslateX) CalculateMusicInfoLyricsPlacement(
@@ -4588,10 +4885,9 @@ public partial class MainWindow : Window
         var targetLeft = preserveWindowLeft
             ? Left
             : Math.Clamp(Left, workArea.Left, maxLeft);
-        const double sidecarShadowPadding = 17;
         var panelRight = MusicInfoLyricsPanelLeft
             + MusicInfoLyricsPanelWidth
-            + sidecarShadowPadding;
+            + MusicInfoLyricsShadowPadding;
         var panelTranslateX = Math.Min(
             0,
             (workArea.Right - targetLeft - (panelRight * _musicInfoScale))
@@ -4656,27 +4952,39 @@ public partial class MainWindow : Window
 
         var duration = TimeSpan.FromMilliseconds(MusicInfoPanel.InformationShellFadeDurationMilliseconds);
         var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var concealClip = PrepareMusicInfoLyricsRevealClip(
+            GetMusicInfoLyricsFullClipRect());
+        if (_musicInfoLyricsRestingTranslateX < -0.5)
+        {
+            Panel.SetZIndex(MusicInfoLyricsPanel, 7);
+        }
+        else
+        {
+            SetMusicInfoLyricsAnimatingLayer();
+        }
         var fade = new DoubleAnimation(0, duration) { EasingFunction = easing };
         fade.Completed += (_, _) =>
         {
             if (generation == _musicInfoLyricsTransitionGeneration && !_isMusicInfoLyricsVisible)
             {
+                ClearMusicInfoLyricsRevealClip();
                 MusicInfoLyricsPanel.Visibility = Visibility.Collapsed;
                 _isMusicInfoLyricsTransitioning = false;
             }
         };
         MusicInfoLyricsPanel.BeginAnimation(OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
-        MusicInfoLyricsPanelScale.BeginAnimation(
-            ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(0.985, duration) { EasingFunction = easing },
-            HandoffBehavior.SnapshotAndReplace);
-        MusicInfoLyricsPanelScale.BeginAnimation(
-            ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(0.985, duration) { EasingFunction = easing },
+        concealClip.BeginAnimation(
+            RectangleGeometry.RectProperty,
+            new RectAnimation
+            {
+                To = GetMusicInfoLyricsCollapsedClipRect(),
+                Duration = duration,
+                EasingFunction = easing
+            },
             HandoffBehavior.SnapshotAndReplace);
         MusicInfoLyricsPanelTranslate.BeginAnimation(
             TranslateTransform.XProperty,
-            new DoubleAnimation(_musicInfoLyricsRestingTranslateX - 18, duration) { EasingFunction = easing },
+            new DoubleAnimation(GetMusicInfoLyricsTuckedTranslateX(), duration) { EasingFunction = easing },
             HandoffBehavior.SnapshotAndReplace);
     }
 
@@ -4692,10 +5000,12 @@ public partial class MainWindow : Window
         MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
         MusicInfoLyricsPanelScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         MusicInfoLyricsPanelTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        ClearMusicInfoLyricsRevealClip();
         MusicInfoLyricsPanel.Opacity = 0;
-        MusicInfoLyricsPanelScale.ScaleX = 0.985;
-        MusicInfoLyricsPanelScale.ScaleY = 0.985;
-        MusicInfoLyricsPanelTranslate.X = -22;
+        MusicInfoLyricsPanelScale.ScaleX = 1;
+        MusicInfoLyricsPanelScale.ScaleY = 1;
+        MusicInfoLyricsPanelTranslate.X = MusicInfoLyricsTuckedTranslateX;
+        Panel.SetZIndex(MusicInfoLyricsPanel, 4);
         MusicInfoLyricsPanel.IsHitTestVisible = false;
         MusicInfoLyricsPanel.Visibility = Visibility.Collapsed;
         CompactLyricsButton.ToolTip = "Lyrics";
@@ -5373,6 +5683,10 @@ public partial class MainWindow : Window
                     FinalizeMusicInfoWindowLeft(placement.WindowLeft);
                     _musicInfoLyricsWindowLeftWhenOpen = placement.WindowLeft;
                     _musicInfoLyricsRestingTranslateX = placement.PanelTranslateX;
+                    FreezeMusicInfoLyricsRevealClip(
+                        PrepareMusicInfoLyricsRevealClip(GetMusicInfoLyricsFullClipRect()),
+                        GetMusicInfoLyricsFullClipRect());
+                    SetMusicInfoLyricsRestingLayer();
                     MusicInfoLyricsPanelTranslate.BeginAnimation(TranslateTransform.XProperty, null);
                     MusicInfoLyricsPanelTranslate.X = _musicInfoLyricsRestingTranslateX;
                 }
@@ -7367,14 +7681,13 @@ public partial class MainWindow : Window
             UnionRoundedRegion(combinedRegion, new Rect(346, 88, 372, 104), 19, scaleX, scaleY);
             if (MusicInfoLyricsPanel.Visibility == Visibility.Visible || _isMusicInfoLyricsTransitioning)
             {
-                const double shadowPadding = 17;
                 UnionRoundedRegion(
                     combinedRegion,
                     new Rect(
-                        MusicInfoLyricsPanelLeft - shadowPadding,
-                        MusicInfoLyricsPanelTop - shadowPadding,
-                        MusicInfoLyricsPanelWidth + (shadowPadding * 2),
-                        MusicInfoLyricsPanelHeight + (shadowPadding * 2)),
+                        MusicInfoLyricsPanelLeft - MusicInfoLyricsShadowPadding,
+                        MusicInfoLyricsPanelTop - MusicInfoLyricsShadowPadding,
+                        MusicInfoLyricsPanelWidth + (MusicInfoLyricsShadowPadding * 2),
+                        MusicInfoLyricsPanelHeight + (MusicInfoLyricsShadowPadding * 2)),
                     17,
                     scaleX,
                     scaleY);

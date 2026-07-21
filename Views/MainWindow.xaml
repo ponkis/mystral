@@ -409,41 +409,42 @@
                                  VerticalAlignment="Top"
                                  Visibility="Collapsed"
                                  Panel.ZIndex="5" />
-        <Border x:Name="MusicInfoLyricsPanel"
-                Width="252"
-                Height="342"
-                Margin="710,142,0,0"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                CornerRadius="9"
-                BorderThickness="1"
-                Visibility="Collapsed"
-                Opacity="0"
-                IsHitTestVisible="False"
-                Effect="{StaticResource CardShadow}"
-                RenderTransformOrigin="0,0.5"
-                Panel.ZIndex="7">
-            <Border.BorderBrush>
-                <SolidColorBrush x:Name="MusicInfoLyricsBorderBrush" Color="#9BCFE2E8" />
-            </Border.BorderBrush>
-            <Border.Background>
-                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                    <GradientStop x:Name="MusicInfoLyricsTopStop" Color="#A835434A" Offset="0" />
-                    <GradientStop x:Name="MusicInfoLyricsUpperStop" Color="#98263035" Offset="0.30" />
-                    <GradientStop x:Name="MusicInfoLyricsLowerStop" Color="#A8151B1F" Offset="0.67" />
-                    <GradientStop x:Name="MusicInfoLyricsBottomStop" Color="#B50C1114" Offset="1" />
-                </LinearGradientBrush>
-            </Border.Background>
-            <Border.RenderTransform>
+        <Grid x:Name="MusicInfoLyricsPanel"
+              Width="252"
+              Height="342"
+              Margin="710,142,0,0"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Top"
+              Visibility="Collapsed"
+              Opacity="0"
+              IsHitTestVisible="False"
+              RenderTransformOrigin="0,0.5"
+              Panel.ZIndex="4">
+            <Grid.RenderTransform>
                 <TransformGroup>
-                    <ScaleTransform x:Name="MusicInfoLyricsPanelScale" ScaleX="0.985" ScaleY="0.985" />
-                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-22" />
+                    <ScaleTransform x:Name="MusicInfoLyricsPanelScale" ScaleX="1" ScaleY="1" />
+                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-259" />
                 </TransformGroup>
-            </Border.RenderTransform>
+            </Grid.RenderTransform>
 
-            <Grid x:Name="MusicInfoLyricsSurface"
-                  ClipToBounds="True"
-                  SizeChanged="RoundedSurface_SizeChanged">
+            <Border CornerRadius="9"
+                    BorderThickness="1"
+                    Effect="{StaticResource CardShadow}">
+                <Border.BorderBrush>
+                    <SolidColorBrush x:Name="MusicInfoLyricsBorderBrush" Color="#9BCFE2E8" />
+                </Border.BorderBrush>
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop x:Name="MusicInfoLyricsTopStop" Color="#A835434A" Offset="0" />
+                        <GradientStop x:Name="MusicInfoLyricsUpperStop" Color="#98263035" Offset="0.30" />
+                        <GradientStop x:Name="MusicInfoLyricsLowerStop" Color="#A8151B1F" Offset="0.67" />
+                        <GradientStop x:Name="MusicInfoLyricsBottomStop" Color="#B50C1114" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+
+                <Grid x:Name="MusicInfoLyricsSurface"
+                      ClipToBounds="True"
+                      SizeChanged="RoundedSurface_SizeChanged">
                 <Image x:Name="MusicInfoLyricsBackdropImage"
                        Stretch="UniformToFill"
                        Opacity="0.13"
@@ -494,7 +495,7 @@
                                   CanContentScroll="False"
                                   PanningMode="VerticalOnly">
                         <StackPanel x:Name="MusicInfoLyricsStackPanel"
-                                    Margin="0,110,0,110"
+                                    Margin="0,10,0,110"
                                     VerticalAlignment="Top" />
                     </ScrollViewer>
 
@@ -544,8 +545,9 @@
                         </Grid>
                     </Border>
                 </Grid>
-            </Grid>
-        </Border>
+                </Grid>
+            </Border>
+        </Grid>
         <Grid x:Name="MusicInfoTimelinePanel"
               Width="646"
               Height="30"

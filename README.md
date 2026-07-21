@@ -67,7 +67,9 @@ The playback timeline uses the media session's own update timestamp so Spotify
 and browser sessions do not rewind when Windows repeats a stale position.
 Progress and volume bars use their full hand-cursor surface for click-to-jump or
 dragging, with an immediate tooltip that lingers after release. Volume applies
-continuously; progress previews the target and commits the seek on release.
+continuously; progress previews the target and commits the seek on release. The
+tooltip remains anchored to the slider handle as playback advances and when a
+bar moves between player layouts.
 
 For Apple Music's Windows media session, lyric lookup separates a combined
 `Artist — Album` value when the session omits its album field, and uses the
@@ -103,12 +105,13 @@ the open space directly beneath the details without a surrounding panel,
 divider, or a large empty footer. Equal 12-DIP spacing separates the timeline
 from both the information box and the rounded lower edge. The pill follows the selected information page's glass
 tint, including an available artist portrait. While information remains open,
-the Lyrics control slides a narrow glass pane out from its right side without
+the Lyrics control slides a narrow glass pane out from beneath its right side without
 changing the selected Track, Artist, or Album page. The attached pane follows
 synchronized lines, supports scrolling and seekable line clicks, and retracts
-with the reverse slide-and-fade motion. The window controls remain visible
-and move into a
-squared-bottom tab whose bottom edge sits on the top border rather than
+under the sheet with the reverse slide. Its lines begin at the same compact top
+inset as regular lyrics, the active line uses the album track-list glow, and the
+last line moves up so its song details remain visible below it. The window
+controls remain visible and move into a squared-bottom tab whose bottom edge sits on the top border rather than
 overlapping the sheet. The tab samples the sheet's rendered, cover-derived glass
 material and reuses its border instead of drawing a separate solid tint, and its button
 highlights remain joined to the strip with rounding only at the two outer top
