@@ -265,6 +265,7 @@ public partial class MainWindow : Window
     private const double BurnDiscPullOffsetPerDip =
         (BurnDiscEjectedOffsetY - BurnDiscMaxPulledOffsetY) / BurnDiscMaxPullDistance;
     private const double LyricsStackVerticalPadding = 132;
+    private const double LyricsActiveRowTopInset = 12;
     private const double LyricsEndTailSpacerHeight = 180;
     private static readonly TimeSpan LyricWaitMinimumGap = TimeSpan.FromMilliseconds(4200);
     private static readonly TimeSpan LyricWaitAfterLineDelay = TimeSpan.FromMilliseconds(1300);
@@ -4097,6 +4098,12 @@ public partial class MainWindow : Window
             var target = isFullscreen
                 ? elementTop + (elementExtent * 0.5) - artCenterY
                 : LyricsStackVerticalPadding + elementTop + (elementExtent * 0.5) - (scrollViewer.ViewportHeight * 0.43);
+            if (!isFullscreen)
+            {
+                var maximumOffsetForTopInset =
+                    LyricsStackPanel.Margin.Top + elementTop - LyricsActiveRowTopInset;
+                target = Math.Min(target, maximumOffsetForTopInset);
+            }
             AnimateLyricsScrollTo(Math.Clamp(target, 0, max), isFullscreen);
         }
         catch (InvalidOperationException)
@@ -4640,16 +4647,22 @@ public partial class MainWindow : Window
             }
 
             _isLyricsMode = true;
+            LyricsPanel.BeginAnimation(OpacityProperty, null);
+            LyricsPanelScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            LyricsPanelScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            LyricsPanel.Opacity = 0;
+            LyricsPanelScale.ScaleX = 0.97;
+            LyricsPanelScale.ScaleY = 0.97;
+            LyricsPanel.Visibility = Visibility.Visible;
+            RenderLyricsState();
+            LyricsPanel.UpdateLayout();
+            LyricsPanel.Opacity = 0.18;
             SetCompactChromeVisible(false);
             UpdateCompactBlurredArtVisibility();
             CollapseExpandedButton.Visibility = Visibility.Collapsed;
-            LyricsPanel.Visibility = Visibility.Visible;
             LyricsPanel.IsHitTestVisible = true;
-            LyricsPanelScale.ScaleX = 0.97;
-            LyricsPanelScale.ScaleY = 0.97;
             SetWindowSize(LyricsWidth, LyricsHeight);
             AnimateLyricsPanel(true);
-            RenderLyricsState();
             return;
         }
 

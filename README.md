@@ -90,7 +90,9 @@ Synchronized lyric lines become seek targets when the active media session
 allows seeking; plain lyrics remain read-only text. In the regular,
 information-side, and fullscreen views, the active synchronized line uses the
 same three-layer `cd_thing.png` glow as the playing row in an album track list;
-inactive and plain lines remain unframed. When a looping track restarts after
+inactive and plain lines remain unframed. Wrapped active lines stay below the
+regular lyrics header instead of clipping against the top of the viewport.
+When a looping track restarts after
 reaching its end, lyric browsing resets in all three views. Lyrics mode sits on the player's translucent glass surface and
 uses one cover-derived backdrop plus its header artwork, while a fixed custom
 theme continues to hide the backdrop.
