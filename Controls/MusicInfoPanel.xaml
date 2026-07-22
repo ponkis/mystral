@@ -1,0 +1,520 @@
+<UserControl x:Class="Mystral.Controls.MusicInfoPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="720"
+             Height="520"
+             Background="Transparent"
+             Cursor="Arrow"
+             Focusable="False"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True"
+             Loaded="UserControl_Loaded">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/PresentationFramework.Aero;component/themes/Aero.NormalColor.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <DropShadowEffect x:Key="InfoShellShadow"
+                              BlurRadius="14"
+                              ShadowDepth="0"
+                              Opacity="0.48"
+                              Color="#050708" />
+            <DropShadowEffect x:Key="HeroShadow"
+                              BlurRadius="14"
+                              ShadowDepth="2"
+                              Opacity="0.58"
+                              Color="#040506" />
+            <DropShadowEffect x:Key="InfoTextShadow"
+                              BlurRadius="2"
+                              ShadowDepth="1"
+                              Opacity="0.48"
+                              Color="#000000" />
+
+            <Style x:Key="InfoTabItemStyle" TargetType="TabItem">
+                <Setter Property="Width" Value="86" />
+                <Setter Property="Height" Value="32" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="Padding" Value="16,5" />
+                <Setter Property="Foreground" Value="#C8D7DBDD" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Cursor" Value="Arrow" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TabItem">
+                            <Border x:Name="TabChrome"
+                                    Padding="{TemplateBinding Padding}"
+                                    CornerRadius="0"
+                                    Background="#26000000"
+                                    BorderBrush="#62DDEBF0"
+                                    BorderThickness="1,1,0,1"
+                                    Cursor="Hand">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  ContentSource="Header" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="TabChrome" Property="Background" Value="#28FFFFFF" />
+                                    <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="TabChrome" Property="Background" Value="#58101619" />
+                                    <Setter TargetName="TabChrome" Property="BorderBrush" Value="#62DDEBF0" />
+                                    <Setter TargetName="TabChrome" Property="BorderThickness" Value="1,1,0,0" />
+                                    <Setter Property="Foreground" Value="#FFFFFFFF" />
+                                    <Setter Property="Panel.ZIndex" Value="2" />
+                                </Trigger>
+                                <Trigger Property="Tag" Value="LastInfoTab">
+                                    <Setter TargetName="TabChrome" Property="BorderThickness" Value="1" />
+                                </Trigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsSelected" Value="True" />
+                                        <Condition Property="Tag" Value="LastInfoTab" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="TabChrome" Property="BorderThickness" Value="1,1,1,0" />
+                                </MultiTrigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="InfoTabControlStyle" TargetType="TabControl">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TabControl">
+                            <Grid KeyboardNavigation.TabNavigation="Local">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="32" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Panel.ZIndex="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                    </Grid.ColumnDefinitions>
+                                    <TabPanel Grid.Column="1"
+                                              IsItemsHost="True"
+                                              Panel.ZIndex="1"
+                                              KeyboardNavigation.TabIndex="1" />
+                                    <Border Grid.Column="2"
+                                            Height="1"
+                                            VerticalAlignment="Bottom"
+                                            Background="#62DDEBF0"
+                                            IsHitTestVisible="False"
+                                            Panel.ZIndex="2" />
+                                </Grid>
+                                <Border x:Name="InfoContentBorder"
+                                        Grid.Row="1"
+                                        Margin="12,0,12,12"
+                                        CornerRadius="0,0,7,7"
+                                        BorderBrush="#62DDEBF0"
+                                        BorderThickness="1,0,1,1"
+                                        Background="#58101619"
+                                        Cursor="Arrow"
+                                        ClipToBounds="True">
+                                    <ContentPresenter x:Name="PART_SelectedContentHost"
+                                                      Margin="0"
+                                                      Cursor="Arrow"
+                                                      ContentSource="SelectedContent" />
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="InfoScrollViewerStyle" TargetType="ScrollViewer">
+                <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+                <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+                <Setter Property="PanningMode" Value="VerticalOnly" />
+                <Setter Property="Padding" Value="17,10,14,9" />
+                <Setter Property="Background" Value="Transparent" />
+            </Style>
+
+            <Style x:Key="InfoStatusTextStyle" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,10,0,12" />
+                <Setter Property="MaxWidth" Value="390" />
+                <Setter Property="Foreground" Value="#D7E2E4E4" />
+                <Setter Property="TextAlignment" Value="Center" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Effect" Value="{StaticResource InfoTextShadow}" />
+            </Style>
+
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Canvas x:Name="ExtensionSurface"
+            Width="720"
+            Height="520"
+            ClipToBounds="False">
+        <Border x:Name="InfoShell"
+                Canvas.Left="38"
+                Canvas.Top="116"
+                Width="670"
+                Height="394"
+                CornerRadius="9"
+                BorderBrush="#9BCFE2E8"
+                BorderThickness="1,0,1,1"
+                Background="#20232B30"
+                Effect="{StaticResource InfoShellShadow}"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="InfoShellScale" ScaleX="0.985" ScaleY="0.985" />
+            </Border.RenderTransform>
+            <Grid x:Name="InfoShellSurface"
+                  ClipToBounds="True"
+                  SizeChanged="RoundedSurface_SizeChanged">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop x:Name="ShellTopStop" Color="#A835434A" Offset="0" />
+                        <GradientStop x:Name="ShellUpperStop" Color="#98263035" Offset="0.30" />
+                        <GradientStop x:Name="ShellLowerStop" Color="#A8151B1F" Offset="0.67" />
+                        <GradientStop x:Name="ShellBottomStop" Color="#B50C1114" Offset="1" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+
+                <Border x:Name="InfoShellTopBorder"
+                        Width="329"
+                        Height="1"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        Background="#9BCFE2E8"
+                        IsHitTestVisible="False" />
+                <Border x:Name="InfoShellTopRightBorder"
+                        Width="11"
+                        Height="1"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Background="#9BCFE2E8"
+                        IsHitTestVisible="False" />
+
+                <Image x:Name="BlurredCoverImage"
+                       Stretch="UniformToFill"
+                       Opacity="0.16"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="LowQuality">
+                    <Image.Effect>
+                        <BlurEffect Radius="28" KernelType="Gaussian" />
+                    </Image.Effect>
+                </Image>
+
+                <Border Opacity="0.42" IsHitTestVisible="False">
+                    <Border.Background>
+                        <RadialGradientBrush Center="0.10,0.05"
+                                             GradientOrigin="0.10,0.05"
+                                             RadiusX="0.92"
+                                             RadiusY="0.88">
+                            <GradientStop x:Name="ShellGlowStop" Color="#70EAF7FA" Offset="0" />
+                            <GradientStop Color="#00000000" Offset="0.72" />
+                        </RadialGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <Rectangle Height="66"
+                           VerticalAlignment="Top"
+                           Opacity="0.32"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#C9FFFFFF" Offset="0" />
+                            <GradientStop Color="#24FFFFFF" Offset="0.58" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border Margin="1"
+                        CornerRadius="8"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1,0,1,1"
+                        IsHitTestVisible="False" />
+                <Border Width="328"
+                        Height="1"
+                        Margin="1,1,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
+                        Background="#30FFFFFF"
+                        IsHitTestVisible="False" />
+                <Border Width="10"
+                        Height="1"
+                        Margin="0,1,1,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Background="#30FFFFFF"
+                        IsHitTestVisible="False" />
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <!-- Keep the lifted artwork/header above details and reserve the timeline footer. -->
+                        <RowDefinition Height="90" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="30" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0"
+                          Width="170"
+                          Margin="150,16,0,0"
+                          HorizontalAlignment="Left">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="HeaderTitleText"
+                                   Foreground="#FCFEFC"
+                                   FontSize="18"
+                                   FontWeight="Bold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Effect="{StaticResource InfoTextShadow}"
+                                   Text="Music information" />
+                        <StackPanel Grid.Row="1" Orientation="Horizontal">
+                            <TextBlock x:Name="HeaderArtistText"
+                                       MaxWidth="170"
+                                       Margin="0,1,0,0"
+                                       Foreground="#D3DFDB"
+                                       FontSize="12.5"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Effect="{StaticResource InfoTextShadow}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TabControl x:Name="InfoTabs"
+                                Grid.Row="1"
+                                Style="{StaticResource InfoTabControlStyle}"
+                                SelectionChanged="InfoTabs_SelectionChanged">
+                        <TabItem x:Name="TrackTab"
+                                 Header="Track"
+                                 Style="{StaticResource InfoTabItemStyle}">
+                            <Grid Background="Transparent">
+                                <ScrollViewer x:Name="TrackScrollViewer"
+                                              Style="{StaticResource InfoScrollViewerStyle}">
+                                    <StackPanel x:Name="TrackDetailsPanel" />
+                                </ScrollViewer>
+                                <StackPanel x:Name="TrackStatusPanel"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <ProgressBar x:Name="TrackProgressBar"
+                                                 Width="180"
+                                                 Height="14"
+                                                 IsIndeterminate="True" />
+                                    <TextBlock x:Name="TrackStatusText"
+                                               Style="{StaticResource InfoStatusTextStyle}"
+                                               Text="Finding this track..." />
+                                    <Button x:Name="TrackRetryButton"
+                                            Width="86"
+                                            Content="Try again"
+                                            Visibility="Collapsed"
+                                            Click="TrackRetryButton_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </TabItem>
+
+                        <TabItem x:Name="ArtistTab"
+                                 Header="Artist"
+                                 Style="{StaticResource InfoTabItemStyle}">
+                            <Grid Background="Transparent">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <Border x:Name="ArtistSelectorPanel"
+                                        Grid.Row="0"
+                                        Padding="16,8"
+                                        Background="#2BFFFFFF"
+                                        BorderBrush="#3EFFFFFF"
+                                        BorderThickness="0,0,0,1"
+                                        Visibility="Collapsed">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="10" />
+                                            <ColumnDefinition Width="230" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock VerticalAlignment="Center"
+                                                   Foreground="#B8C7C9C9"
+                                                   Text="Credited artist" />
+                                        <ComboBox x:Name="ArtistSelector"
+                                                  Grid.Column="2"
+                                                  DisplayMemberPath="Name"
+                                                  SelectionChanged="ArtistSelector_SelectionChanged" />
+                                    </Grid>
+                                </Border>
+                                <Grid Grid.Row="1">
+                                    <ScrollViewer x:Name="ArtistScrollViewer"
+                                                  Style="{StaticResource InfoScrollViewerStyle}">
+                                        <StackPanel x:Name="ArtistDetailsPanel" />
+                                    </ScrollViewer>
+                                    <StackPanel x:Name="ArtistStatusPanel"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center">
+                                        <ProgressBar x:Name="ArtistProgressBar"
+                                                     Width="180"
+                                                     Height="14"
+                                                     IsIndeterminate="True"
+                                                     Visibility="Collapsed" />
+                                        <TextBlock x:Name="ArtistStatusText"
+                                                   Style="{StaticResource InfoStatusTextStyle}"
+                                                   Text="Finding the artist..." />
+                                        <Button x:Name="ArtistRetryButton"
+                                                Width="86"
+                                                Content="Try again"
+                                                Visibility="Collapsed"
+                                                Click="ArtistRetryButton_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </TabItem>
+
+                        <TabItem x:Name="AlbumTab"
+                                  Header="Album"
+                                  Tag="LastInfoTab"
+                                  Style="{StaticResource InfoTabItemStyle}">
+                            <Grid Background="Transparent">
+                                <ScrollViewer x:Name="AlbumScrollViewer"
+                                              Style="{StaticResource InfoScrollViewerStyle}">
+                                    <StackPanel x:Name="AlbumDetailsPanel" />
+                                </ScrollViewer>
+                                <StackPanel x:Name="AlbumStatusPanel"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center">
+                                    <ProgressBar x:Name="AlbumProgressBar"
+                                                 Width="180"
+                                                 Height="14"
+                                                 IsIndeterminate="True"
+                                                 Visibility="Collapsed" />
+                                    <TextBlock x:Name="AlbumStatusText"
+                                               Style="{StaticResource InfoStatusTextStyle}"
+                                               Text="Finding the album..." />
+                                    <Button x:Name="AlbumRetryButton"
+                                            Width="86"
+                                            Content="Try again"
+                                            Visibility="Collapsed"
+                                            Click="AlbumRetryButton_Click" />
+                                </StackPanel>
+                            </Grid>
+                        </TabItem>
+                    </TabControl>
+
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border x:Name="HeroArtworkFrame"
+                Canvas.Left="18"
+                Canvas.Top="28"
+                Width="160"
+                Height="160"
+                CornerRadius="10"
+                BorderBrush="#D7EFF7F7"
+                BorderThickness="1"
+                Background="#E51A2125"
+                ClipToBounds="False"
+                Effect="{StaticResource HeroShadow}"
+                Opacity="0"
+                RenderTransformOrigin="0,0">
+            <Border.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="HeroArtworkScale" ScaleX="1" ScaleY="1" />
+                    <TranslateTransform x:Name="HeroArtworkTranslate" />
+                </TransformGroup>
+            </Border.RenderTransform>
+            <Border x:Name="HeroArtworkClip"
+                    Margin="1"
+                    CornerRadius="8"
+                    ClipToBounds="True"
+                    SizeChanged="ArtworkSurface_SizeChanged">
+                <Grid>
+                    <Grid.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#E8EFF8F9" Offset="0" />
+                            <GradientStop Color="#8A6F8189" Offset="0.46" />
+                            <GradientStop Color="#D0181E22" Offset="1" />
+                        </LinearGradientBrush>
+                    </Grid.Background>
+                <Image x:Name="HeroArtworkPlaceholder"
+                       Source="pack://siteoforigin:,,,/Resources/Images/unknown.png"
+                       Stretch="UniformToFill"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <Image x:Name="HeroArtworkImage"
+                       Stretch="UniformToFill"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <Image x:Name="HeroArtVideoImage"
+                       Stretch="UniformToFill"
+                       Opacity="0"
+                       IsHitTestVisible="False" />
+                <Image x:Name="HeroArtFrozenFrameImage"
+                       Stretch="UniformToFill"
+                       Opacity="0"
+                       IsHitTestVisible="False" />
+
+                <Grid x:Name="ArtistIdentityPanel" Visibility="Collapsed">
+                    <Border>
+                        <Border.Background>
+                            <RadialGradientBrush Center="0.35,0.28"
+                                                 GradientOrigin="0.35,0.28"
+                                                 RadiusX="0.86"
+                                                 RadiusY="0.86">
+                                <GradientStop x:Name="ArtistIdentityGlowStop" Color="#D5AFDDE8" Offset="0" />
+                                <GradientStop x:Name="ArtistIdentityBaseStop" Color="#F02A3840" Offset="1" />
+                            </RadialGradientBrush>
+                        </Border.Background>
+                    </Border>
+                    <Image Width="92"
+                           Height="92"
+                           Margin="0,4,0,22"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           Source="pack://siteoforigin:,,,/Resources/user.ico"
+                           Opacity="0.24"
+                           RenderOptions.BitmapScalingMode="HighQuality" />
+                    <TextBlock x:Name="ArtistInitialsText"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               Margin="0,0,0,14"
+                               Foreground="#FFFFFFFF"
+                               FontSize="42"
+                               FontWeight="Light"
+                               Effect="{StaticResource InfoTextShadow}"
+                               Text="?" />
+                    <Border Height="39"
+                            VerticalAlignment="Bottom"
+                            Background="#76000000">
+                        <TextBlock x:Name="ArtistIdentityNameText"
+                                   Margin="9,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="#F5F8F5"
+                                   FontSize="11.5"
+                                   FontWeight="SemiBold"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"
+                                   Effect="{StaticResource InfoTextShadow}" />
+                    </Border>
+                </Grid>
+
+                <Rectangle Height="62"
+                           VerticalAlignment="Top"
+                           Opacity="0.36"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#FFFFFFFF" Offset="0" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+                </Grid>
+            </Border>
+        </Border>
+    </Canvas>
+</UserControl>

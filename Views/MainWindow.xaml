@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:Mystral.Controls"
         mc:Ignorable="d"
         Title="Mystral"
         Icon="pack://siteoforigin:,,,/Resources/ico.ico"
@@ -10,7 +11,7 @@
         Height="172"
         MinWidth="218"
         MinHeight="144"
-        MaxWidth="430"
+        MaxWidth="980"
         MaxHeight="660"
         WindowStyle="None"
         ResizeMode="NoResize"
@@ -35,6 +36,12 @@
                           ShadowDepth="0"
                           Opacity="0.45"
                           Color="#070A0C" />
+
+        <DropShadowEffect x:Key="MusicInfoDrawerShadow"
+                          BlurRadius="14"
+                          ShadowDepth="0"
+                          Opacity="0.48"
+                          Color="#050708" />
 
         <DropShadowEffect x:Key="TextShadow"
                           BlurRadius="2"
@@ -63,6 +70,12 @@
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="Tag" Value="ChromeLeftEdge">
+                                <Setter TargetName="ButtonChrome" Property="CornerRadius" Value="8,0,0,0" />
+                            </Trigger>
+                            <Trigger Property="Tag" Value="ChromeRightEdge">
+                                <Setter TargetName="ButtonChrome" Property="CornerRadius" Value="0,8,0,0" />
+                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonChrome" Property="Background" Value="#3CFFFFFF" />
                             </Trigger>
@@ -394,11 +407,173 @@
 
     <Grid x:Name="WindowSurface"
           ClipToBounds="False">
-    <Border x:Name="RootCard"
+        <Grid.LayoutTransform>
+            <ScaleTransform x:Name="MusicInfoSurfaceScale" ScaleX="1" ScaleY="1" />
+        </Grid.LayoutTransform>
+        <controls:MusicInfoPanel x:Name="MusicInfoPanel"
+                                 HorizontalAlignment="Left"
+                                 VerticalAlignment="Top"
+                                 Visibility="Collapsed"
+                                 Panel.ZIndex="5" />
+        <Grid x:Name="MusicInfoLyricsPanel"
+              Width="260"
+              Height="342"
+              Margin="700,142,0,0"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Top"
+              Visibility="Collapsed"
+              Opacity="0"
+              IsHitTestVisible="False"
+              RenderTransformOrigin="0,0.5"
+              Panel.ZIndex="4">
+            <Grid.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="MusicInfoLyricsPanelScale" ScaleX="1" ScaleY="1" />
+                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-252" />
+                </TransformGroup>
+            </Grid.RenderTransform>
+
+            <Border x:Name="MusicInfoLyricsChrome"
+                    CornerRadius="0,9,9,0"
+                    BorderThickness="0,1,1,1"
+                    Effect="{StaticResource MusicInfoDrawerShadow}">
+                <Border.BorderBrush>
+                    <SolidColorBrush x:Name="MusicInfoLyricsBorderBrush" Color="#9BCFE2E8" />
+                </Border.BorderBrush>
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop x:Name="MusicInfoLyricsTopStop" Color="#A835434A" Offset="0" />
+                        <GradientStop x:Name="MusicInfoLyricsUpperStop" Color="#98263035" Offset="0.30" />
+                        <GradientStop x:Name="MusicInfoLyricsLowerStop" Color="#A8151B1F" Offset="0.67" />
+                        <GradientStop x:Name="MusicInfoLyricsBottomStop" Color="#B50C1114" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+
+                <Grid x:Name="MusicInfoLyricsSurface"
+                      ClipToBounds="True"
+                      SizeChanged="RoundedSurface_SizeChanged">
+                <Image x:Name="MusicInfoLyricsBackdropImage"
+                       Stretch="UniformToFill"
+                       Opacity="0.13"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="LowQuality">
+                    <Image.Effect>
+                        <BlurEffect Radius="24" KernelType="Gaussian" />
+                    </Image.Effect>
+                </Image>
+
+                <Border Opacity="0.40" IsHitTestVisible="False">
+                    <Border.Background>
+                        <RadialGradientBrush Center="0.12,0.04"
+                                             GradientOrigin="0.12,0.04"
+                                             RadiusX="0.92"
+                                             RadiusY="0.88">
+                            <GradientStop x:Name="MusicInfoLyricsGlowStop" Color="#70EAF7FA" Offset="0" />
+                            <GradientStop Color="#00000000" Offset="0.72" />
+                        </RadialGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <Rectangle Height="58"
+                           VerticalAlignment="Top"
+                           Opacity="0.28"
+                           IsHitTestVisible="False">
+                    <Rectangle.Fill>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#C9FFFFFF" Offset="0" />
+                            <GradientStop Color="#20FFFFFF" Offset="0.58" />
+                            <GradientStop Color="#00FFFFFF" Offset="1" />
+                        </LinearGradientBrush>
+                    </Rectangle.Fill>
+                </Rectangle>
+
+                <Border x:Name="MusicInfoLyricsInnerBorder"
+                        Margin="1"
+                        CornerRadius="0,8,8,0"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="0,1,1,1"
+                        IsHitTestVisible="False" />
+
+                <Grid Margin="24,12,14,12"
+                      ClipToBounds="True"
+                      PreviewMouseWheel="MusicInfoLyricsViewport_PreviewMouseWheel">
+                    <ScrollViewer x:Name="MusicInfoLyricsScrollViewer"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Hidden"
+                                  CanContentScroll="False"
+                                  PanningMode="VerticalOnly">
+                        <StackPanel x:Name="MusicInfoLyricsStackPanel"
+                                    Margin="0,10,0,110"
+                                    VerticalAlignment="Top" />
+                    </ScrollViewer>
+
+                    <Border x:Name="MusicInfoLyricsMessagePanel"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Center"
+                            Padding="12,13"
+                            CornerRadius="7"
+                            BorderBrush="#34FFFFFF"
+                            BorderThickness="1"
+                            Background="#26000000">
+                        <Grid HorizontalAlignment="Center" MinHeight="28">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Image x:Name="MusicInfoLyricsLoadingIcon"
+                                   Width="28"
+                                   Height="28"
+                                   VerticalAlignment="Center"
+                                   Stretch="Uniform"
+                                   Visibility="Collapsed"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                            <Image x:Name="MusicInfoLyricsWarningIcon"
+                                   Width="16"
+                                   Height="16"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Stretch="None"
+                                   Source="pack://siteoforigin:,,,/Resources/Images/WarningIcon.png"
+                                   Visibility="Collapsed"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor" />
+
+                            <TextBlock x:Name="MusicInfoLyricsMessageText"
+                                       Grid.Column="2"
+                                       MaxWidth="174"
+                                       VerticalAlignment="Center"
+                                       Foreground="#E6F3EB"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       Effect="{StaticResource TextShadow}"
+                                       Text="Looking for lyrics" />
+                        </Grid>
+                    </Border>
+                </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+        <Grid x:Name="MusicInfoTimelinePanel"
+              Width="646"
+              Height="30"
+              Margin="50,480,0,0"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Top"
+              Visibility="Collapsed"
+              Panel.ZIndex="8">
+            <Grid x:Name="MusicInfoTimelineHost"
+                  Margin="14,0"
+                  VerticalAlignment="Top" />
+        </Grid>
+        <Border x:Name="RootCard"
             CornerRadius="9"
             BorderBrush="#A9E2EEF2"
             BorderThickness="1"
             Effect="{StaticResource CardShadow}"
+            Panel.ZIndex="10"
             RenderTransformOrigin="0.5,0.5"
             SizeChanged="RoundedSurface_SizeChanged">
         <Border.RenderTransform>
@@ -417,9 +592,9 @@
               ClipToBounds="True"
               SizeChanged="RoundedSurface_SizeChanged">
             <Grid.RowDefinitions>
-                <RowDefinition Height="25" />
-                <RowDefinition Height="88" />
-                <RowDefinition Height="*" />
+                <RowDefinition x:Name="CompactTitleRow" Height="25" />
+                <RowDefinition x:Name="CompactMediaRow" Height="88" />
+                <RowDefinition x:Name="CompactControlsRow" Height="*" />
             </Grid.RowDefinitions>
 
             <Grid.Background>
@@ -448,7 +623,8 @@
                 </Image.Effect>
             </Image>
 
-            <Border Grid.RowSpan="3"
+            <Border x:Name="CompactGlassGlowOverlay"
+                    Grid.RowSpan="3"
                     Opacity="0.20"
                     IsHitTestVisible="False">
                 <Border.Background>
@@ -463,7 +639,8 @@
                 </Border.Background>
             </Border>
 
-            <Rectangle Grid.RowSpan="3"
+            <Rectangle x:Name="CompactGlassGloss"
+                       Grid.RowSpan="3"
                        Height="66"
                        VerticalAlignment="Top"
                        Opacity="0.55">
@@ -488,11 +665,18 @@
                   Panel.ZIndex="100"
                   Margin="0"
                   MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
+                <Border x:Name="InfoTitleBarChrome"
+                        CornerRadius="8,8,0,0"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        IsHitTestVisible="False" />
                 <Grid x:Name="ChromeButtons">
                     <StackPanel HorizontalAlignment="Left"
                                 Orientation="Horizontal">
                         <Button x:Name="CloseButton"
                                 Style="{StaticResource ChromeButtonStyle}"
+                                Tag="ChromeLeftEdge"
                                 Click="CloseButton_Click"
                                 ToolTip="Close">
                             <Path Width="11"
@@ -543,6 +727,7 @@
                         </Button>
                         <Button x:Name="FullscreenButton"
                                 Style="{StaticResource ChromeButtonStyle}"
+                                Tag="ChromeRightEdge"
                                 Click="FullscreenButton_Click"
                                 ToolTip="Fullscreen">
                             <Path x:Name="FullscreenButtonPath"
@@ -644,7 +829,8 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Column="2">
+                    <Grid x:Name="CompactMetadataGrid"
+                          Grid.Column="2">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
