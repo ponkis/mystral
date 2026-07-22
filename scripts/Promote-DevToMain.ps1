@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectFile = Join-Path $repoRoot "Mystral.csproj"
+$publicDocPaths = @("README.md", "SMOKE_TEST.md")
 
 function Invoke-Git {
     & git @args
@@ -29,7 +30,56 @@ try {
     Invoke-Git fetch $Remote
     Invoke-Git checkout $MainBranch
     Invoke-Git pull --ff-only $Remote $MainBranch
-    Invoke-Git merge --no-ff $DevBranch -m "Merge dev into main"
+
+    $publicDocs = @{}
+    foreach ($relativePath in $publicDocPaths) {
+        $fullPath = Join-Path $repoRoot $relativePath
+        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw "Public document $relativePath is missing from $MainBranch."
+        }
+
+        $publicDocs[$relativePath] = [System.IO.File]::ReadAllBytes($fullPath)
+    }
+
+    & git merge --no-ff --no-commit $DevBranch
+    $mergeExitCode = $LASTEXITCODE
+    if ($mergeExitCode -ne 0) {
+        $unmergedPaths = @(& git diff --name-only --diff-filter=U)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect merge conflicts."
+        }
+
+        $unexpectedConflicts = @(
+            $unmergedPaths | Where-Object { $_ -notin $publicDocPaths }
+        )
+        if ($unmergedPaths.Count -eq 0 -or $unexpectedConflicts.Count -gt 0) {
+            $details = if ($unexpectedConflicts.Count -gt 0) {
+                $unexpectedConflicts -join ", "
+            } else {
+                "unknown merge failure"
+            }
+            throw "Merge requires manual resolution: $details."
+        }
+    }
+
+    foreach ($relativePath in $publicDocPaths) {
+        [System.IO.File]::WriteAllBytes(
+            (Join-Path $repoRoot $relativePath),
+            $publicDocs[$relativePath])
+    }
+    Invoke-Git add "--" @publicDocPaths
+
+    $remainingConflicts = @(& git diff --name-only --diff-filter=U)
+    if ($LASTEXITCODE -ne 0 -or $remainingConflicts.Count -gt 0) {
+        throw "Merge still has unresolved conflicts."
+    }
+
+    $mergeHead = git rev-parse --verify -q MERGE_HEAD
+    if ($LASTEXITCODE -ne 0 -or -not $mergeHead) {
+        throw "Nothing new was merged from $DevBranch."
+    }
+
+    Invoke-Git commit -m "Merge dev into main"
     Invoke-Git push $Remote $MainBranch
 
     if ($Release) {

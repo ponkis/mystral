@@ -3967,7 +3967,6 @@ public partial class MainWindow : Window
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
         var visuals = isFullscreen ? _fullscreenLyricVisuals : _lyricVisuals;
         var isUserBrowsing = isFullscreen ? _isUserBrowsingFullscreenLyrics : _isUserBrowsingLyrics;
-        var shouldHidePreviousFinalLine = !isFullscreen && !isUserBrowsing && activeIndex == blocks.Count - 1;
 
         for (var i = 0; i < blocks.Count; i++)
         {
@@ -3976,7 +3975,7 @@ public partial class MainWindow : Window
             var isActive = i == activeIndex;
             var targetOpacity = isFullscreen
                 ? isActive ? 1.0 : isUserBrowsing || i > activeIndex ? 0.35 : 0.0
-                : shouldHidePreviousFinalLine && i == activeIndex - 1
+                : !isUserBrowsing && i < activeIndex
                     ? 0.0
                     : isActive ? 1.0 : distance == 1 ? 0.48 : distance == 2 ? 0.28 : 0.18;
             var targetColor = isFullscreen

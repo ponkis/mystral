@@ -92,6 +92,8 @@ information-side, and fullscreen views, the active synchronized line uses the
 same three-layer `cd_thing.png` glow as the playing row in an album track list;
 inactive and plain lines remain unframed. Wrapped active lines stay below the
 regular lyrics header instead of clipping against the top of the viewport.
+During automatic following, completed lines leave the regular lyrics viewport;
+scrolling restores them for browsing.
 When a looping track restarts after
 reaching its end, lyric browsing resets in all three views. Lyrics mode sits on the player's translucent glass surface and
 uses one cover-derived backdrop plus its header artwork, while a fixed custom
@@ -228,7 +230,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.2.2</VersionPrefix>
+<VersionPrefix>2.3.0</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.
@@ -317,6 +319,11 @@ To merge, push `main`, and create the production release tag in one step:
 ```powershell
 .\scripts\Promote-DevToMain.ps1 -Release
 ```
+
+`main` keeps contributor-facing versions of `README.md` and `SMOKE_TEST.md`.
+The promotion script preserves those two files from `main`, including when they
+are the only merge conflicts, so development notes cannot replace the public
+documentation. Update the public copies on `main` before promoting a release.
 
 For local release builds, run these commands from the repository root.
 
