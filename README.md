@@ -129,7 +129,8 @@ with the selected tab opening into the otherwise outlined content area. Track id
 details use a larger, aligned presentation. The views focus on essential credits,
 dates, genres, and a compact, divided album track list; multi-artist recordings
 also let you choose which credited artist to view. The Artist page promotes the
-artist name and first available alias into the header. In an album track list,
+artist name and first available alias into the header. The Album page promotes
+the album name into the header and the current track into its subtitle. In an album track list,
 only the currently playing recording receives the vertically stretched
 `cd_thing.png` highlight, framed by original-height copies of the same fade at
 its top and bottom; the remaining rows stay plain. There is no source label or
