@@ -37,6 +37,12 @@
                           Opacity="0.45"
                           Color="#070A0C" />
 
+        <DropShadowEffect x:Key="MusicInfoDrawerShadow"
+                          BlurRadius="14"
+                          ShadowDepth="0"
+                          Opacity="0.48"
+                          Color="#050708" />
+
         <DropShadowEffect x:Key="TextShadow"
                           BlurRadius="2"
                           ShadowDepth="1"
@@ -410,9 +416,9 @@
                                  Visibility="Collapsed"
                                  Panel.ZIndex="5" />
         <Grid x:Name="MusicInfoLyricsPanel"
-              Width="252"
+              Width="260"
               Height="342"
-              Margin="710,142,0,0"
+              Margin="700,142,0,0"
               HorizontalAlignment="Left"
               VerticalAlignment="Top"
               Visibility="Collapsed"
@@ -423,13 +429,14 @@
             <Grid.RenderTransform>
                 <TransformGroup>
                     <ScaleTransform x:Name="MusicInfoLyricsPanelScale" ScaleX="1" ScaleY="1" />
-                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-259" />
+                    <TranslateTransform x:Name="MusicInfoLyricsPanelTranslate" X="-252" />
                 </TransformGroup>
             </Grid.RenderTransform>
 
-            <Border CornerRadius="9"
-                    BorderThickness="1"
-                    Effect="{StaticResource CardShadow}">
+            <Border x:Name="MusicInfoLyricsChrome"
+                    CornerRadius="0,9,9,0"
+                    BorderThickness="0,1,1,1"
+                    Effect="{StaticResource MusicInfoDrawerShadow}">
                 <Border.BorderBrush>
                     <SolidColorBrush x:Name="MusicInfoLyricsBorderBrush" Color="#9BCFE2E8" />
                 </Border.BorderBrush>
@@ -480,13 +487,14 @@
                     </Rectangle.Fill>
                 </Rectangle>
 
-                <Border Margin="1"
-                        CornerRadius="8"
+                <Border x:Name="MusicInfoLyricsInnerBorder"
+                        Margin="1"
+                        CornerRadius="0,8,8,0"
                         BorderBrush="#30FFFFFF"
-                        BorderThickness="1"
+                        BorderThickness="0,1,1,1"
                         IsHitTestVisible="False" />
 
-                <Grid Margin="16,12,14,12"
+                <Grid Margin="24,12,14,12"
                       ClipToBounds="True"
                       PreviewMouseWheel="MusicInfoLyricsViewport_PreviewMouseWheel">
                     <ScrollViewer x:Name="MusicInfoLyricsScrollViewer"

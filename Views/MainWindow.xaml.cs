@@ -224,18 +224,20 @@ public partial class MainWindow : Window
     private const double MusicInfoWidth = 720;
     private const double MusicInfoHeight = 520;
     private const double MusicInfoSurfaceWidth = 980;
-    private const double MusicInfoLyricsPanelLeft = 710;
+    private const double MusicInfoLyricsJoinPlaneX = MusicInfoWidth - 12;
+    private const double MusicInfoLyricsUnderlap = 8;
+    private const double MusicInfoLyricsPanelLeft =
+        MusicInfoLyricsJoinPlaneX - MusicInfoLyricsUnderlap;
     private const double MusicInfoLyricsPanelTop = 142;
-    private const double MusicInfoLyricsPanelWidth = 252;
+    private const double MusicInfoLyricsPanelWidth = 260;
     private const double MusicInfoLyricsPanelHeight = 342;
     private const double MusicInfoLyricsShadowPadding = 17;
     private const double MusicInfoLyricsStackTopPadding = 10;
     private const double MusicInfoLyricsEndTailSpacerHeight = 180;
     private const double MusicInfoLyricsTuckedTranslateX =
-        MusicInfoWidth
+        MusicInfoLyricsJoinPlaneX
         - MusicInfoLyricsPanelLeft
-        - MusicInfoLyricsPanelWidth
-        - MusicInfoLyricsShadowPadding;
+        - MusicInfoLyricsPanelWidth;
     private const int MusicInfoLyricsEntranceDurationMilliseconds = 230;
     private const int MusicInfoLyricsExitDurationMilliseconds = 180;
     private const double MusicInfoPlayerOffsetX = MusicInfoWidth - CompactWidth - 12;
@@ -2158,10 +2160,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (ReferenceEquals(element, MusicInfoLyricsSurface))
+        {
+            ApplyMusicInfoLyricsSurfaceClip(e.NewSize);
+            return;
+        }
+
         var radius = ReferenceEquals(element, RootCard)
             || ReferenceEquals(element, GlassSurface)
             || ReferenceEquals(element, ExpandedSurface)
-            || ReferenceEquals(element, MusicInfoLyricsSurface)
                 ? 9.0
                 : 5.0;
         if (_isFullscreen)
@@ -2195,6 +2202,50 @@ public partial class MainWindow : Window
         }
 
         element.Clip = clip;
+    }
+
+    private void ApplyMusicInfoLyricsSurfaceClip(Size size)
+    {
+        if (_musicInfoLyricsRestingTranslateX < -0.5)
+        {
+            ApplyRoundedSurfaceClip(MusicInfoLyricsSurface, size, 9);
+            return;
+        }
+
+        const double radius = 9;
+        var width = size.Width;
+        var height = size.Height;
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+        {
+            context.BeginFigure(new Point(0, 0), isFilled: true, isClosed: true);
+            context.LineTo(new Point(width - radius, 0), isStroked: true, isSmoothJoin: false);
+            context.ArcTo(
+                new Point(width, radius),
+                new Size(radius, radius),
+                rotationAngle: 0,
+                isLargeArc: false,
+                sweepDirection: SweepDirection.Clockwise,
+                isStroked: true,
+                isSmoothJoin: false);
+            context.LineTo(new Point(width, height - radius), isStroked: true, isSmoothJoin: false);
+            context.ArcTo(
+                new Point(width - radius, height),
+                new Size(radius, radius),
+                rotationAngle: 0,
+                isLargeArc: false,
+                sweepDirection: SweepDirection.Clockwise,
+                isStroked: true,
+                isSmoothJoin: false);
+            context.LineTo(new Point(0, height), isStroked: true, isSmoothJoin: false);
+        }
+
+        if (geometry.CanFreeze)
+        {
+            geometry.Freeze();
+        }
+
+        MusicInfoLyricsSurface.Clip = geometry;
     }
 
     private void CenterLyricsBackgroundArtwork(Size surfaceSize)
@@ -4708,6 +4759,7 @@ public partial class MainWindow : Window
                 _musicInfoLyricsRestingTranslateX = placement.PanelTranslateX;
             }
 
+            ApplyMusicInfoLyricsDockingChrome();
             var revealClip = PrepareMusicInfoLyricsRevealClip(
                 GetMusicInfoLyricsCollapsedClipRect());
             if (_musicInfoLyricsRestingTranslateX < -0.5)
@@ -4857,21 +4909,47 @@ public partial class MainWindow : Window
 
     private static Rect GetMusicInfoLyricsCollapsedClipRect()
     {
-        var right = MusicInfoLyricsPanelWidth + MusicInfoLyricsShadowPadding;
         return new Rect(
-            right,
+            MusicInfoLyricsPanelWidth,
             -MusicInfoLyricsShadowPadding,
             0,
             MusicInfoLyricsPanelHeight + (MusicInfoLyricsShadowPadding * 2));
     }
 
-    private static Rect GetMusicInfoLyricsFullClipRect()
+    private Rect GetMusicInfoLyricsFullClipRect()
     {
+        var left = _musicInfoLyricsRestingTranslateX < -0.5
+            ? -MusicInfoLyricsShadowPadding
+            : MusicInfoLyricsUnderlap;
+        var right = MusicInfoLyricsPanelWidth + MusicInfoLyricsShadowPadding;
         return new Rect(
+            left,
             -MusicInfoLyricsShadowPadding,
-            -MusicInfoLyricsShadowPadding,
-            MusicInfoLyricsPanelWidth + (MusicInfoLyricsShadowPadding * 2),
+            right - left,
             MusicInfoLyricsPanelHeight + (MusicInfoLyricsShadowPadding * 2));
+    }
+
+    private void ApplyMusicInfoLyricsDockingChrome()
+    {
+        var isDocked = _musicInfoLyricsRestingTranslateX >= -0.5;
+        MusicInfoLyricsChrome.CornerRadius = isDocked
+            ? new CornerRadius(0, 9, 9, 0)
+            : new CornerRadius(9);
+        MusicInfoLyricsChrome.BorderThickness = isDocked
+            ? new Thickness(0, 1, 1, 1)
+            : new Thickness(1);
+        MusicInfoLyricsInnerBorder.CornerRadius = isDocked
+            ? new CornerRadius(0, 8, 8, 0)
+            : new CornerRadius(8);
+        MusicInfoLyricsInnerBorder.BorderThickness = isDocked
+            ? new Thickness(0, 1, 1, 1)
+            : new Thickness(1);
+        if (MusicInfoLyricsSurface.ActualWidth > 0 && MusicInfoLyricsSurface.ActualHeight > 0)
+        {
+            ApplyMusicInfoLyricsSurfaceClip(new Size(
+                MusicInfoLyricsSurface.ActualWidth,
+                MusicInfoLyricsSurface.ActualHeight));
+        }
     }
 
     private RectangleGeometry PrepareMusicInfoLyricsRevealClip(Rect initialRect)
@@ -5056,6 +5134,7 @@ public partial class MainWindow : Window
         _musicInfoLyricsWindowLeftBeforeOpen = double.NaN;
         _musicInfoLyricsWindowLeftWhenOpen = double.NaN;
         _musicInfoLyricsRestingTranslateX = 0;
+        ApplyMusicInfoLyricsDockingChrome();
         _wasMusicInfoLyricsWindowDragged = false;
     }
 
@@ -5727,6 +5806,7 @@ public partial class MainWindow : Window
                     FinalizeMusicInfoWindowLeft(placement.WindowLeft);
                     _musicInfoLyricsWindowLeftWhenOpen = placement.WindowLeft;
                     _musicInfoLyricsRestingTranslateX = placement.PanelTranslateX;
+                    ApplyMusicInfoLyricsDockingChrome();
                     FreezeMusicInfoLyricsRevealClip(
                         PrepareMusicInfoLyricsRevealClip(GetMusicInfoLyricsFullClipRect()),
                         GetMusicInfoLyricsFullClipRect());

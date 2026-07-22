@@ -108,7 +108,9 @@ divider, or a large empty footer. Equal 12-DIP spacing separates the timeline
 from both the information box and the rounded lower edge. The pill follows the selected information page's glass
 tint, including an available artist portrait. While information remains open,
 the Lyrics control slides a narrow glass pane out from beneath its right side without
-changing the selected Track, Artist, or Album page. The attached pane follows
+changing the selected Track, Artist, or Album page. Its left edge stays tucked
+beneath the information sheet, so the pane meets it cleanly while retaining its
+own cover-tinted glass. The attached pane follows
 synchronized lines, supports scrolling and seekable line clicks, and retracts
 under the sheet with the reverse slide. Its lines begin at the same compact top
 inset as regular lyrics, shares their active-line glow, and the
