@@ -43,7 +43,7 @@ public partial class MainWindow : Window
         public bool OwnsMouseCapture { get; set; }
     }
 
-    private sealed record MusicInfoLyricVisual(
+    private sealed record LyricVisual(
         Grid Row,
         Image FillLayer,
         Image TopEdgeLayer,
@@ -68,9 +68,10 @@ public partial class MainWindow : Window
     private readonly Dictionary<Slider, SliderPointerInteraction> _sliderPointerInteractions = [];
     private readonly CancellationTokenSource _burnDiscArtworkCts = new();
     private readonly List<TextBlock> _lyricBlocks = [];
+    private readonly List<LyricVisual> _lyricVisuals = [];
     private readonly List<LyricWaitIndicator> _lyricWaitIndicators = [];
     private readonly List<TextBlock> _musicInfoLyricBlocks = [];
-    private readonly List<MusicInfoLyricVisual> _musicInfoLyricVisuals = [];
+    private readonly List<LyricVisual> _musicInfoLyricVisuals = [];
     private readonly List<LyricWaitIndicator> _musicInfoLyricWaitIndicators = [];
     private readonly List<BitmapImage> _loadingIconFrames = [];
     private CancellationTokenSource? _lyricsRefreshCts;
@@ -118,6 +119,7 @@ public partial class MainWindow : Window
     private int _activeFullscreenLyricWaitIndicatorIndex = -1;
     private double _fullscreenLyricsScrollTarget;
     private readonly List<TextBlock> _fullscreenLyricBlocks = [];
+    private readonly List<LyricVisual> _fullscreenLyricVisuals = [];
     private readonly List<LyricWaitIndicator> _fullscreenLyricWaitIndicators = [];
     private bool _isMinimizing;
     private bool _isClosing;
@@ -272,7 +274,7 @@ public partial class MainWindow : Window
         AppMetadata.LocalApplicationDataDirectory,
         "last-version.txt");
     private static readonly Color DefaultTint = Color.FromRgb(74, 82, 88);
-    private static readonly ImageSource MusicInfoActiveLyricHighlightSource =
+    private static readonly ImageSource ActiveLyricHighlightSource =
         IconImageSource.LoadSiteImage("Resources/Images/cd_thing.png");
     private static readonly TimeSpan LyricActivationLead = TimeSpan.FromMilliseconds(1000);
     private static readonly TimeSpan LyricRegressionTolerance = TimeSpan.FromMilliseconds(1750);
@@ -3069,6 +3071,7 @@ public partial class MainWindow : Window
         LyricsStatusText.Text = Lyrics.Message;
         LyricsStackPanel.Children.Clear();
         _lyricBlocks.Clear();
+        _lyricVisuals.Clear();
         _lyricWaitIndicators.Clear();
         _lyricsFooterPanel = null;
         _activeLyricIndex = -1;
@@ -3101,7 +3104,12 @@ public partial class MainWindow : Window
         if (Lyrics.Status == LyricsStatus.Synced)
         {
             LyricsMessagePanel.Visibility = Visibility.Collapsed;
-            RenderSyncedLyrics(LyricsStackPanel, _lyricBlocks, _lyricWaitIndicators, isFullscreen: false);
+            RenderSyncedLyrics(
+                LyricsStackPanel,
+                _lyricBlocks,
+                _lyricVisuals,
+                _lyricWaitIndicators,
+                isFullscreen: false);
             AddLyricsInfoFooter();
             Dispatcher.BeginInvoke(() => UpdateSyncedLyricsUi(GetCurrentPosition()), DispatcherPriority.Loaded);
             if (_isFullscreen && _isFullscreenLyrics)
@@ -3255,6 +3263,27 @@ public partial class MainWindow : Window
         Thickness margin,
         Color foreground)
     {
+        return AddHighlightedLyricBlock(
+            MusicInfoLyricsStackPanel,
+            _musicInfoLyricBlocks,
+            _musicInfoLyricVisuals,
+            text,
+            fontSize,
+            opacity,
+            margin,
+            foreground);
+    }
+
+    private static TextBlock AddHighlightedLyricBlock(
+        Panel targetPanel,
+        ICollection<TextBlock> blocks,
+        ICollection<LyricVisual> visuals,
+        string text,
+        double fontSize,
+        double opacity,
+        Thickness margin,
+        Color foreground)
+    {
         var row = new Grid
         {
             Margin = new Thickness(-6, 0, -4, 0),
@@ -3267,7 +3296,7 @@ public partial class MainWindow : Window
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 VerticalAlignment = alignment,
-                Source = MusicInfoActiveLyricHighlightSource,
+                Source = ActiveLyricHighlightSource,
                 Stretch = Stretch.Fill,
                 Opacity = 0,
                 SnapsToDevicePixels = height.HasValue,
@@ -3290,14 +3319,14 @@ public partial class MainWindow : Window
 
         var block = AddLyricBlock(
             row,
-            _musicInfoLyricBlocks,
+            blocks,
             text,
             fontSize,
             opacity,
             new Thickness(6, margin.Top, 4, margin.Bottom),
             foreground);
-        MusicInfoLyricsStackPanel.Children.Add(row);
-        _musicInfoLyricVisuals.Add(new MusicInfoLyricVisual(
+        targetPanel.Children.Add(row);
+        visuals.Add(new LyricVisual(
             row,
             fillLayer,
             topEdgeLayer,
@@ -3884,6 +3913,7 @@ public partial class MainWindow : Window
     private void ApplyLyricBlockVisualState(int activeIndex, bool isFullscreen = false)
     {
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
+        var visuals = isFullscreen ? _fullscreenLyricVisuals : _lyricVisuals;
         var isUserBrowsing = isFullscreen ? _isUserBrowsingFullscreenLyrics : _isUserBrowsingLyrics;
         var shouldHidePreviousFinalLine = !isFullscreen && !isUserBrowsing && activeIndex == blocks.Count - 1;
 
@@ -3916,6 +3946,7 @@ public partial class MainWindow : Window
 
             block.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
             AnimateDouble(block, OpacityProperty, targetOpacity, isFullscreen && isUserBrowsing ? 150 : 380);
+            ApplyLyricHighlightVisualState(visuals, i, isActive);
         }
     }
 
@@ -3949,20 +3980,30 @@ public partial class MainWindow : Window
 
             block.FontWeight = isActive ? FontWeights.Bold : FontWeights.SemiBold;
             AnimateDouble(block, OpacityProperty, targetOpacity, _isUserBrowsingMusicInfoLyrics ? 150 : 320);
-
-            if (i < _musicInfoLyricVisuals.Count)
-            {
-                var visual = _musicInfoLyricVisuals[i];
-                AnimateDouble(visual.FillLayer, OpacityProperty, isActive ? 0.42 : 0, 220);
-                AnimateDouble(visual.TopEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
-                AnimateDouble(visual.BottomEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
-            }
+            ApplyLyricHighlightVisualState(_musicInfoLyricVisuals, i, isActive);
         }
+    }
+
+    private static void ApplyLyricHighlightVisualState(
+        IReadOnlyList<LyricVisual> visuals,
+        int index,
+        bool isActive)
+    {
+        if (index < 0 || index >= visuals.Count)
+        {
+            return;
+        }
+
+        var visual = visuals[index];
+        AnimateDouble(visual.FillLayer, OpacityProperty, isActive ? 0.42 : 0, 220);
+        AnimateDouble(visual.TopEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
+        AnimateDouble(visual.BottomEdgeLayer, OpacityProperty, isActive ? 0.72 : 0, 220);
     }
 
     private void CenterActiveLyric(int activeIndex, bool isFullscreen = false)
     {
         var blocks = isFullscreen ? _fullscreenLyricBlocks : _lyricBlocks;
+        var visuals = isFullscreen ? _fullscreenLyricVisuals : _lyricVisuals;
         var scrollViewer = isFullscreen ? FullscreenLyricsScrollViewer : LyricsScrollViewer;
         if (scrollViewer.ViewportHeight <= 1)
         {
@@ -3980,7 +4021,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        CenterLyricsElement(blocks[activeIndex], isFullscreen);
+        FrameworkElement element = activeIndex < visuals.Count
+            ? visuals[activeIndex].Row
+            : blocks[activeIndex];
+        CenterLyricsElement(element, isFullscreen);
     }
 
     private void CenterLyricsElement(FrameworkElement element, bool isFullscreen = false)
@@ -5895,6 +5939,7 @@ public partial class MainWindow : Window
     private void RenderSyncedLyrics(
         Panel panel,
         ICollection<TextBlock> blocks,
+        ICollection<LyricVisual> visuals,
         ICollection<LyricWaitIndicator> waitIndicators,
         bool isFullscreen)
     {
@@ -5903,9 +5948,10 @@ public partial class MainWindow : Window
             var line = Lyrics.SyncedLines[i];
             var previousLineTime = i == 0 ? TimeSpan.Zero : Lyrics.SyncedLines[i - 1].Time;
             AddLyricWaitIndicatorIfNeeded(i, previousLineTime, line.Time, panel, waitIndicators, isFullscreen);
-            var block = AddLyricBlock(
+            var block = AddHighlightedLyricBlock(
                 panel,
                 blocks,
+                visuals,
                 line.Text,
                 isFullscreen ? 38 : 22,
                 isFullscreen ? 0.35 : 0.30,
@@ -8103,8 +8149,12 @@ public partial class MainWindow : Window
 
         FullscreenLyricsStackPanel.Children.Clear();
         _fullscreenLyricBlocks.Clear();
+        _fullscreenLyricVisuals.Clear();
         _fullscreenLyricWaitIndicators.Clear();
+        _activeFullscreenLyricIndex = -1;
         _activeFullscreenLyricWaitIndicatorIndex = -1;
+        _isUserBrowsingFullscreenLyrics = false;
+        _fullscreenLyricsInactivityTimer.Stop();
         _fullscreenLyricsFooterPanel = null;
         _fullscreenLyricsTopSpacer = null;
         _fullscreenLyricsBottomSpacer = null;
@@ -8117,7 +8167,12 @@ public partial class MainWindow : Window
 
             if (status == LyricsStatus.Synced)
             {
-                RenderSyncedLyrics(FullscreenLyricsStackPanel, _fullscreenLyricBlocks, _fullscreenLyricWaitIndicators, isFullscreen: true);
+                RenderSyncedLyrics(
+                    FullscreenLyricsStackPanel,
+                    _fullscreenLyricBlocks,
+                    _fullscreenLyricVisuals,
+                    _fullscreenLyricWaitIndicators,
+                    isFullscreen: true);
             }
             else
             {

@@ -87,9 +87,11 @@ resolved through the `artwork.m8tec.top` lookup service and cached in the user's
 temp directory, where Windows disk cleanup can reclaim them.
 
 Synchronized lyric lines become seek targets when the active media session
-allows seeking; plain lyrics remain read-only text. When a looping track
-restarts after reaching its end, lyric browsing resets in the regular,
-information-side, and fullscreen views. Lyrics mode sits on the player's translucent glass surface and
+allows seeking; plain lyrics remain read-only text. In the regular,
+information-side, and fullscreen views, the active synchronized line uses the
+same three-layer `cd_thing.png` glow as the playing row in an album track list;
+inactive and plain lines remain unframed. When a looping track restarts after
+reaching its end, lyric browsing resets in all three views. Lyrics mode sits on the player's translucent glass surface and
 uses one cover-derived backdrop plus its header artwork, while a fixed custom
 theme continues to hide the backdrop.
 
@@ -109,7 +111,7 @@ the Lyrics control slides a narrow glass pane out from beneath its right side wi
 changing the selected Track, Artist, or Album page. The attached pane follows
 synchronized lines, supports scrolling and seekable line clicks, and retracts
 under the sheet with the reverse slide. Its lines begin at the same compact top
-inset as regular lyrics, the active line uses the album track-list glow, and the
+inset as regular lyrics, shares their active-line glow, and the
 last line moves up so its song details remain visible below it. The window
 controls remain visible and move into a squared-bottom tab whose bottom edge sits on the top border rather than
 overlapping the sheet. The tab samples the sheet's rendered, cover-derived glass
