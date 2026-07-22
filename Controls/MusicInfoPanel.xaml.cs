@@ -777,6 +777,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         {
             PopulateAlbumDetails(_albumInfo);
             SetAlbumReady();
+            UpdateHeaderForSelectedPage();
             return;
         }
 
@@ -828,6 +829,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             _albumInfo = info;
             PopulateAlbumDetails(info);
             SetAlbumReady();
+            UpdateHeaderForSelectedPage();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -1255,6 +1257,13 @@ public partial class MusicInfoPanel : UserControl, IDisposable
 
             HeaderTitleText.Text = FirstNonEmpty(selectedCredit?.Name, _snapshot.Artist, "Artist");
             HeaderArtistText.Text = string.Empty;
+            return;
+        }
+
+        if (InfoTabs.SelectedItem == AlbumTab)
+        {
+            HeaderTitleText.Text = FirstNonEmpty(_albumInfo?.Title, _trackInfo?.Album, _snapshot.Album, "Album");
+            HeaderArtistText.Text = FirstNonEmpty(_snapshot.Title, _trackInfo?.Title);
             return;
         }
 
