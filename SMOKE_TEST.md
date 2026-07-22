@@ -1,176 +1,199 @@
 # Mystral Smoke Test
 
-Use this checklist before a release or after changes that touch WPF, media controls, settings, Last.fm, installer packaging, tray behavior, or startup behavior.
+Use this checklist before a release or after changes to the Windows UI, media
+controls, lyrics, settings, Last.fm, burning, updates, startup, or packaging.
 
 ## Build
 
-```powershell
-dotnet build .\mystral.csproj -c Debug /p:AppEnvironment=Development
-dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj -c Debug --no-restore
-dotnet build .\mystral.csproj -c Release /p:AppEnvironment=Production --no-restore
-dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj -c Release --no-restore
-```
+~~~powershell
+dotnet build .\Mystral.csproj -c Debug /p:AppEnvironment=Development
+dotnet run --project .\tests\Mystral.Tests\Mystral.Tests.csproj -c Debug
+dotnet build .\Mystral.csproj -c Release /p:AppEnvironment=Production
+~~~
 
-For packaged development builds:
+For a packaged development build:
 
-```powershell
+~~~powershell
 .\scripts\Build-Dev.ps1 -Clean
-```
+~~~
 
-## App Launch
+## Launch
 
-- Launch Mystral from Visual Studio, `dotnet run`, or the packaged `Mystral.exe`.
-- Confirm the main window appears without startup errors.
-- Confirm the app icon appears in the taskbar or tray as expected.
-- Close and relaunch once to catch settings or placement load errors.
+- Launch from Visual Studio, dotnet run, or a packaged Mystral.exe.
+- Confirm the player opens without an error and its icon appears correctly.
+- Launch Mystral again and confirm the existing instance is activated instead
+  of opening a duplicate process.
+- Close and reopen once to verify saved settings and window placement.
 
-## Window And Tray
+## Window and tray
 
-- Confirm each custom title bar places its available Close and Minimize controls on the left, while main-window actions such as Always on top and Fullscreen remain on the right.
-- Confirm the Mystral icon and name are visually centered in custom title bars where they are shown, including the burn editor and track notification.
-- Move the window, close it, relaunch, and confirm placement is restored safely on-screen.
-- Toggle always-on-top and confirm the setting sticks after restart.
-- With always-on-top enabled, open the burn editor and the settings window; confirm the player stays above other apps the whole time (the child windows themselves are not topmost) and remains topmost after closing them.
-- Minimize the app and confirm restore works.
-- Enter fullscreen and confirm Close is hidden, then exit with Escape or the fullscreen control and confirm Close returns.
-- Close with `Close to tray` enabled and confirm the tray icon remains.
-- Restore from the tray icon.
-- Exit from the tray menu and confirm the process closes.
+- Move the player, restart, and confirm it returns to a visible screen position.
+- Toggle always-on-top, open Settings and the burn editor, and confirm the player
+  retains its setting.
+- Minimize and restore the app.
+- Enter and leave fullscreen with both the control and Escape.
+- With close-to-tray enabled, close the window, restore it from the tray, and
+  then use the tray Exit command to end the process.
+- Confirm custom title-bar controls remain visible, aligned, and clickable in
+  every player mode.
 
-## Media Controls
+## Media controls
 
-- Start playback in Spotify, a browser, or another Windows media-session app.
-- Confirm title, artist/description, progress, duration, play state, and artwork update.
-- Test play/pause, next, previous, and seek controls.
-- In compact, expanded, and fullscreen playback controls, confirm Lyrics appears before More.
-- In compact, expanded, lyrics, and fullscreen modes, click an empty point on the progress bar and drag from the track (not only the thumb); confirm every progress bar follows the same target.
-- Confirm the hand cursor covers the full progress and volume bar surfaces, not only their draggable thumbs.
-- Hover a progress bar and confirm its tooltip says `Seek`; click or drag and confirm it shows the target time, stays visible briefly after release, and then returns to `Seek`.
-- Confirm the seek and volume tooltips appear centered above the slider handle (pill) and follow it while dragging rather than sitting over the middle of the bar.
-- While dragging a progress bar, switch away from Mystral before releasing; return and confirm the timeline is not stuck in seek-preview mode.
-- Seek forward and backward in Spotify and Chrome and confirm the chosen timestamp does not snap back while Windows delivers the old position.
-- Let Spotify and Chrome play across several polling intervals and confirm the elapsed time remains monotonic instead of jumping backward or resetting to zero.
-- Play a track from an album with Apple Music animated cover art (for example The Weeknd — Dawn FM) and confirm the cover fades into a looping animation in the compact, expanded, lyrics-header, and fullscreen art views.
-- Let the animated cover reach its end and confirm it loops without freezing; switch tracks and confirm the next track returns to its own static or animated art without leftovers.
-- Switch between two albums whose animated covers are both already cached and confirm no outgoing static, blank, or black frame flashes during the swap.
-- Switch from animated art to an album without animation and confirm the new track's real static cover replaces the held frame immediately when available — the old frame must not linger beside the new title and must not fade out seconds later. Repeat with quick Next/Previous presses while metadata is still changing and confirm no provisional cover breaks through or remains behind. Use a 60 fps recording and frame-by-frame inspection for the one-frame case.
-- Pause playback and confirm the UI state updates.
-- Stop playback or close the media app and confirm Mystral returns to idle without crashing.
+- Start playback in Spotify, Apple Music, a browser, or another Windows media
+  session source.
+- Confirm title, artist, artwork, progress, duration, play state, and supported
+  actions update.
+- Test play/pause, next, previous, mute, volume, and seeking.
+- Click and drag progress and volume bars from both the track and thumb.
+- Confirm each tooltip remains centered over its slider handle before, during,
+  and after dragging, including after switching player layouts.
+- Seek forward and backward and confirm stale Windows timeline updates do not
+  snap the selected time back.
+- Switch tracks quickly and confirm metadata and artwork never settle on values
+  from the previous track.
+- Pause playback, then stop playback or close the source and confirm Mystral
+  returns to a valid idle state.
+
+## Artwork and themes
+
+- In automatic theme mode, switch between covers with different colors and
+  confirm the player tint follows the artwork.
+- Choose and save a custom theme. Confirm it applies immediately while foreground
+  cover art remains visible and cover-derived backgrounds are hidden.
+- Return to automatic mode and confirm artwork tint and backgrounds return.
+- Play an album with supported animated Apple Music artwork and confirm it loops
+  in compact, expanded, lyrics-header, and fullscreen artwork views.
+- Switch rapidly between animated and static covers and confirm no blank, black,
+  or stale frame remains.
+
+## Music information
+
+- While a track is playing, open More and select Track information, Artist
+  information, and Album information.
+- Confirm the player unfolds in the same window, opens the requested tab, and
+  keeps playback controls and the timeline usable.
+- Switch tabs and confirm the cover, tab outline, content, and player tint remain
+  aligned without duplicated compact metadata.
+- Confirm Track shows the matched recording details without blank-field clutter.
+- Confirm Artist supports credited-artist selection and uses a validated artist
+  image when available, otherwise an initials tile.
+- Confirm Album keeps the active player cover, presents multi-disc tracks
+  clearly, and highlights only the currently playing recording.
+- Open a track with punctuation, accent, featured-credit, edition, or renamed
+  artist differences and confirm a confident known match still resolves.
+- Try incomplete metadata and a song with no confident match; confirm a readable
+  empty state appears.
+- Disconnect the network, retry, reconnect, and confirm the information lookup
+  reports a readable failure and recovers.
+- Change tracks or close information during a lookup and confirm stale results
+  do not replace the current track.
+- Open and close information near each monitor edge at 100% and 150% display
+  scaling. Confirm the compact player returns to its original visible position.
+- Confirm the opening and closing artwork animation has no clipping, stale frame,
+  resize snap, or blank handoff.
+
+## Attached information lyrics
+
+- From each information tab, open Lyrics and confirm a narrow drawer slides from
+  beneath the information sheet without replacing the selected tab.
+- Confirm the drawer meets the sheet without a wallpaper gap, doubled border,
+  shadow halo, or rounded inner edge.
+- Toggle it repeatedly and confirm entrance and exit remain smooth while the
+  main information sheet stays still.
+- Confirm synchronized lines follow playback, can be clicked to seek, and can be
+  browsed with the wheel.
+- Switch tracks while the drawer is open. Confirm loading replaces the old
+  lyrics, valid new lyrics appear, and a definitive no-lyrics result retracts
+  the drawer cleanly.
 
 ## Lyrics
 
-- Play a well-tagged song with the correct album and duration and confirm synced or plain lyrics load.
-- In Apple Music for Windows, play a known track and confirm lyrics load when its media session combines `Artist — Album` instead of publishing a separate album.
-- Play a track with incomplete or imperfect metadata and confirm lyrics still load through the fallback search when available.
-- During a long gap, confirm the three dots fill alongside the preceding highlighted lyric without recentering or advancing lyric synchronization early.
-- With a seekable source and synchronized lyrics, click a line in both regular and fullscreen lyrics; confirm playback seeks to that line and recenters it. Confirm plain lyrics and synchronized lyrics from a non-seekable source keep the normal cursor and do nothing when clicked.
-- Scroll regular and fullscreen lyrics away from the active line, then let the same track loop from near its end to the beginning; confirm both views clear browsing state and return to the top. Confirm a one-off zero/near-zero provider reading or small backward jitter does not reset the lyric view.
-- With the automatic artwork theme, confirm lyrics mode shows one blurred cover backdrop plus the header thumbnail without a doubled backdrop or a ghost of the compact player art. With a fixed custom theme, confirm the backdrop stays hidden while the header thumbnail remains.
-- Confirm lyrics mode keeps the player's translucent glass look (the desktop shows through slightly) instead of a fully solid panel.
-- Leave lyrics mode back to the regular and expanded views and confirm the background artwork appears in its final position without shifting sideways during the transition.
-- Switch tracks and confirm old lyrics do not remain stuck.
-- Test lyrics mode, back navigation, scrolling, and fullscreen lyrics if artwork is present.
-- Play a track with no lyrics and confirm the empty/not-found state is readable.
+- Play songs with synchronized lyrics, plain lyrics, imperfect metadata, and no
+  available lyrics; confirm each state is readable.
+- Enter regular lyrics and confirm the surface appears without a blank frame.
+- Confirm the active synchronized line uses the disc-style highlight in regular,
+  attached information, and fullscreen lyrics.
+- Use an active lyric that wraps to three or more rows and confirm its container
+  remains fully below the regular lyrics header.
+- Let several lines advance automatically. Completed regular lyrics should
+  disappear instead of peeking above the active row; scrolling upward should
+  reveal them again for browsing.
+- During a long instrumental gap, confirm the wait dots animate without advancing
+  synchronization early.
+- With a seekable source, click synchronized lines in all three lyric views and
+  confirm playback seeks and recenters. Plain or non-seekable lyrics must not
+  act as links.
+- Browse away from the active line and let the track loop. Confirm all lyric
+  views reset to the beginning, while one-off near-zero timeline noise does not.
+- Leave lyrics for compact and expanded modes and confirm no artwork or layout
+  jumps during the transition.
 
-## Volume
+## Settings and Last.fm
 
-- Adjust volume using Mystral and confirm Windows output volume changes.
-- Toggle mute and confirm the icon/state updates.
-- Click an empty point on each volume bar, then drag from both the track and thumb; confirm volume follows continuously in every player mode.
-- Confirm the volume tooltip appears immediately, stays visible briefly after release, and a lost mouse capture does not leave the slider in its dragging state.
+- Open Settings from both the player and tray.
+- Change behavior and appearance settings, save, restart, and confirm persistence.
+- Export playback history and confirm the CSV is created.
+- Switch the burn lyric lookup between MusicBrainz and LRCLIB, save, restart,
+  and confirm the selection persists.
+- With only a Last.fm API key and username, confirm track and profile links work.
+- Enable scrobbling without its additional credentials and confirm saving is
+  blocked with a readable explanation.
+- Enter invalid full credentials and confirm validation fails gracefully; test
+  valid credentials when available.
+- Toggle scrobbling from the tray while Settings is open and confirm both views
+  remain synchronized.
 
 ## Notifications
 
-- Enable notifications in settings.
-- Change tracks and confirm one track notification appears.
-- Disable notifications and confirm no new notification appears.
-- With a custom player theme selected, confirm track notifications still derive their tint from the track artwork rather than the custom player color.
+- Enable notifications, change tracks, and confirm one track notification appears.
+- Disable notifications and confirm no additional notification appears.
+- With a fixed player theme, confirm notifications still derive their tint from
+  the track artwork.
 
-## Settings
+## Burn editor
 
-- Open settings from the app and tray menu.
-- Toggle behavior settings, save, restart, and confirm persistence.
-- Export playback history and confirm the successful `Export complete` dialog uses the CSV icon.
-- Under Behavior, switch the Burn lyrics provider between `MusicBrainz (default)` and `LRCLIB`, save, restart, and confirm the selected provider persists.
-- Open Appearance and confirm the category/header uses the appearance icon and the Theme control opens its color picker showing only the color wheel and a hex field.
-- Move the picker's wheel and confirm the main player (and the Appearance swatch/hex text) previews the color live; cancel and confirm the player returns to the last accepted or saved appearance.
-- Accept a color with `Use color` and confirm the player keeps showing it; save and confirm it becomes permanent, or close settings without saving and confirm the player reverts.
-- Choose a custom theme color and save; confirm the main player changes to that color immediately without switching tracks or restarting.
-- Check the compact, expanded-artwork, lyrics, and fullscreen player modes; confirm cover-derived blurred background artwork is hidden in each mode while foreground cover artwork (including the expanded view's cover) remains visible.
-- In the History list, right-click a track and confirm the `Remove` entry shows the delete icon.
-- Return Theme to automatic and save; confirm artwork-derived tinting and all player background artwork return immediately.
-- Open the burn editor with artwork and confirm its tint remains artwork-derived rather than using the custom main-player theme.
-- Enter invalid Last.fm credentials and confirm validation fails gracefully.
-- If available, enter valid Last.fm credentials and confirm validation succeeds.
-- With only an API key and username saved, confirm Last.fm track links and the tray profile link work; confirm the API secret and password fields stay disabled until `Scrobble playback to Last.fm` is checked.
-- With scrobbling checked but no API secret or password, confirm Save is blocked with a readable status and the tray's `Enable Scrobbling` toggle refuses to turn on and points to Settings.
-- Fill every Last.fm field but use a wrong password or secret, then enable scrobbling from the tray; confirm Mystral checks the account first and reports the failure instead of turning scrobbling on.
-- With settings open, toggle scrobbling from the tray menu and confirm the settings checkbox updates immediately without reopening the window.
-
-## Burn Editor
-
-- Open an audio file that already contains plain and synchronized lyrics; confirm both fields appear in the Lyrics tab without changing the source file.
-- Add or edit plain lyrics and timestamped LRC lyrics such as `[00:12.34]First line`, save the burned copy, reopen that copy, and confirm both lyric forms round-trip.
-- Clear both lyric fields, save another copy, reopen it, and confirm the lyrics were removed while unrelated metadata remains intact.
-- Enter synchronized text without a valid LRC timestamp and confirm Save reports a readable validation error instead of creating the burned copy.
-- With `MusicBrainz (default)` selected, click `Fetch song data` for a known track and confirm MusicBrainz metadata/artwork and LRCLIB plain or synchronized lyrics populate the editor.
-- With `LRCLIB` selected, edit the lookup fields, click `Fetch song data`, and confirm lyrics are searched using the values currently in the editor.
-- Disconnect the network and click `Fetch song data`; confirm the fetch ends with a readable connection/timeout message instead of hanging.
-- Right-click the CD artwork tile, choose `Save artwork guide...`, and confirm the saved `cd-artwork-guide.png` matches the transparent disc mask.
-- Fetch a song with lyrics, then fetch a song that has no lyrics; confirm both lyric editors clear instead of retaining the previous song's text.
-- While a fetch is running, confirm the progress window uses the search icon and concise song-search wording; when cover or disc artwork is not found, confirm the notice uses the artwork icon.
-- Fetch tracks that LRCLIB marks as instrumental both with and without a confident MusicBrainz match; confirm the completion or warning popup uses the instrumental icon.
-- If both plain and synchronized lyrics are available from LRCLIB, confirm both remain editable and are saved to the burned copy.
-- Confirm the original audio bytes and tags are unchanged after every burn.
+- Open a supported audio file and confirm the editor does not modify it in place.
+- Edit metadata, cover art, disc art, plain lyrics, and timestamped LRC lyrics;
+  save, reopen the copy, and confirm the values round-trip.
+- Clear lyrics and save another copy. Confirm unrelated metadata remains intact.
+- Enter malformed synchronized lyrics and confirm saving reports a readable
+  validation error without creating a copy.
+- Test Fetch song data in both MusicBrainz and LRCLIB modes. Confirm returned
+  metadata, artwork, and lyrics remain editable.
+- Fetch a song with lyrics followed by one without lyrics and confirm old lyric
+  text is cleared.
+- Disconnect the network during a fetch and confirm it ends with a readable
+  connection or timeout message.
+- Save the artwork guide from the disc-art menu and confirm the exported image
+  retains its transparent disc mask.
+- Confirm the source file’s bytes and tags remain unchanged after every burn.
 
 ## Updates
 
-- From the About dialog, check for an update while running a version older than the latest release.
-- Start the installer download, click Cancel, and confirm Mystral reports that the download was canceled and the installer was not launched.
-- Start the download again, disconnect the network, and confirm the failure dialog includes a cause plus Retry and Cancel buttons.
-- Restore the connection, click Retry, and confirm a new progress dialog completes the download and launches the installer.
-- After installing a newer release, confirm the `Update installed` popup includes a `What's new?` link and opens the GitHub comparison from the previous release tag to the newly installed tag.
+- Check for an update from About while running an older version.
+- Start a download, cancel it, and confirm no installer launches.
+- Retry after an interrupted connection and confirm the download can complete.
+- After installing a newer release, confirm the update dialog can open the
+  GitHub comparison between versions.
 
-## Last.fm
+## Social sharing
 
-- With Last.fm enabled, play a likely song longer than 30 seconds.
-- Confirm the Last.fm link/action appears for valid track metadata.
-- If scrobbling is enabled, confirm now-playing/scrobble status does not report repeated failures.
-- Play an ad, podcast, very short clip, or idle state and confirm it is not treated as a scrobbleable song.
-
-## globe
-
-- Run globe locally on port 3000, open Settings → Social, and link through the browser approval page.
-- Confirm the linked name, username, avatar, and CD count update without restarting Mystral.
-- Burn once with automatic sharing off: the completion popup must offer `Share to globe`, and its status modal must move from progress to success.
-- Confirm the post-share confirmation uses the mail icon and its `View your post on globe` link (on its own line) opens the burned-CD post via `/users/<name>?post=<id>`.
-- Burn once with automatic sharing on: the same share progress modal must appear, and the completion popup must say `Successfully burned and shared to your globe profile!` only after the server accepted it.
-- On globe, watch the profile's `my CD collection` sidebar while sharing and deleting a burned-CD post; confirm it updates without a page refresh.
-- Stop globe or force the burn endpoint to fail, burn with automatic sharing on, and confirm the popup reports the failure and offers Retry.
-- Stop globe while linked and confirm the Social profile frame transitions to its offline presence; restart globe and confirm it animates back to online on the next status change.
-- Restore globe, click Retry, and confirm Mystral validates immediately and resends the same burn instead of waiting for the periodic check.
-- Unlink in Mystral and confirm globe rejects the old bearer token, local link state clears, auto-share turns off, and a confirmation appears.
-- Link again, unlink from globe's web settings, and confirm Mystral warns once on the next status check and disables globe controls.
-- Cancel a browser approval and confirm Mystral exits the waiting state and reports the cancellation.
-- Open globe's Mystral connection page while unlinked, click `open Mystral to link`, and confirm Settings → Social opens and linking starts automatically.
-- Open `mystral-dev://settings/social` and confirm an existing process is activated rather than starting a second instance.
-- Confirm globe shows the burned-CD wall post and jewel-case collection entry with the same metadata/card styling as Last.fm music posts.
+Social sharing depends on the hosted service and is validated separately by the
+maintainer. It is not required for contributor smoke testing.
 
 ## Installer
 
-- Build the release folder output.
-- Run `installer\Build-Installer.ps1`.
-- Install the generated setup executable.
-- Launch Mystral from the installed shortcut or install location.
-- Confirm resources load: icon, artwork placeholder, buttons, busy animation, and sounds.
-- Open `mystral://settings/social` and confirm the installed production app opens Settings → Social and begins linking when no account is linked.
-- Uninstall and confirm the app is removed cleanly.
+- Build the Release folder output and run installer\Build-Installer.ps1.
+- Install the generated setup, launch from the installed shortcut, and confirm
+  icons, artwork, animations, and sounds load.
+- Open the production Mystral URL protocol and confirm it activates the installed
+  app rather than starting duplicate processes.
+- Uninstall and confirm the application is removed.
 
-## Pass Criteria
+## Pass criteria
 
-- No crashes.
-- No stuck tray process after exit.
-- Settings persist across restart.
-- Media controls match the active Windows media session.
-- Lyrics and Last.fm failures degrade to readable UI states.
-- Installer creates a launchable app with expected resources.
+- No crashes or stuck process after Exit.
+- Window, tray, settings, and media controls remain usable.
+- Lyrics, MusicBrainz, Last.fm, and network failures degrade to readable states.
+- The original audio source is never modified.
+- The installer produces a launchable application with expected resources.
