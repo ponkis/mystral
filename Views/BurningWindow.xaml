@@ -202,7 +202,7 @@
 
                     <Grid x:Name="TitleBar"
                           Grid.Row="0"
-                          Background="#12000000"
+                          Background="Transparent"
                           MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
                         <Button x:Name="CloseButton"
                                 HorizontalAlignment="Left"
@@ -238,8 +238,8 @@
 
                     <Border Grid.Row="1"
                             BorderBrush="#55FFFFFF"
-                            BorderThickness="0,1,0,1"
-                            Background="#36000000">
+                            BorderThickness="0,0,0,1"
+                            Background="Transparent">
                         <Grid Margin="18,5,20,5">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="160" />
