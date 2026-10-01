@@ -1,20 +1,21 @@
 <div align="center">
 
-# Mystral
+# mystral
 
 ![Mystral logo](assets/screenshots/logo.png)
 
-Mystral is a Windows desktop music companion. It follows the active Windows
-media session and provides playback controls, lyrics, MusicBrainz information,
-Last.fm integration, themed artwork, and tools for creating a retagged copy of
-an audio file with CD and jewel-case artwork.
+A Windows desktop music companion.
 
-[![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![Windows 10 1809+](https://img.shields.io/badge/Windows-10%201809%2B-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![CI](https://github.com/ponkis/mystral/actions/workflows/ci.yml/badge.svg)](https://github.com/ponkis/mystral/actions/workflows/ci.yml)
 [![Source License: MIT](https://img.shields.io/badge/source%20license-MIT-blue.svg)](LICENSE)
 
 </div>
+
+It follows the active Windows media session and provides playback controls,
+lyrics, MusicBrainz information, Last.fm integration, themed artwork, and tools
+for creating a retagged copy of an audio file with CD and jewel-case artwork.
 
 ![Main player](assets/screenshots/1.png)
 ![Burn editor](assets/screenshots/2.png)
