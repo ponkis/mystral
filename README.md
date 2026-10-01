@@ -4,7 +4,10 @@
 
 ![Mystral logo](assets/screenshots/logo.png)
 
-A Windows music companion for playback, lyrics, music information, and custom artwork.
+Mystral is a Windows desktop music companion. It follows the active Windows
+media session and provides playback controls, lyrics, MusicBrainz information,
+Last.fm integration, themed artwork, and tools for creating a retagged copy of
+an audio file with CD and jewel-case artwork.
 
 </div>
 
