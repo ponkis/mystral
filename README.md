@@ -1,6 +1,6 @@
 <div align="center">
 
-# mystral
+# Mystral
 
 ![Mystral logo](assets/screenshots/logo.png)
 
