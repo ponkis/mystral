@@ -394,6 +394,8 @@ static class AppSettingsServiceTests
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             invalidProvider.Settings.Behavior.BurnLyricsProvider);
+        // Settings saved before the option existed keep the online-cover default.
+        Check.True(invalidProvider.Settings.Behavior.PreferOnlineCoverArt);
         Check.Equal(string.Empty, invalidProvider.Settings.Appearance.PlayerThemeColor);
 
         var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
@@ -2029,6 +2031,7 @@ static class ModelTests
         Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p", ScrobblingEnabled = true }.IsConfigured);
         Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p" }.HasScrobblingCredentials);
         Check.True(new BehaviorSettings().CloseToTray);
+        Check.True(new BehaviorSettings().PreferOnlineCoverArt);
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             new BehaviorSettings().BurnLyricsProvider);

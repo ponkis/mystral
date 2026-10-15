@@ -218,6 +218,11 @@
                               Margin="0,8,0,0"
                               Content="Check for updates on startup"
                               Click="SettingsControl_Changed" />
+                    <CheckBox x:Name="PreferOnlineCoverArtCheckBox"
+                              Margin="0,8,0,0"
+                              Content="Prefer online cover art"
+                              ToolTip="Show the cover found on MusicBrainz instead of the one the media app provides. Falls back to the app's cover when none is found."
+                              Click="SettingsControl_Changed" />
                     <TextBlock Margin="0,18,0,0"
                                FontWeight="Bold"
                                Text="Burn lyrics" />

@@ -10,6 +10,8 @@ namespace Mystral.Services;
 public sealed class MediaSessionService : IDisposable
 {
     private const int MaxArtworkDecodePixelWidth = 1536;
+    private const int MaxOnlineCoverArtCacheEntries = 64;
+    private static readonly TimeSpan OnlineCoverArtSettleDelay = TimeSpan.FromMilliseconds(600);
 
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
@@ -18,9 +20,26 @@ public sealed class MediaSessionService : IDisposable
     private BitmapImage? _coverArtCache;
     private string _coverArtCacheFingerprint = string.Empty;
     private CancellationTokenSource? _delayedArtworkRefreshCts;
+    private readonly object _onlineCoverArtSync = new();
+    private readonly Dictionary<string, CoverArtResult> _onlineCoverArtCache = new(StringComparer.Ordinal);
+    private readonly Queue<string> _onlineCoverArtCacheOrder = new();
+    private string _onlineCoverArtPendingKey = string.Empty;
+    private CancellationTokenSource? _onlineCoverArtCts;
     private bool _disposed;
 
     public event EventHandler<MediaSnapshot>? SnapshotChanged;
+
+    /// <summary>
+    /// Looks up the now-playing track's cover online and returns its encoded bytes,
+    /// or null when none is found.
+    /// </summary>
+    public Func<MediaSnapshot, CancellationToken, Task<byte[]?>>? OnlineCoverArtProvider { get; set; }
+
+    /// <summary>
+    /// When set, snapshots carry the online cover once it resolves; the media
+    /// session thumbnail is used until then and whenever no online cover exists.
+    /// </summary>
+    public bool PreferOnlineCoverArt { get; set; }
 
     public async Task StartAsync()
     {
@@ -190,7 +209,7 @@ public sealed class MediaSessionService : IDisposable
             sourceUpdatedAt: timelineUpdatedAt,
             observedAt: timelineObservedAt);
 
-        return new MediaSnapshot(
+        var snapshot = new MediaSnapshot(
             HasSession: true,
             Title: title,
             Artist: artist,
@@ -212,6 +231,116 @@ public sealed class MediaSessionService : IDisposable
             HasReliableTimelineUpdatedAt = hasReliableTimelineUpdatedAt,
             CoverArtFingerprint = coverArt.Fingerprint
         };
+
+        return ApplyOnlineCoverArt(snapshot);
+    }
+
+    private MediaSnapshot ApplyOnlineCoverArt(MediaSnapshot snapshot)
+    {
+        if (!PreferOnlineCoverArt || OnlineCoverArtProvider is null)
+        {
+            return snapshot;
+        }
+
+        var lookup = AppleMusicMediaMetadata.NormalizeLyricsLookup(snapshot);
+        var key = CreateOnlineCoverArtKey(lookup);
+        if (key.Length == 0)
+        {
+            return snapshot;
+        }
+
+        lock (_onlineCoverArtSync)
+        {
+            if (_onlineCoverArtCache.TryGetValue(key, out var cached))
+            {
+                return cached.Image is null
+                    ? snapshot
+                    : snapshot with
+                    {
+                        CoverArt = cached.Image,
+                        CoverArtFingerprint = cached.Fingerprint
+                    };
+            }
+
+            if (key != _onlineCoverArtPendingKey)
+            {
+                // Track changes publish metadata in pieces; the settle delay lets
+                // partial keys be superseded before they reach MusicBrainz.
+                _onlineCoverArtCts?.Cancel();
+                _onlineCoverArtCts?.Dispose();
+                _onlineCoverArtCts = new CancellationTokenSource();
+                _onlineCoverArtPendingKey = key;
+                _ = FetchOnlineCoverArtAsync(key, lookup, _onlineCoverArtCts.Token);
+            }
+        }
+
+        return snapshot;
+    }
+
+    private static string CreateOnlineCoverArtKey(MediaSnapshot snapshot)
+    {
+        if (!snapshot.HasSession
+            || string.IsNullOrWhiteSpace(snapshot.Artist)
+            || string.IsNullOrWhiteSpace(snapshot.Title)
+            || snapshot.Title == "Unknown track")
+        {
+            return string.Empty;
+        }
+
+        return $"{snapshot.Title.Trim()}|{snapshot.Artist.Trim()}|{snapshot.Album.Trim()}"
+            .ToUpperInvariant();
+    }
+
+    private async Task FetchOnlineCoverArtAsync(
+        string key,
+        MediaSnapshot lookup,
+        CancellationToken cancellationToken)
+    {
+        var provider = OnlineCoverArtProvider;
+        if (provider is null)
+        {
+            return;
+        }
+
+        CoverArtResult result;
+        try
+        {
+            await Task.Delay(OnlineCoverArtSettleDelay, cancellationToken);
+            var bytes = await provider(lookup, cancellationToken);
+            result = bytes is { Length: > 0 } ? DecodeCoverArt(bytes) : CoverArtResult.Empty;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        catch
+        {
+            // Online art is optional; remember the miss so polling does not retry
+            // the lookup, and keep showing the media session thumbnail.
+            result = CoverArtResult.Empty;
+        }
+
+        lock (_onlineCoverArtSync)
+        {
+            if (_onlineCoverArtCache.TryAdd(key, result))
+            {
+                _onlineCoverArtCacheOrder.Enqueue(key);
+                while (_onlineCoverArtCacheOrder.Count > MaxOnlineCoverArtCacheEntries)
+                {
+                    _onlineCoverArtCache.Remove(_onlineCoverArtCacheOrder.Dequeue());
+                }
+            }
+
+            if (_onlineCoverArtPendingKey == key)
+            {
+                _onlineCoverArtPendingKey = string.Empty;
+            }
+        }
+
+        if (result.Image is not null && !cancellationToken.IsCancellationRequested)
+        {
+            await RefreshAsync();
+        }
     }
 
     private async Task<CoverArtResult> GetCoverArtAsync(
@@ -331,7 +460,18 @@ public sealed class MediaSessionService : IDisposable
             using var reader = new DataReader(stream);
             await reader.LoadAsync((uint)stream.Size);
             reader.ReadBytes(bytes);
+            return DecodeCoverArt(bytes);
+        }
+        catch
+        {
+            return CoverArtResult.Empty;
+        }
+    }
 
+    private static CoverArtResult DecodeCoverArt(byte[] bytes)
+    {
+        try
+        {
             using var memory = new MemoryStream(bytes);
             var bitmap = new BitmapImage();
             bitmap.BeginInit();
@@ -367,6 +507,13 @@ public sealed class MediaSessionService : IDisposable
         AttachSession(null);
         _delayedArtworkRefreshCts?.Cancel();
         _delayedArtworkRefreshCts?.Dispose();
+        lock (_onlineCoverArtSync)
+        {
+            _onlineCoverArtCts?.Cancel();
+            _onlineCoverArtCts?.Dispose();
+            _onlineCoverArtCts = null;
+        }
+
         _refreshLock.Dispose();
     }
 }

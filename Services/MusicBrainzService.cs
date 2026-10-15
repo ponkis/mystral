@@ -139,6 +139,27 @@ public sealed class MusicBrainzService : IDisposable
             discOutcome);
     }
 
+    /// <summary>
+    /// Resolves the now-playing recording and downloads only its release front
+    /// cover. Returns null when no confident match or cover exists.
+    /// </summary>
+    public async Task<byte[]?> FetchTrackCoverArtworkAsync(
+        string title,
+        string artist,
+        string album,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+    {
+        var match = await FindRecordingAsync(title, artist, album, string.Empty, duration, cancellationToken);
+        if (match?.Release is null)
+        {
+            return null;
+        }
+
+        var artwork = await FetchReleaseArtworkAsync(match.Release, cancellationToken, includeDisc: false);
+        return artwork.Cover.Data;
+    }
+
     public async Task<MusicBrainzTrackInfo?> FetchTrackInfoAsync(
         string title,
         string artist,
