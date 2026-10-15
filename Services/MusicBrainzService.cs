@@ -230,6 +230,7 @@ public sealed class MusicBrainzService : IDisposable
             Clean(payload.Disambiguation),
             Clean(payload.Annotation),
             FindArtistImagePageUrl(payload.Relations),
+            FindArtistWikidataUrl(payload.Relations),
             NormalizeStrings(payload.Aliases.Select(alias => alias.Name)),
             MapGenres(payload.Genres, payload.Tags));
     }
@@ -1157,6 +1158,27 @@ public sealed class MusicBrainzService : IDisposable
             }
 
             return uri.GetLeftPart(UriPartial.Path);
+        }
+
+        return string.Empty;
+    }
+
+    private static string FindArtistWikidataUrl(IEnumerable<UrlRelationResult> relations)
+    {
+        foreach (var relation in relations)
+        {
+            if (!string.Equals(relation.Type, "wikidata", StringComparison.OrdinalIgnoreCase)
+                || relation.Ended
+                || !string.IsNullOrWhiteSpace(relation.End))
+            {
+                continue;
+            }
+
+            var entityId = ArtistArtworkService.ParseWikidataEntityId(relation.Url?.Resource);
+            if (entityId.Length > 0)
+            {
+                return $"https://www.wikidata.org/wiki/{entityId}";
+            }
         }
 
         return string.Empty;

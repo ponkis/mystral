@@ -22,6 +22,12 @@ public sealed class ArtistArtworkService : IDisposable
     private const long MaxCachedArtworkBytes = 32L * 1024 * 1024;
     private static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan MaxRetryDelay = TimeSpan.FromSeconds(2);
+    private const string WikidataHost = "www.wikidata.org";
+    private const string UnsafeCommonsFileNameCharacters = "#<>[]|{}/\\:";
+    private static readonly Regex WikidataItemIdPattern = new(
+        "^Q[1-9][0-9]{0,11}$",
+        RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
     private static readonly Regex HtmlTagPattern = new(
         "<[^>]*>",
         RegexOptions.CultureInvariant,
@@ -50,18 +56,33 @@ public sealed class ArtistArtworkService : IDisposable
         }
     }
 
+    public Task<ArtistArtworkInfo?> FetchAsync(
+        string artistId,
+        string imagePageUrl,
+        CancellationToken cancellationToken = default)
+    {
+        return FetchAsync(artistId, imagePageUrl, string.Empty, cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the artist photo from a MusicBrainz Commons <c>image</c> relation,
+    /// or, when there is none, from the Wikidata entity's P18 (image) claim.
+    /// </summary>
     public async Task<ArtistArtworkInfo?> FetchAsync(
         string artistId,
         string imagePageUrl,
+        string wikidataUrl,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         cancellationToken.ThrowIfCancellationRequested();
         var normalizedArtistId = artistId?.Trim() ?? string.Empty;
+        var hasCommonsPage = TryParseCommonsFilePage(imagePageUrl, out var sourcePage, out var fileTitle);
+        var wikidataEntityId = hasCommonsPage ? string.Empty : ParseWikidataEntityId(wikidataUrl);
         if (normalizedArtistId.Length == 0
             || normalizedArtistId.Length > 128
-            || !TryParseCommonsFilePage(imagePageUrl, out var sourcePage, out var fileTitle))
+            || (!hasCommonsPage && wikidataEntityId.Length == 0))
         {
             return null;
         }
@@ -76,6 +97,15 @@ public sealed class ArtistArtworkService : IDisposable
 
         try
         {
+            if (!hasCommonsPage)
+            {
+                var commonsPageUrl = await ResolveWikidataImagePageAsync(wikidataEntityId, cancellationToken);
+                if (!TryParseCommonsFilePage(commonsPageUrl, out sourcePage, out fileTitle))
+                {
+                    return null;
+                }
+            }
+
             var metadataUri = BuildMetadataUri(fileTitle);
             using var metadataResponse = await SendWithRetriesAsync(
                 metadataUri,
@@ -184,6 +214,82 @@ public sealed class ArtistArtworkService : IDisposable
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Returns the canonical item ID (e.g. <c>Q42</c>) from an HTTPS
+    /// <c>www.wikidata.org/wiki/Q…</c> or <c>/entity/Q…</c> URL, or an empty string.
+    /// </summary>
+    internal static string ParseWikidataEntityId(string? value)
+    {
+        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || !string.Equals(uri.IdnHost, WikidataHost, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        var path = uri.AbsolutePath;
+        var id = path.StartsWith("/wiki/", StringComparison.Ordinal) ? path["/wiki/".Length..]
+            : path.StartsWith("/entity/", StringComparison.Ordinal) ? path["/entity/".Length..]
+            : string.Empty;
+        return WikidataItemIdPattern.IsMatch(id) ? id : string.Empty;
+    }
+
+    /// <summary>
+    /// Picks the Commons file named by a <c>wbgetclaims</c> P18 response, preferring
+    /// preferred-rank statements and skipping deprecated ones, and returns its
+    /// Commons file page URL (empty when none is usable).
+    /// </summary>
+    internal static string SelectWikidataImagePageUrl(byte[] claimsJson)
+    {
+        var payload = JsonSerializer.Deserialize<WikidataClaimsResponse>(claimsJson);
+        var statements = payload?.Claims?.GetValueOrDefault("P18") ?? [];
+        var fileName = statements
+            .Where(statement => statement is not null
+                                && !string.Equals(statement.Rank, "deprecated", StringComparison.OrdinalIgnoreCase)
+                                && string.Equals(statement.MainSnak?.SnakType, "value", StringComparison.Ordinal)
+                                && statement.MainSnak?.DataValue?.Value.ValueKind == JsonValueKind.String)
+            .OrderByDescending(statement => string.Equals(statement!.Rank, "preferred", StringComparison.OrdinalIgnoreCase))
+            .Select(statement => statement!.MainSnak!.DataValue!.Value.GetString()?.Trim() ?? string.Empty)
+            .FirstOrDefault(IsSafeCommonsFileName);
+        return fileName is null
+            ? string.Empty
+            : "https://commons.wikimedia.org/wiki/File:" + Uri.EscapeDataString(fileName.Replace(' ', '_'));
+    }
+
+    private static bool IsSafeCommonsFileName(string fileName)
+    {
+        return fileName.Length is > 0 and <= 384
+               && !fileName.Any(character => char.IsControl(character) || UnsafeCommonsFileNameCharacters.Contains(character));
+    }
+
+    private async Task<string> ResolveWikidataImagePageAsync(
+        string entityId,
+        CancellationToken cancellationToken)
+    {
+        var claimsUri = new Uri(
+            $"https://{WikidataHost}/w/api.php?action=wbgetclaims&format=json&property=P18&entity={entityId}");
+        using var response = await SendWithRetriesAsync(
+            claimsUri,
+            RequestKind.Wikidata,
+            "application/json",
+            cancellationToken);
+        if (!response.IsSuccessStatusCode
+            || !IsJsonContentType(response.Content.Headers.ContentType?.MediaType))
+        {
+            return string.Empty;
+        }
+
+        var claimsBytes = await ReadBoundedWithDeadlineAsync(
+            response.Content,
+            MaxMetadataBytes,
+            cancellationToken);
+        return SelectWikidataImagePageUrl(claimsBytes);
     }
 
     public void Dispose()
@@ -311,10 +417,18 @@ public sealed class ArtistArtworkService : IDisposable
             throw new InvalidDataException("The artist image service returned an invalid address.");
         }
 
-        var expectedHost = kind == RequestKind.Metadata
-            ? "commons.wikimedia.org"
-            : "upload.wikimedia.org";
-        if (!string.Equals(uri.IdnHost, expectedHost, StringComparison.OrdinalIgnoreCase))
+        var expectedHost = kind switch
+        {
+            RequestKind.Metadata => "commons.wikimedia.org",
+            RequestKind.Wikidata => WikidataHost,
+            _ => "upload.wikimedia.org"
+        };
+        // Commons now serves imageinfo thumbnails from thumb.wikimedia.org; older
+        // responses and redirects still use upload.wikimedia.org.
+        var isTrustedHost = string.Equals(uri.IdnHost, expectedHost, StringComparison.OrdinalIgnoreCase)
+                            || (kind == RequestKind.Artwork
+                                && string.Equals(uri.IdnHost, "thumb.wikimedia.org", StringComparison.OrdinalIgnoreCase));
+        if (!isTrustedHost)
         {
             throw new InvalidDataException("The artist image service returned an untrusted address.");
         }
@@ -565,7 +679,38 @@ public sealed class ArtistArtworkService : IDisposable
     private enum RequestKind
     {
         Metadata,
+        Wikidata,
         Artwork
+    }
+
+    private sealed class WikidataClaimsResponse
+    {
+        [JsonPropertyName("claims")]
+        public Dictionary<string, List<WikidataStatement?>>? Claims { get; init; }
+    }
+
+    private sealed class WikidataStatement
+    {
+        [JsonPropertyName("rank")]
+        public string? Rank { get; init; }
+
+        [JsonPropertyName("mainsnak")]
+        public WikidataSnak? MainSnak { get; init; }
+    }
+
+    private sealed class WikidataSnak
+    {
+        [JsonPropertyName("snaktype")]
+        public string? SnakType { get; init; }
+
+        [JsonPropertyName("datavalue")]
+        public WikidataDataValue? DataValue { get; init; }
+    }
+
+    private sealed class WikidataDataValue
+    {
+        [JsonPropertyName("value")]
+        public JsonElement Value { get; init; }
     }
 
     private sealed class CommonsResponse

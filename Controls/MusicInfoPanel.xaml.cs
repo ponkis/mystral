@@ -595,7 +595,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     private async Task LoadArtistPhotoForCachedInfoAsync(MusicBrainzArtistInfo info)
     {
         if (_artistArtworkService is null
-            || string.IsNullOrWhiteSpace(info.ImagePageUrl)
+            || !HasArtistPhotoSource(info)
             || !IsArtistPhotoRetryDue(info.ArtistId)
             || (string.Equals(_artistLookupInFlightId, info.ArtistId, StringComparison.OrdinalIgnoreCase)
                 && _artistLookupCts is { IsCancellationRequested: false }))
@@ -635,6 +635,12 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         }
     }
 
+    private static bool HasArtistPhotoSource(MusicBrainzArtistInfo info)
+    {
+        return !string.IsNullOrWhiteSpace(info.ImagePageUrl)
+               || !string.IsNullOrWhiteSpace(info.WikidataUrl);
+    }
+
     private async Task TryLoadArtistPhotoAsync(
         MusicBrainzArtistInfo info,
         CancellationTokenSource cancellation,
@@ -644,7 +650,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
     {
         var artistArtworkService = _artistArtworkService;
         if (artistArtworkService is null
-            || string.IsNullOrWhiteSpace(info.ImagePageUrl)
+            || !HasArtistPhotoSource(info)
             || !IsArtistPhotoRetryDue(artistId))
         {
             return;
@@ -655,6 +661,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             var details = await artistArtworkService.FetchAsync(
                 artistId,
                 info.ImagePageUrl,
+                info.WikidataUrl,
                 cancellation.Token);
             if (!IsCurrentArtistLookup(cancellation, generation, trackGeneration, artistId))
             {
