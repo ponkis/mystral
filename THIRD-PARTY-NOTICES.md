@@ -54,3 +54,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+# Third-Party Notices: Country Flags
+
+The flag images in `Resources/Flags` were downloaded from flagcdn.com
+(<https://flagcdn.com>), which serves them free of charge. National flags are
+in the public domain; the glossy finish is drawn by Mystral at runtime.
