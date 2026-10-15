@@ -52,6 +52,8 @@ internal static class Program
             ("MusicBrainz maps artist details by MBID", MusicBrainzServiceTests.MapsArtistInformation),
             ("artist artwork resolves trusted Commons photos and caches them", ArtistArtworkServiceTests.ResolvesTrustedCommonsArtwork),
             ("artist artwork rejects unsafe URLs and invalid responses", ArtistArtworkServiceTests.RejectsUnsafeAndInvalidResponses),
+            ("artist artwork falls back to the Wikidata P18 image", ArtistArtworkServiceTests.FallsBackToWikidataImage),
+            ("artist artwork parses Wikidata IDs and P18 claims safely", ArtistArtworkServiceTests.ParsesWikidataInputsSafely),
             ("MusicBrainz maps release details, tracks, labels, genres, and cover art", MusicBrainzServiceTests.MapsAlbumInformation),
             ("MusicBrainz retries transient API and transport failures", MusicBrainzServiceTests.RetriesTransientApiFailures),
             ("music information failures keep accurate retry states", MusicBrainzServiceTests.ClassifiesLookupFailures),
@@ -394,6 +396,8 @@ static class AppSettingsServiceTests
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             invalidProvider.Settings.Behavior.BurnLyricsProvider);
+        // Settings saved before the option existed keep the online-cover default.
+        Check.True(invalidProvider.Settings.Behavior.PreferOnlineCoverArt);
         Check.Equal(string.Empty, invalidProvider.Settings.Appearance.PlayerThemeColor);
 
         var legacyPath = Path.Combine(temp.Path, "legacy-settings.json");
@@ -2029,6 +2033,7 @@ static class ModelTests
         Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p", ScrobblingEnabled = true }.IsConfigured);
         Check.True(new LastFmCredentials { Enabled = true, ApiKey = "a", ApiSecret = "s", Username = "u", Password = "p" }.HasScrobblingCredentials);
         Check.True(new BehaviorSettings().CloseToTray);
+        Check.True(new BehaviorSettings().PreferOnlineCoverArt);
         Check.Equal(
             BurnLyricsProvider.MusicBrainzAssisted,
             new BehaviorSettings().BurnLyricsProvider);
@@ -2893,6 +2898,16 @@ static class MusicBrainzServiceTests
                   "annotation": " Long-form artist note. ",
                   "relations": [
                     {
+                      "type": "wikidata",
+                      "ended": false,
+                      "url": { "resource": "https://www.wikidata.org.example/wiki/Q999" }
+                    },
+                    {
+                      "type": "wikidata",
+                      "ended": false,
+                      "url": { "resource": "https://www.wikidata.org/wiki/Q12345" }
+                    },
+                    {
                       "type": "image",
                       "ended": true,
                       "url": { "resource": "https://commons.wikimedia.org/wiki/File:Old_photo.jpg" }
@@ -2955,6 +2970,7 @@ static class MusicBrainzServiceTests
         Check.Equal(
             "https://commons.wikimedia.org/wiki/File:The_Artist_live.jpg",
             result.ImagePageUrl);
+        Check.Equal("https://www.wikidata.org/wiki/Q12345", result.WikidataUrl);
         Check.Sequence(new[] { "Stage Name", "Real Name" }, result.Aliases);
         Check.Sequence(new[] { "art pop", "electronic", "singer-songwriter" }, result.Genres);
         Check.Equal(1, handler.Count);
@@ -3864,6 +3880,16 @@ static class ArtistArtworkServiceTests
             Check.Equal(1, untrustedThumbHandler.Count);
         }
 
+        var lookalikeThumbHandler = new FakeHttpMessageHandler(_ =>
+            CommonsMetadata("https://thumb.wikimedia.org.example/artist.png"));
+        using (var lookalikeThumbClient = new HttpClient(lookalikeThumbHandler))
+        using (var service = new ArtistArtworkService(lookalikeThumbClient))
+        {
+            Check.Null(service.FetchAsync("artist-lookalike", "https://commons.wikimedia.org/wiki/File:Photo.png")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, lookalikeThumbHandler.Count);
+        }
+
         var redirectHandler = new FakeHttpMessageHandler(_ =>
         {
             var response = new HttpResponseMessage(HttpStatusCode.Found);
@@ -3925,6 +3951,157 @@ static class ArtistArtworkServiceTests
                     cancelled.Token)
                 .GetAwaiter()
                 .GetResult());
+    }
+
+    public static void FallsBackToWikidataImage()
+    {
+        var png = Png(1, 1, [10, 20, 30, 255]);
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("www.wikidata.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Equal("/w/api.php", uri.AbsolutePath);
+                Check.Contains("action=wbgetclaims", uri.Query);
+                Check.Contains("property=P18", uri.Query);
+                Check.Contains("entity=Q42", uri.Query);
+                return JsonText("""
+                    {
+                      "claims": {
+                        "P18": [
+                          { "rank": "deprecated", "mainsnak": { "snaktype": "value", "datavalue": { "value": "Old Photo.jpg" } } },
+                          { "rank": "normal", "mainsnak": { "snaktype": "value", "datavalue": { "value": "Normal Photo.jpg" } } },
+                          { "rank": "preferred", "mainsnak": { "snaktype": "value", "datavalue": { "value": "Best Photo.png" } } }
+                        ]
+                      }
+                    }
+                    """);
+            }
+
+            if (uri.Host.Equals("commons.wikimedia.org", StringComparison.OrdinalIgnoreCase))
+            {
+                Check.Contains("titles=File:Best_Photo.png", Uri.UnescapeDataString(uri.Query));
+                return CommonsMetadata("https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b1/Best_Photo.png/960px-Best_Photo.png?utm_source=commons.wikimedia.org");
+            }
+
+            Check.Equal("thumb.wikimedia.org", uri.Host);
+            var response = Bytes(png);
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            return response;
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new ArtistArtworkService(client);
+        var result = service.FetchAsync("artist-wd", string.Empty, "https://www.wikidata.org/wiki/Q42")
+            .GetAwaiter()
+            .GetResult();
+
+        Check.NotNull(result);
+        Check.Sequence(png, result!.Data);
+        Check.Equal("https://commons.wikimedia.org/wiki/File:Best_Photo.png", result.SourcePageUrl);
+        Check.Equal("CC BY-SA 4.0", result.LicenseName);
+        Check.Equal(3, handler.Count);
+
+        // A direct Commons relation wins without touching Wikidata.
+        var commonsOnlyHandler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            Check.False(uri.Host.Equals("www.wikidata.org", StringComparison.OrdinalIgnoreCase));
+            return CommonsMetadata("https://evil.example/stop.png");
+        });
+        using (var commonsOnlyClient = new HttpClient(commonsOnlyHandler))
+        using (var commonsOnlyService = new ArtistArtworkService(commonsOnlyClient))
+        {
+            Check.Null(commonsOnlyService.FetchAsync(
+                    "artist-direct",
+                    "https://commons.wikimedia.org/wiki/File:Photo.png",
+                    "https://www.wikidata.org/wiki/Q42")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, commonsOnlyHandler.Count);
+        }
+
+        // Unsafe Wikidata input never starts a request.
+        var untouchedHandler = new FakeHttpMessageHandler(_ =>
+            throw new InvalidOperationException("Unsafe input must not start a request."));
+        using (var untouchedClient = new HttpClient(untouchedHandler))
+        using (var untouchedService = new ArtistArtworkService(untouchedClient))
+        {
+            foreach (var unsafeUrl in new[]
+                     {
+                         "http://www.wikidata.org/wiki/Q42",
+                         "https://www.wikidata.org.example/wiki/Q42",
+                         "https://www.wikidata.org/wiki/Q42?action=raw",
+                         "https://www.wikidata.org/wiki/P18",
+                         "https://www.wikidata.org/wiki/Q42#P18",
+                         "https://www.wikidata.org/wiki/Special:EntityData/Q42.json"
+                     })
+            {
+                Check.Null(untouchedService.FetchAsync("artist", string.Empty, unsafeUrl)
+                    .GetAwaiter().GetResult());
+            }
+
+            Check.Equal(0, untouchedHandler.Count);
+        }
+
+        // Claims without a usable file, or a redirect off Wikidata, yield no photo.
+        var noFileHandler = new FakeHttpMessageHandler(_ => JsonText("""
+            {
+              "claims": {
+                "P18": [
+                  { "rank": "normal", "mainsnak": { "snaktype": "somevalue" } },
+                  { "rank": "normal", "mainsnak": { "snaktype": "value", "datavalue": { "value": "../evil/Photo.png" } } },
+                  { "rank": "normal", "mainsnak": { "snaktype": "value", "datavalue": { "value": { "id": "Q1" } } } }
+                ]
+              }
+            }
+            """));
+        using (var noFileClient = new HttpClient(noFileHandler))
+        using (var noFileService = new ArtistArtworkService(noFileClient))
+        {
+            Check.Null(noFileService.FetchAsync("artist-nofile", string.Empty, "https://www.wikidata.org/wiki/Q42")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, noFileHandler.Count);
+        }
+
+        var redirectHandler = new FakeHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Found);
+            response.Headers.Location = new Uri("https://evil.example/w/api.php");
+            return response;
+        });
+        using (var redirectClient = new HttpClient(redirectHandler))
+        using (var redirectService = new ArtistArtworkService(redirectClient))
+        {
+            Check.Null(redirectService.FetchAsync("artist-redirect", string.Empty, "https://www.wikidata.org/wiki/Q42")
+                .GetAwaiter().GetResult());
+            Check.Equal(1, redirectHandler.Count);
+        }
+    }
+
+    public static void ParsesWikidataInputsSafely()
+    {
+        Check.Equal("Q42", ArtistArtworkService.ParseWikidataEntityId(" https://www.wikidata.org/wiki/Q42 "));
+        Check.Equal("Q42", ArtistArtworkService.ParseWikidataEntityId("https://www.wikidata.org/entity/Q42"));
+        Check.Equal(string.Empty, ArtistArtworkService.ParseWikidataEntityId("https://www.wikidata.org/wiki/Q0"));
+        Check.Equal(string.Empty, ArtistArtworkService.ParseWikidataEntityId("https://www.wikidata.org/wiki/q42"));
+        Check.Equal(string.Empty, ArtistArtworkService.ParseWikidataEntityId("https://www.wikidata.org:8443/wiki/Q42"));
+        Check.Equal(string.Empty, ArtistArtworkService.ParseWikidataEntityId("https://user@www.wikidata.org/wiki/Q42"));
+        Check.Equal(string.Empty, ArtistArtworkService.ParseWikidataEntityId(null));
+
+        Check.Equal(
+            "https://commons.wikimedia.org/wiki/File:A_%26_B_%28live%29.jpg",
+            ArtistArtworkService.SelectWikidataImagePageUrl(Encoding.UTF8.GetBytes("""
+                {"claims":{"P18":[{"rank":"normal","mainsnak":{"snaktype":"value","datavalue":{"value":" A & B (live).jpg "}}}]}}
+                """)));
+        Check.Equal(string.Empty, ArtistArtworkService.SelectWikidataImagePageUrl(Encoding.UTF8.GetBytes("{}")));
+        Check.Equal(string.Empty, ArtistArtworkService.SelectWikidataImagePageUrl(Encoding.UTF8.GetBytes("""
+            {"claims":{"P18":[null,{"rank":"deprecated","mainsnak":{"snaktype":"value","datavalue":{"value":"Old.jpg"}}}]}}
+            """)));
+        Check.Equal(string.Empty, ArtistArtworkService.SelectWikidataImagePageUrl(Encoding.UTF8.GetBytes("""
+            {"claims":{"P18":[{"rank":"normal","mainsnak":{"snaktype":"value","datavalue":{"value":"Photo.jpg#frag"}}}]}}
+            """)));
+        Check.Throws<System.Text.Json.JsonException>(() =>
+            ArtistArtworkService.SelectWikidataImagePageUrl(Encoding.UTF8.GetBytes("not json")));
     }
 
     private static HttpResponseMessage CommonsMetadata(string thumbnailUrl)

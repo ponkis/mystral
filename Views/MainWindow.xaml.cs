@@ -307,6 +307,14 @@ public partial class MainWindow : Window
         _artistArtworkService = new ArtistArtworkService();
         _globeConnectionService = new GlobeConnectionService(_settingsService);
         MusicInfoPanel.Initialize(_musicBrainzService, _artistArtworkService);
+        _mediaService.OnlineCoverArtProvider = (snapshot, cancellationToken) =>
+            _musicBrainzService.FetchTrackCoverArtworkAsync(
+                snapshot.Title,
+                snapshot.Artist,
+                snapshot.Album,
+                snapshot.Duration,
+                cancellationToken);
+        _mediaService.PreferOnlineCoverArt = _settingsService.Settings.Behavior.PreferOnlineCoverArt;
         MusicInfoPanel.TintChanged += MusicInfoPanel_TintChanged;
         _mediaService.SnapshotChanged += OnSnapshotChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
@@ -7259,6 +7267,13 @@ public partial class MainWindow : Window
         RefreshLastFmForSnapshot(Snapshot, force: true);
         UpdateScrobblingForSnapshot(Snapshot, force: true);
         ApplyPlayerAppearance();
+        var preferOnlineCoverArt = _settingsService.Settings.Behavior.PreferOnlineCoverArt;
+        if (_mediaService.PreferOnlineCoverArt != preferOnlineCoverArt)
+        {
+            _mediaService.PreferOnlineCoverArt = preferOnlineCoverArt;
+            _ = _mediaService.RefreshAsync();
+        }
+
         var alwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop;
         if (_openDialogCount > 0)
         {

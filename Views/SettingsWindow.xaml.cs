@@ -138,6 +138,7 @@ public partial class SettingsWindow : Window
         EnableNotificationsCheckBox.IsChecked = settings.Behavior.EnableNotifications;
         StartWithWindowsCheckBox.IsChecked = settings.Behavior.StartWithWindows;
         CheckForUpdatesOnStartupCheckBox.IsChecked = settings.Behavior.CheckForUpdatesOnStartup;
+        PreferOnlineCoverArtCheckBox.IsChecked = settings.Behavior.PreferOnlineCoverArt;
         BurnLyricsProviderComboBox.SelectedIndex = settings.Behavior.BurnLyricsProvider == BurnLyricsProvider.Lrclib
             ? 1
             : 0;
@@ -443,6 +444,7 @@ public partial class SettingsWindow : Window
                 AlwaysOnTop = _settingsService.Settings.Behavior.AlwaysOnTop,
                 StartWithWindows = StartWithWindowsCheckBox.IsChecked == true,
                 CheckForUpdatesOnStartup = CheckForUpdatesOnStartupCheckBox.IsChecked == true,
+                PreferOnlineCoverArt = PreferOnlineCoverArtCheckBox.IsChecked == true,
                 BurnLyricsProvider = BurnLyricsProviderComboBox.SelectedIndex == 1
                     ? BurnLyricsProvider.Lrclib
                     : BurnLyricsProvider.MusicBrainzAssisted

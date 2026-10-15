@@ -63,6 +63,12 @@ public sealed record class BehaviorSettings
     public bool AlwaysOnTop { get; set; } = true;
     public bool StartWithWindows { get; set; } = false;
     public bool CheckForUpdatesOnStartup { get; set; } = true;
+
+    /// <summary>
+    /// Show the cover found online (MusicBrainz / Cover Art Archive) instead of the
+    /// media session's thumbnail, falling back to the thumbnail when none is found.
+    /// </summary>
+    public bool PreferOnlineCoverArt { get; set; } = true;
     public BurnLyricsProvider BurnLyricsProvider { get; set; } = BurnLyricsProvider.MusicBrainzAssisted;
 }
 

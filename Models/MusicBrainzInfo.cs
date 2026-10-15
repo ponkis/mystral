@@ -37,6 +37,7 @@ public sealed record MusicBrainzArtistInfo(
     string Disambiguation,
     string Annotation,
     string ImagePageUrl,
+    string WikidataUrl,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<string> Genres);
 
