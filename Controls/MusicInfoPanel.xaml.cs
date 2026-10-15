@@ -917,7 +917,7 @@ public partial class MusicInfoPanel : UserControl, IDisposable
         AddSection(ArtistDetailsPanel, "Artist");
         AddDetail(ArtistDetailsPanel, "Name", info.Name);
         AddDetail(ArtistDetailsPanel, "Track credit", fullCredit);
-        AddDetail(ArtistDetailsPanel, "Country", info.Country);
+        AddCountryDetail(ArtistDetailsPanel, "Country", info.Country);
         AddDetail(ArtistDetailsPanel, "Aliases", JoinValues(info.Aliases));
         AddDetail(ArtistDetailsPanel, "Genres", JoinValues(info.Genres));
         AddDetail(ArtistDetailsPanel, "About", info.Annotation);
@@ -989,6 +989,19 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             return;
         }
 
+        var valueBlock = new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(235, 241, 239)),
+            FontSize = prominent ? 14 : 13,
+            FontWeight = prominent ? FontWeights.SemiBold : FontWeights.Normal,
+            Text = value,
+            TextWrapping = TextWrapping.Wrap
+        };
+        AddDetailRow(panel, label, valueBlock, prominent);
+    }
+
+    private static void AddDetailRow(Panel panel, string label, FrameworkElement valueElement, bool prominent)
+    {
         var row = new Grid { Margin = new Thickness(0, 0, 0, prominent ? 6 : 5) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(104) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -1002,18 +1015,157 @@ public partial class MusicInfoPanel : UserControl, IDisposable
             FontWeight = FontWeights.SemiBold,
             Text = label
         };
-        var valueBlock = new TextBlock
-        {
-            Foreground = new SolidColorBrush(Color.FromRgb(235, 241, 239)),
-            FontSize = prominent ? 14 : 13,
-            FontWeight = prominent ? FontWeights.SemiBold : FontWeights.Normal,
-            Text = value,
-            TextWrapping = TextWrapping.Wrap
-        };
-        Grid.SetColumn(valueBlock, 1);
+        Grid.SetColumn(valueElement, 1);
         row.Children.Add(labelBlock);
-        row.Children.Add(valueBlock);
+        row.Children.Add(valueElement);
         panel.Children.Add(row);
+    }
+
+    // MusicBrainz reports ISO 3166-1 alpha-2 codes plus a few user-assigned ones;
+    // Europe (XE) maps to the EU flag, the rest (XW, XU, legacy states) stay text.
+    private static void AddCountryDetail(Panel panel, string label, string? countryCode)
+    {
+        countryCode = countryCode?.Trim();
+        if (string.IsNullOrWhiteSpace(countryCode))
+        {
+            return;
+        }
+
+        if (TryCreateGlossyFlag(countryCode) is { } flag)
+        {
+            AddDetailRow(panel, label, flag, prominent: false);
+        }
+        else
+        {
+            AddDetail(panel, label, countryCode);
+        }
+    }
+
+    private static FrameworkElement? TryCreateGlossyFlag(string countryCode)
+    {
+        var flagCode = countryCode.ToLowerInvariant() switch
+        {
+            "xe" => "eu",
+            "uk" => "gb",
+            var code => code
+        };
+        if (flagCode.Length != 2
+            || !flagCode.All(char.IsAsciiLetterLower)
+            || !File.Exists(Path.Combine(AppContext.BaseDirectory, "Resources", "Flags", $"{flagCode}.png")))
+        {
+            return null;
+        }
+
+        BitmapSource source;
+        try
+        {
+            source = (BitmapSource)IconImageSource.LoadSiteImage($"Resources/Flags/{flagCode}.png");
+        }
+        catch (Exception ex) when (ex is IOException or NotSupportedException or InvalidCastException)
+        {
+            return null;
+        }
+
+        const double height = 20;
+        const double cornerRadius = 3;
+        var aspect = source.PixelHeight > 0 ? (double)source.PixelWidth / source.PixelHeight : 1.5;
+        var width = Math.Round(Math.Clamp(height * aspect, 20, 34));
+
+        var face = new Grid
+        {
+            Width = width,
+            Height = height,
+            Clip = new RectangleGeometry(new Rect(0, 0, width, height), cornerRadius, cornerRadius),
+            // Keeps the gloss and bevel off transparent areas of non-rectangular flags (Nepal).
+            OpacityMask = new ImageBrush(source) { Stretch = Stretch.UniformToFill }
+        };
+
+        var image = new Image
+        {
+            Source = source,
+            Stretch = Stretch.UniformToFill,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
+        face.Children.Add(image);
+
+        // Lower shading gives the face some curvature under the highlight.
+        face.Children.Add(new Border
+        {
+            Background = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new(Color.FromArgb(0, 0, 0, 0), 0.45),
+                    new(Color.FromArgb(70, 0, 0, 0), 1.0)
+                },
+                new Point(0, 0),
+                new Point(0, 1))
+        });
+
+        // Glass highlight: bright upper half ending in a hard edge at the middle.
+        face.Children.Add(new Border
+        {
+            Background = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new(Color.FromArgb(170, 255, 255, 255), 0.0),
+                    new(Color.FromArgb(70, 255, 255, 255), 0.48),
+                    new(Color.FromArgb(0, 255, 255, 255), 0.5),
+                    new(Color.FromArgb(0, 255, 255, 255), 0.82),
+                    new(Color.FromArgb(40, 255, 255, 255), 1.0)
+                },
+                new Point(0, 0),
+                new Point(0, 1))
+        });
+
+        // Bevel: light top rim fading into a darker bottom rim.
+        face.Children.Add(new Border
+        {
+            CornerRadius = new CornerRadius(cornerRadius),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new LinearGradientBrush(
+                Color.FromArgb(150, 255, 255, 255),
+                Color.FromArgb(120, 0, 0, 0),
+                90)
+        });
+
+        var countryName = GetCountryDisplayName(countryCode);
+        var container = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 0, 0, 1),
+            Child = face,
+            ToolTip = countryName,
+            Effect = new DropShadowEffect
+            {
+                BlurRadius = 4,
+                ShadowDepth = 1,
+                Direction = 270,
+                Opacity = 0.5,
+                Color = Colors.Black
+            }
+        };
+        System.Windows.Automation.AutomationProperties.SetName(container, countryName);
+        return container;
+    }
+
+    private static string GetCountryDisplayName(string countryCode)
+    {
+        if (string.Equals(countryCode, "XE", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Europe";
+        }
+
+        try
+        {
+            return new System.Globalization.RegionInfo(countryCode).EnglishName;
+        }
+        catch (ArgumentException)
+        {
+            return countryCode.ToUpperInvariant();
+        }
     }
 
     private static void AddAlbumTrack(
