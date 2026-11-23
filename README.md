@@ -42,6 +42,13 @@ If Last.fm rejects the API key, Mystral stops using Last.fm and says so in the
 tray menu and in the `Last.fm` settings; everything else keeps working. It tries
 the key again after settings are saved or the app restarts.
 
+`Prefer online cover art` (under `Behavior`, on by default) shows the
+track's cover from MusicBrainz and the Cover Art Archive instead of the one
+the media app provides. The cover is used only when it belongs to the same
+artist and album, allowing for edition names such as "(Deluxe)"; when the
+track only turns up on a compilation, a remix, or another artist's song with
+the same name, the media app's cover stays.
+
 Under `Behavior`, choose how the burn editor looks up lyrics:
 
 - `MusicBrainz (default)` first matches the song on MusicBrainz and uses that
@@ -204,7 +211,7 @@ The test suite covers the vital headless app logic:
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
 - media-session timestamp projection, stale-position filtering, seek reconciliation, and loop-restart detection
 - model defaults and artwork tint edge cases
-- MusicBrainz recording, artist/image-relation, and multi-disc release mapping, confidence selection, artist/release artwork security bounds, outcomes, and failure handling
+- MusicBrainz recording, artist/image-relation, and multi-disc release mapping, confidence selection, online cover release matching, artist/release artwork security bounds, outcomes, and failure handling
 - burn metadata validation, lyric-tag round trips, and preservation of the source audio
 - interrupted update downloads, partial-file cleanup, and failure-message handling
 
@@ -235,7 +242,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.3.0</VersionPrefix>
+<VersionPrefix>2.3.6</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

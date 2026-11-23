@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Mystral.Configuration;
 using Mystral.Models;
 
@@ -30,6 +31,19 @@ public sealed class MusicBrainzService : IDisposable
     private static readonly object ArtworkBackoffSync = new();
     private static DateTimeOffset _artworkRetryNotBefore = DateTimeOffset.MinValue;
     private const string ArtworkOriginHost = "coverartarchive.org";
+
+    // Trailing edition labels that store and MusicBrainz release titles add or
+    // omit independently: "(Deluxe)", "[Expanded Edition]", "- Single", "- 2011 Remaster".
+    private static readonly Regex AlbumEditionSuffix = new(
+        @"(?:\s*[\(\[][^\(\)\[\]]*\b(?:deluxe|edition|expanded|remaster(?:ed)?|anniversary|bonus|special|single|ep)\b[^\(\)\[\]]*[\)\]]"
+        + @"|\s+[-–—]\s+(?:[^-–—]*\b(?:deluxe|edition|expanded|remaster(?:ed)?|anniversary|bonus|special)\b[^-–—]*|single|ep))\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    // Words that mark a different take of a song: a remix or cover has its own art.
+    private static readonly Regex AlternateVersionWord = new(
+        @"\b(?:remix|remixed|remake|cover|karaoke|instrumental|acoustic|live|sped\s+up|slowed)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly bool _enforceTrustedArtworkHosts;
@@ -141,7 +155,13 @@ public sealed class MusicBrainzService : IDisposable
 
     /// <summary>
     /// Resolves the now-playing recording and downloads only its release front
-    /// cover. Returns null when no confident match or cover exists.
+    /// cover. Returns null when no confident match or cover exists. The cover
+    /// replaces artwork the media app already shows, so it needs a stricter
+    /// match than track information: the recording's artist must match, it must
+    /// not be a remix/cover/live take the title does not ask for, and the
+    /// release must be the playing album (allowing for edition suffixes such as
+    /// "(Deluxe)") by the same artist. Without an album, only the artist's own
+    /// non-compilation releases qualify.
     /// </summary>
     public async Task<byte[]?> FetchTrackCoverArtworkAsync(
         string title,
@@ -150,7 +170,8 @@ public sealed class MusicBrainzService : IDisposable
         TimeSpan duration,
         CancellationToken cancellationToken = default)
     {
-        var match = await FindRecordingAsync(title, artist, album, string.Empty, duration, cancellationToken);
+        var match = await FindRecordingAsync(
+            title, artist, album, string.Empty, duration, cancellationToken, forCoverArt: true);
         if (match?.Release is null)
         {
             return null;
@@ -304,7 +325,8 @@ public sealed class MusicBrainzService : IDisposable
         string album,
         string isrc,
         TimeSpan duration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forCoverArt = false)
     {
         var queries = BuildRecordingQueries(title, artist, album, isrc);
         if (queries.Count == 0)
@@ -319,19 +341,107 @@ public sealed class MusicBrainzService : IDisposable
             using var response = await SendMusicBrainzAsync(searchUri, cancellationToken);
             response.EnsureSuccessStatusCode();
             var payload = await ReadMusicBrainzPayloadAsync<RecordingSearchResponse>(response, cancellationToken);
-            var recording = payload.Recordings
+            var candidates = payload.Recordings
                 .OrderByDescending(item => ScoreRecording(item, title, artist, album, duration))
-                .FirstOrDefault(item => IsConfidentRecording(item, title, artist, album, isrc, duration));
-            if (recording is not null)
+                .Where(item => IsConfidentRecording(item, title, artist, album, isrc, duration));
+            if (!forCoverArt)
             {
-                var release = recording.Releases
-                    .OrderByDescending(item => ScoreRelease(item, album))
-                    .FirstOrDefault();
-                return new MatchedRecording(recording, release);
+                var recording = candidates.FirstOrDefault();
+                if (recording is not null)
+                {
+                    var release = recording.Releases
+                        .OrderByDescending(item => ScoreRelease(item, album))
+                        .FirstOrDefault();
+                    return new MatchedRecording(recording, release);
+                }
+
+                continue;
+            }
+
+            foreach (var recording in candidates)
+            {
+                var release = SelectCoverArtRelease(recording, title, artist, album);
+                if (release is not null)
+                {
+                    return new MatchedRecording(recording, release);
+                }
             }
         }
 
         return null;
+    }
+
+    private static ReleaseResult? SelectCoverArtRelease(
+        RecordingResult recording,
+        string requestedTitle,
+        string requestedArtist,
+        string requestedAlbum)
+    {
+        if (!ArtistMatches(recording.ArtistCredit, requestedArtist)
+            || IsUnrequestedAlternateVersion(recording, requestedTitle))
+        {
+            return null;
+        }
+
+        var albumProvided = !string.IsNullOrWhiteSpace(requestedAlbum);
+        return recording.Releases
+            .Where(release => !string.Equals(release.Status, "Bootleg", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(release.Status, "Pseudo-Release", StringComparison.OrdinalIgnoreCase))
+            // Search results omit a release's artist credit when it equals the
+            // recording's; a compilation carries its own (often Various Artists).
+            .Where(release => ArtistMatches(
+                release.ArtistCredit.Count > 0 ? release.ArtistCredit : recording.ArtistCredit,
+                requestedArtist))
+            .Where(release => albumProvided
+                ? AlbumTitleMatches(release.Title, requestedAlbum)
+                : !IsCompilationLikeRelease(release))
+            .OrderByDescending(release => ScoreRelease(release, requestedAlbum))
+            .FirstOrDefault();
+    }
+
+    private static bool AlbumTitleMatches(string? candidate, string requested)
+    {
+        return MetadataTextEquals(candidate, requested)
+            || MetadataTextEquals(
+                StripAlbumEditionQualifier(candidate ?? string.Empty),
+                StripAlbumEditionQualifier(requested));
+    }
+
+    private static string StripAlbumEditionQualifier(string value)
+    {
+        var current = value.Trim();
+        while (true)
+        {
+            var stripped = AlbumEditionSuffix.Replace(current, string.Empty).Trim();
+            if (stripped.Length == 0 || stripped == current)
+            {
+                return current;
+            }
+
+            current = stripped;
+        }
+    }
+
+    private static bool IsCompilationLikeRelease(ReleaseResult release)
+    {
+        return release.ReleaseGroup?.SecondaryTypes.Any(type =>
+            type.Equals("Compilation", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("Remix", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("DJ-mix", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("Mixtape/Street", StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    private static bool IsUnrequestedAlternateVersion(RecordingResult recording, string requestedTitle)
+    {
+        var labels = AlternateVersionLabels($"{recording.Title} {recording.Disambiguation}");
+        return labels.Count > 0 && !labels.IsSubsetOf(AlternateVersionLabels(requestedTitle));
+    }
+
+    private static HashSet<string> AlternateVersionLabels(string value)
+    {
+        return AlternateVersionWord.Matches(value)
+            .Select(match => NormalizeMetadataText(match.Value))
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static async Task<T> ReadMusicBrainzPayloadAsync<T>(
@@ -1434,13 +1544,21 @@ public sealed class MusicBrainzService : IDisposable
         }
 
         var requestedPrimary = StripFeaturingQualifier(requested);
+        // Media apps list collaborators as "A, B" or "A & B" where MusicBrainz
+        // writes "A feat. B"; any one listed artist matching a credit counts.
+        var requestedNames = requestedPrimary
+            .Split(ArtistListSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Prepend(requestedPrimary)
+            .Prepend(requested)
+            .ToArray();
         return candidateCredits.Any(credit =>
         {
             var creditedName = credit.Name ?? credit.Artist?.Name;
-            return MetadataTextEquals(creditedName, requested)
-                || MetadataTextEquals(creditedName, requestedPrimary);
+            return requestedNames.Any(name => MetadataTextEquals(creditedName, name));
         });
     }
+
+    private static readonly string[] ArtistListSeparators = [", ", " & ", "; ", " / ", " x "];
 
     private static bool MetadataTextEquals(string? left, string? right)
     {

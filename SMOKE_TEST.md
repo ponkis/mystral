@@ -41,6 +41,7 @@ For packaged development builds:
 
 - Start playback in Spotify, a browser, or another Windows media-session app.
 - Confirm title, artist/description, progress, duration, play state, and artwork update.
+- With `Prefer online cover art` on, play a track from a deluxe edition that also appears on compilations (for example David Guetta & OneRepublic — I Don't Wanna Wait from Artificial Paradise (Deluxe)) and a song that shares its title with other artists' songs (for example The Chainsmokers — Closer). Confirm the cover never changes to a compilation, remix, or other artist's cover after the first few seconds; it either stays on the media app's cover or switches to the same album's cover.
 - Test play/pause, next, previous, and seek controls.
 - In compact, expanded, and fullscreen playback controls, confirm Lyrics appears before More.
 - In compact, expanded, lyrics, and fullscreen modes, click an empty point on the progress bar and drag from the track (not only the thumb); confirm every progress bar follows the same target.

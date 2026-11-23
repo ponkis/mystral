@@ -47,6 +47,7 @@ internal static class Program
             ("artwork loader validates decoded image content instead of extensions", ImageArtworkLoaderTests.ValidatesDecodedImageContent),
             ("MusicBrainz maps the best recording, release, cover, and medium artwork", MusicBrainzServiceTests.MapsRecordingAndArtworkResponses),
             ("MusicBrainz maps fast track information with stable entity IDs", MusicBrainzServiceTests.MapsTrackInformation),
+            ("online cover art needs the playing album and artist, not a compilation, remake, or namesake", MusicBrainzServiceTests.OnlineCoverArtRequiresMatchingRelease),
             ("MusicBrainz recovers featured-credit and punctuation metadata variants", MusicBrainzServiceTests.RecoversCommonMetadataVariants),
             ("MusicBrainz finds historical credits after an artist rename", MusicBrainzServiceTests.FindsHistoricalCreditAfterArtistRename),
             ("MusicBrainz rejects mismatched titles and checks lower-ranked candidates", MusicBrainzServiceTests.ChoosesConfidentRecordingCandidate),
@@ -3207,6 +3208,172 @@ static class MusicBrainzServiceTests
         Check.Null(withoutArtwork.CoverArtwork);
         Check.Equal(ArtworkFetchOutcome.NotAvailable, withoutArtwork.CoverOutcome);
         Check.Equal(4, handler.Count);
+    }
+
+    public static void OnlineCoverArtRequiresMatchingRelease()
+    {
+        var coverBytes = new byte[] { 9, 8, 7, 6 };
+        var requestedReleases = new List<string>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var uri = request.RequestUri ?? throw new InvalidOperationException("Request URI was missing.");
+            if (uri.Host.Equals("coverartarchive.org", StringComparison.OrdinalIgnoreCase))
+            {
+                requestedReleases.Add(uri.AbsolutePath);
+                return JsonText("""
+                    {
+                      "images": [{
+                        "approved": true,
+                        "front": true,
+                        "types": ["Front"],
+                        "image": "http://assets.test/cover-original",
+                        "thumbnails": { "1200": "http://assets.test/cover-1200" }
+                      }]
+                    }
+                    """);
+            }
+
+            if (uri.Equals(new Uri("https://assets.test/cover-1200")))
+            {
+                return Bytes(coverBytes);
+            }
+
+            var query = Uri.UnescapeDataString(uri.Query);
+            if (query.Contains("I Don't Wanna Wait", StringComparison.Ordinal))
+            {
+                // The compilation outscores the album on format and status, and the
+                // store's "(Deluxe)" album title matches no MusicBrainz release exactly.
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "recording-wait",
+                        "score": 100,
+                        "title": "I Don't Wanna Wait",
+                        "length": 155000,
+                        "artist-credit": [
+                          { "name": "David Guetta", "joinphrase": " & " },
+                          { "name": "OneRepublic" }
+                        ],
+                        "releases": [
+                          {
+                            "id": "release-now-118",
+                            "title": "Now That's What I Call Music! 118",
+                            "status": "Official",
+                            "artist-credit": [{ "name": "Various Artists" }],
+                            "release-group": { "id": "group-now", "primary-type": "Album", "secondary-types": ["Compilation"] },
+                            "media": [{ "format": "CD" }]
+                          },
+                          {
+                            "id": "release-paradise",
+                            "title": "Artificial Paradise",
+                            "status": "Official",
+                            "artist-credit": [{ "name": "David Guetta" }],
+                            "release-group": { "id": "group-paradise", "primary-type": "Album" },
+                            "media": [{ "format": "Digital Media" }]
+                          }
+                        ]
+                      }]
+                    }
+                    """);
+            }
+
+            if (query.Contains("Without album", StringComparison.Ordinal))
+            {
+                return JsonText("""
+                    {
+                      "recordings": [{
+                        "id": "recording-hits-only",
+                        "score": 100,
+                        "title": "Without album",
+                        "length": 200000,
+                        "artist-credit": [{ "name": "Solo Artist" }],
+                        "releases": [{
+                          "id": "release-hits",
+                          "title": "Greatest Hits",
+                          "status": "Official",
+                          "release-group": { "id": "group-hits", "primary-type": "Album", "secondary-types": ["Compilation"] },
+                          "media": [{ "format": "CD" }]
+                        }]
+                      }]
+                    }
+                    """);
+            }
+
+            // A namesake's single passes the general confidence check on its
+            // matching release title, and the right artist's only hit is a remake.
+            Check.Contains("Closer", query);
+            return JsonText("""
+                {
+                  "recordings": [
+                    {
+                      "id": "recording-namesake",
+                      "score": 100,
+                      "title": "Closer",
+                      "length": 244000,
+                      "artist-credit": [{ "name": "Streex" }],
+                      "releases": [{ "id": "release-namesake", "title": "Closer", "status": "Official" }]
+                    },
+                    {
+                      "id": "recording-remake",
+                      "score": 95,
+                      "title": "Closer",
+                      "length": 244000,
+                      "disambiguation": "Streex remake",
+                      "artist-credit": [
+                        { "name": "The Chainsmokers", "joinphrase": " feat. " },
+                        { "name": "Halsey" }
+                      ],
+                      "releases": [{ "id": "release-remake", "title": "Closer", "status": "Official" }]
+                    }
+                  ]
+                }
+                """);
+        });
+
+        using var client = new HttpClient(handler);
+        using var service = new MusicBrainzService(client);
+
+        var deluxe = service.FetchTrackCoverArtworkAsync(
+                "I Don't Wanna Wait",
+                "David Guetta, OneRepublic",
+                "Artificial Paradise (Deluxe)",
+                TimeSpan.FromSeconds(155))
+            .GetAwaiter()
+            .GetResult();
+        Check.NotNull(deluxe);
+        Check.True(coverBytes.SequenceEqual(deluxe!));
+        Check.Equal(1, requestedReleases.Count);
+        Check.Equal("/release/release-paradise/", requestedReleases[0]);
+
+        var namesake = service.FetchTrackCoverArtworkAsync(
+                "Closer",
+                "The Chainsmokers, Halsey",
+                "Closer",
+                TimeSpan.FromSeconds(244))
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(namesake);
+
+        var compilationOnly = service.FetchTrackCoverArtworkAsync(
+                "Without album",
+                "Solo Artist",
+                string.Empty,
+                TimeSpan.FromSeconds(200))
+            .GetAwaiter()
+            .GetResult();
+        Check.Null(compilationOnly);
+        Check.Equal(1, requestedReleases.Count);
+
+        // Track information still identifies the recording and its best release.
+        var info = service.FetchTrackInfoAsync(
+                "I Don't Wanna Wait",
+                "David Guetta, OneRepublic",
+                "Artificial Paradise (Deluxe)",
+                TimeSpan.FromSeconds(155))
+            .GetAwaiter()
+            .GetResult();
+        Check.NotNull(info);
+        Check.Equal("recording-wait", info!.RecordingId);
     }
 
     public static void MapsRecordingAndArtworkResponses()
