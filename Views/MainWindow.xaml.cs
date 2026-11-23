@@ -6340,6 +6340,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_lastFmService.IsKeyRefused)
+        {
+            ResetScrobblingState();
+            SetScrobblingStatus($"Scrobbling: {LastFmService.KeyRefusedMessage}");
+            return;
+        }
+
         var query = LastFmMetadataCleaner.CreateQuery(snapshot);
         if (!LastFmMetadataCleaner.IsLikelySong(snapshot, query, out var skipReason))
         {
@@ -7414,7 +7421,11 @@ public partial class MainWindow : Window
             var enableScrobblingItem = CreateTrayScrobblingItem();
             var profileItem = CreateLastFmProfileItem();
             menu.Items.Add(enableScrobblingItem);
-            if (!string.IsNullOrWhiteSpace(_trayNowPlayingTrackName))
+            if (_lastFmService.IsKeyRefused)
+            {
+                menu.Items.Add(CreateLastFmKeyRefusedItem());
+            }
+            else if (!string.IsNullOrWhiteSpace(_trayNowPlayingTrackName))
             {
                 menu.Items.Add(CreateNowPlayingTrackItem(_trayNowPlayingTrackName));
             }
@@ -7482,6 +7493,26 @@ public partial class MainWindow : Window
             StaysOpenOnClick = true,
             Cursor = Cursors.Arrow
         };
+    }
+
+    private MenuItem CreateLastFmKeyRefusedItem()
+    {
+        var item = new MenuItem
+        {
+            Header = $"{LastFmService.KeyRefusedMessage} Check it in Settings.",
+            Icon = new Image
+            {
+                Source = GetSiteImageSource("Resources/Images/WarningIcon.png"),
+                Width = 16,
+                Height = 16
+            }
+        };
+        item.Click += (_, _) =>
+        {
+            RestoreFromTray();
+            ShowSettingsWindow();
+        };
+        return item;
     }
 
     private MenuItem CreateLastFmProfileItem()

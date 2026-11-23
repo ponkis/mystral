@@ -11,12 +11,20 @@ namespace Mystral.Services;
 public sealed class LastFmService : IDisposable
 {
     private const string BaseUrl = "https://ws.audioscrobbler.com/2.0/";
+    public const string KeyRefusedMessage = "Last.fm rejected your API key.";
+
+    // Last.fm's errors for a key it will not serve: 10 is an invalid key, 26 a
+    // suspended one.
+    private static readonly HashSet<int> KeyRefusedCodes = [10, 26];
 
     private readonly AppSettingsService _settingsService;
     private readonly HttpClient _httpClient;
     private readonly Dictionary<string, LastFmTrackInfo?> _cache = new(StringComparer.OrdinalIgnoreCase);
     private string _sessionKey = string.Empty;
     private string _sessionCredentialKey = string.Empty;
+    // The API key Last.fm last refused. Lookups stop while it is the saved key,
+    // until settings are saved again or the app restarts.
+    private volatile string _refusedApiKey = string.Empty;
 
     public LastFmService(AppSettingsService settingsService)
         : this(settingsService, new HttpClient { Timeout = TimeSpan.FromSeconds(10) })
@@ -32,6 +40,14 @@ public sealed class LastFmService : IDisposable
     }
 
     public bool IsConfigured => _settingsService.Settings.LastFm.HasViewerCredentials;
+    /// <summary>Last.fm refused the saved API key.</summary>
+    public bool IsKeyRefused => IsKeyRefusedFor(_settingsService.Settings.LastFm.ApiKey);
+
+    /// <summary>Last.fm refused this API key the last time it was used.</summary>
+    public bool IsKeyRefusedFor(string apiKey) =>
+        !string.IsNullOrEmpty(_refusedApiKey)
+        && string.Equals(_refusedApiKey, apiKey.Trim(), StringComparison.Ordinal);
+
     public bool IsScrobblingEnabled =>
         _settingsService.Settings.LastFm.ScrobblingEnabled
         && _settingsService.Settings.LastFm.HasScrobblingCredentials;
@@ -53,9 +69,13 @@ public sealed class LastFmService : IDisposable
             if (credentials.ScrobblingEnabled)
             {
                 var session = await GetSessionKeyAsync(credentials, forceRefresh: true, cancellationToken);
-                return string.IsNullOrWhiteSpace(session)
-                    ? new LastFmValidationResult(false, "Last.fm did not return a scrobbling session.")
-                    : new LastFmValidationResult(true, "Last.fm account and scrobbling verified.");
+                if (string.IsNullOrWhiteSpace(session))
+                {
+                    return new LastFmValidationResult(false, "Last.fm did not return a scrobbling session.");
+                }
+
+                ClearRefusal(credentials.ApiKey);
+                return new LastFmValidationResult(true, "Last.fm account and scrobbling verified.");
             }
 
             var url = $"{BaseUrl}?method=user.getInfo" +
@@ -69,7 +89,13 @@ public sealed class LastFmService : IDisposable
 
             if (response.IsSuccessStatusCode && doc.RootElement.TryGetProperty("user", out _))
             {
+                ClearRefusal(credentials.ApiKey);
                 return LastFmValidationResult.Success;
+            }
+
+            if (NoteRefusal(doc, credentials.ApiKey))
+            {
+                return new LastFmValidationResult(false, KeyRefusedMessage);
             }
 
             var message = TryGetLastFmErrorMessage(doc) ?? $"Last.fm rejected the credentials ({(int)response.StatusCode}).";
@@ -94,6 +120,7 @@ public sealed class LastFmService : IDisposable
         _cache.Clear();
         _sessionKey = string.Empty;
         _sessionCredentialKey = string.Empty;
+        _refusedApiKey = string.Empty;
     }
 
     public async Task<LastFmTrackInfo?> GetTrackInfoAsync(LastFmTrackQuery query, CancellationToken cancellationToken = default)
@@ -101,7 +128,8 @@ public sealed class LastFmService : IDisposable
         var credentials = _settingsService.Settings.LastFm;
         if (!credentials.HasViewerCredentials
             || string.IsNullOrWhiteSpace(query.ArtistName)
-            || string.IsNullOrWhiteSpace(query.TrackName))
+            || string.IsNullOrWhiteSpace(query.TrackName)
+            || IsKeyRefusedFor(credentials.ApiKey))
         {
             return null;
         }
@@ -121,14 +149,19 @@ public sealed class LastFmService : IDisposable
                       "&format=json&autocorrect=1";
 
             using var response = await _httpClient.GetAsync(url, cancellationToken);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+            if (NoteRefusal(doc, credentials.ApiKey))
+            {
+                // Not cached: the track is looked up again once the key works.
+                return null;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 _cache[key] = null;
                 return null;
             }
-
-            var json = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(json);
 
             if (!doc.RootElement.TryGetProperty("track", out var trackElement))
             {
@@ -182,6 +215,11 @@ public sealed class LastFmService : IDisposable
             return LastFmSubmitResult.Failure("Scrobbling is disabled.");
         }
 
+        if (IsKeyRefusedFor(credentials.ApiKey))
+        {
+            return LastFmSubmitResult.Failure(KeyRefusedMessage);
+        }
+
         try
         {
             var sessionKey = await GetSessionKeyAsync(credentials, forceRefresh: false, cancellationToken);
@@ -197,7 +235,7 @@ public sealed class LastFmService : IDisposable
         }
         catch (Exception ex)
         {
-            return LastFmSubmitResult.Failure($"Last.fm now playing failed: {ex.Message}");
+            return LastFmSubmitResult.Failure(IsKeyRefusedFor(credentials.ApiKey) ? KeyRefusedMessage : $"Last.fm now playing failed: {ex.Message}");
         }
     }
 
@@ -207,6 +245,11 @@ public sealed class LastFmService : IDisposable
         if (!IsScrobblingEnabled)
         {
             return LastFmSubmitResult.Failure("Scrobbling is disabled.");
+        }
+
+        if (IsKeyRefusedFor(credentials.ApiKey))
+        {
+            return LastFmSubmitResult.Failure(KeyRefusedMessage);
         }
 
         try
@@ -225,7 +268,7 @@ public sealed class LastFmService : IDisposable
         }
         catch (Exception ex)
         {
-            return LastFmSubmitResult.Failure($"Last.fm scrobble failed: {ex.Message}");
+            return LastFmSubmitResult.Failure(IsKeyRefusedFor(credentials.ApiKey) ? KeyRefusedMessage : $"Last.fm scrobble failed: {ex.Message}");
         }
     }
 
@@ -287,6 +330,11 @@ public sealed class LastFmService : IDisposable
         if (response.IsSuccessStatusCode && !doc.RootElement.TryGetProperty("error", out _))
         {
             return SignedPostResult.Success();
+        }
+
+        if (NoteRefusal(doc, parameters.TryGetValue("api_key", out var apiKey) ? apiKey : string.Empty))
+        {
+            return SignedPostResult.Failure(KeyRefusedMessage);
         }
 
         var message = TryGetLastFmErrorMessage(doc) ?? $"Last.fm rejected the request ({(int)response.StatusCode}).";
@@ -368,6 +416,30 @@ public sealed class LastFmService : IDisposable
                && milliseconds > 0
             ? TimeSpan.FromMilliseconds(milliseconds)
             : TimeSpan.Zero;
+    }
+
+    /// <summary>Remembers the key when Last.fm's answer refuses it.</summary>
+    private bool NoteRefusal(JsonDocument doc, string apiKey)
+    {
+        if (doc.RootElement.ValueKind != JsonValueKind.Object
+            || !doc.RootElement.TryGetProperty("error", out var error)
+            || error.ValueKind != JsonValueKind.Number
+            || !error.TryGetInt32(out var code)
+            || !KeyRefusedCodes.Contains(code))
+        {
+            return false;
+        }
+
+        _refusedApiKey = apiKey.Trim();
+        return true;
+    }
+
+    private void ClearRefusal(string apiKey)
+    {
+        if (IsKeyRefusedFor(apiKey))
+        {
+            _refusedApiKey = string.Empty;
+        }
     }
 
     private static string? TryGetLastFmErrorMessage(JsonDocument doc)
