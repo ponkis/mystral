@@ -40,6 +40,7 @@ internal static class Program
             ("lyrics service normalizes Apple Music media-session metadata", LyricsServiceTests.NormalizesAppleMusicMetadata),
             ("animated artwork parses playlists, prefers H.264, and keys by album", AnimatedArtworkServiceTests.ParsesPlaylistsAndKeys),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
+            ("Last.fm service stops asking once Last.fm rejects the API key", LastFmServiceTests.StopsWhenKeyIsRefused),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
@@ -2016,6 +2017,63 @@ static class LastFmServiceTests
         settings.Save(new AppSettings { LastFm = new LastFmCredentials { Enabled = true, ApiKey = "api2", ApiSecret = "secret", Username = "user", Password = "pass" } });
         Check.False(service.IsScrobblingEnabled);
         Check.Null(service.GetTrackInfoAsync(new LastFmTrackQuery("", "Artist", "")).GetAwaiter().GetResult());
+    }
+
+    public static void StopsWhenKeyIsRefused()
+    {
+        using var temp = TempDir.Create();
+        var settings = new AppSettingsService(Path.Combine(temp.Path, "settings.json"));
+        settings.Save(new AppSettings
+        {
+            LastFm = new LastFmCredentials
+            {
+                Enabled = true,
+                ApiKey = "dead",
+                ApiSecret = "secret",
+                Username = "user",
+                Password = "pass",
+                ScrobblingEnabled = true
+            }
+        });
+
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var body = request.Content is null ? "" : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var asked = request.RequestUri!.Query + body;
+            if (asked.Contains("api_key=dead", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.Forbidden)
+                {
+                    Content = new StringContent("{\"error\":10,\"message\":\"Invalid API key\"}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            return Json(new { track = new { name = "Song", url = "https://last.fm/track", artist = new { name = "Artist" } } });
+        });
+
+        using var service = new LastFmService(settings, new HttpClient(handler));
+        Check.False(service.IsKeyRefused);
+        Check.Null(service.GetTrackInfoAsync(new LastFmTrackQuery("Song", "Artist", "")).GetAwaiter().GetResult());
+        Check.True(service.IsKeyRefused);
+        Check.False(service.IsKeyRefusedFor("other"));
+        Check.Equal(1, handler.Count);
+
+        // No more lookups while the key stays refused.
+        Check.Null(service.GetTrackInfoAsync(new LastFmTrackQuery("Other Song", "Artist", "")).GetAwaiter().GetResult());
+        Check.Equal(1, handler.Count);
+
+        var scrobble = service.ScrobbleAsync(Track(), DateTimeOffset.FromUnixTimeSeconds(42)).GetAwaiter().GetResult();
+        Check.False(scrobble.IsSuccess);
+        Check.Equal(LastFmService.KeyRefusedMessage, scrobble.Message);
+
+        var validation = service.ValidateCredentialsAsync(new LastFmCredentials { Enabled = true, ApiKey = "dead", Username = "user" }).GetAwaiter().GetResult();
+        Check.False(validation.IsSuccess);
+        Check.Equal(LastFmService.KeyRefusedMessage, validation.Message);
+
+        // A new key is asked again, and the refused track was not remembered.
+        settings.Save(new AppSettings { LastFm = new LastFmCredentials { Enabled = true, ApiKey = "live", Username = "user" } });
+        Check.False(service.IsKeyRefused);
+        Check.NotNull(service.GetTrackInfoAsync(new LastFmTrackQuery("Song", "Artist", "")).GetAwaiter().GetResult());
     }
 }
 

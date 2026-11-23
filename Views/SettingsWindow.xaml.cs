@@ -1222,6 +1222,14 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        if (credentials.IsConfigured && _lastFmService.IsKeyRefusedFor(credentials.ApiKey))
+        {
+            SetLastFmStatus(
+                $"{LastFmService.KeyRefusedMessage} Check it, or turn Last.fm off.",
+                isWarning: true);
+            return;
+        }
+
         if (credentials.IsConfigured)
         {
             SetLastFmStatus(

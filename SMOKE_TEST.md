@@ -168,6 +168,7 @@ For packaged development builds:
 - Confirm the Last.fm link/action appears for valid track metadata.
 - If scrobbling is enabled, confirm now-playing/scrobble status does not report repeated failures.
 - Play an ad, podcast, very short clip, or idle state and confirm it is not treated as a scrobbleable song.
+- With Last.fm enabled and an API key Last.fm rejects, play a song and confirm the tray menu shows `Last.fm rejected your API key. Check it in Settings.` instead of the now playing line, that clicking it opens Settings, that the `Last.fm` status shows the same warning, and that playback, lyrics, and music information keep working.
 
 ## globe
 

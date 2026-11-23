@@ -38,6 +38,10 @@ requires the API secret and account password (the tray toggle enforces the same
 rule and stays in sync with an open Settings window). Scrobbling uses Last.fm
 `auth.getMobileSession`, `track.updateNowPlaying`, and `track.scrobble`.
 
+If Last.fm rejects the API key, Mystral stops using Last.fm and says so in the
+tray menu and in the `Last.fm` settings; everything else keeps working. It tries
+the key again after settings are saved or the app restarts.
+
 Under `Behavior`, choose how the burn editor looks up lyrics:
 
 - `MusicBrainz (default)` first matches the song on MusicBrainz and uses that
@@ -194,7 +198,7 @@ dotnet restore .\tests\Mystral.Tests\Mystral.Tests.csproj --source "$env:USERPRO
 The test suite covers the vital headless app logic:
 
 - LRC parsing and lyric result handling
-- Last.fm metadata cleanup, filtering, API requests, signatures, caching, and scrobbling paths
+- Last.fm metadata cleanup, filtering, API requests, signatures, caching, scrobbling paths, and rejected API keys
 - LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
