@@ -41,6 +41,8 @@ internal static class Program
             ("animated artwork parses playlists, prefers H.264, and keys by album", AnimatedArtworkServiceTests.ParsesPlaylistsAndKeys),
             ("Last.fm service validates, fetches, scrobbles, signs, and caches", LastFmServiceTests.UsesLastFmApiSafely),
             ("Last.fm service stops asking once Last.fm rejects the API key", LastFmServiceTests.StopsWhenKeyIsRefused),
+            ("globe client sends plays and now playing", GlobeListeningTests.SendsPlaysAndNowPlaying),
+            ("globe listen queue keeps plays until globe takes them", GlobeListeningTests.QueueKeepsPlaysUntilGlobeTakesThem),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
@@ -2075,6 +2077,121 @@ static class LastFmServiceTests
         settings.Save(new AppSettings { LastFm = new LastFmCredentials { Enabled = true, ApiKey = "live", Username = "user" } });
         Check.False(service.IsKeyRefused);
         Check.NotNull(service.GetTrackInfoAsync(new LastFmTrackQuery("Song", "Artist", "")).GetAwaiter().GetResult());
+    }
+}
+
+static class GlobeListeningTests
+{
+    private const string Token = "glb_mystral_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    public static void SendsPlaysAndNowPlaying()
+    {
+        var bodies = new List<(string Path, string Body)>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var body = request.Content is null ? "" : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            bodies.Add((request.RequestUri!.AbsolutePath, body));
+            Check.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            if (request.RequestUri.AbsolutePath == "/api/mystral/listens")
+            {
+                return Json(new { sent = 2, accepted = 2, added = 1 });
+            }
+
+            if (request.RequestUri.AbsolutePath == "/api/mystral/now-playing")
+            {
+                return Json(new { playing = !body.Contains("\"playing\":false", StringComparison.Ordinal) });
+            }
+
+            throw new InvalidOperationException("Unexpected request: " + request);
+        });
+        using var httpClient = new HttpClient(handler);
+        using var apiClient = new GlobeApiClient(httpClient, new Uri("http://localhost:3000/"));
+
+        var added = apiClient.SubmitListensAsync(Token, new[]
+        {
+            new GlobeListen("Artist", "Song", "Album", 1706704440, 210),
+            new GlobeListen("Artist", "Other", "", 1706704740, 0)
+        }).GetAwaiter().GetResult();
+        Check.Equal(1, added);
+        using (var document = JsonDocument.Parse(bodies[0].Body))
+        {
+            var listens = document.RootElement.GetProperty("listens");
+            Check.Equal(2, listens.GetArrayLength());
+            Check.Equal("Song", listens[0].GetProperty("track").GetString());
+            Check.Equal(1706704440L, listens[0].GetProperty("listened_at").GetInt64());
+            Check.Equal(210000L, listens[0].GetProperty("duration_ms").GetInt64());
+            Check.False(listens[1].TryGetProperty("album", out _));
+            Check.False(listens[1].TryGetProperty("duration_ms", out _));
+        }
+
+        apiClient.SetNowPlayingAsync(Token, new GlobeNowPlaying("Artist", "Live", "Album", 180)).GetAwaiter().GetResult();
+        Check.Contains("\"track\":\"Live\"", bodies[1].Body);
+        Check.Contains("\"duration_ms\":180000", bodies[1].Body);
+        apiClient.SetNowPlayingAsync(Token, null).GetAwaiter().GetResult();
+        Check.Equal("{\"playing\":false}", bodies[2].Body);
+
+        // A refusal that is not about the link (history turned off) is not an authentication failure.
+        var refusing = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Conflict)
+        {
+            Content = new StringContent("{\"error\":\"listening_off\",\"message\":\"listening history is turned off\"}", Encoding.UTF8, "application/json")
+        });
+        using var refusingClient = new HttpClient(refusing);
+        using var refusingApi = new GlobeApiClient(refusingClient, new Uri("http://localhost:3000/"));
+        try
+        {
+            refusingApi.SubmitListensAsync(Token, new[] { new GlobeListen("a", "b", "", 1, 0) }).GetAwaiter().GetResult();
+            throw new InvalidOperationException("expected a refusal");
+        }
+        catch (GlobeAuthenticationException)
+        {
+            throw new InvalidOperationException("listening off must not read as a revoked link");
+        }
+        catch (GlobeApiException)
+        {
+        }
+    }
+
+    public static void QueueKeepsPlaysUntilGlobeTakesThem()
+    {
+        using var temp = TempDir.Create();
+        var path = Path.Combine(temp.Path, "globe-listens.json");
+        var queue = new GlobeListenQueueService(path);
+        for (var i = 0; i < 150; i++)
+        {
+            queue.Enqueue(new GlobeListen("Artist", $"Song {i}", "", 1706704440 + i, 200));
+        }
+
+        Check.Equal(150, queue.Count);
+
+        // globe unreachable: nothing is lost.
+        var sent = queue.FlushAsync((_, _) => throw new GlobeUnavailableException("offline")).GetAwaiter().GetResult();
+        Check.Equal(0, sent);
+        Check.Equal(150, new GlobeListenQueueService(path).Count);
+
+        // Back online: everything goes, oldest first, in batches.
+        var batches = new List<IReadOnlyList<GlobeListen>>();
+        sent = queue.FlushAsync((batch, _) =>
+        {
+            batches.Add(batch);
+            return Task.CompletedTask;
+        }).GetAwaiter().GetResult();
+        Check.Equal(150, sent);
+        Check.Equal(2, batches.Count);
+        Check.Equal("Song 0", batches[0][0].Track);
+        Check.Equal(0, queue.Count);
+
+        // A play globe refuses outright is dropped rather than retried forever.
+        queue.Enqueue(new GlobeListen("Artist", "Refused", "", 1706704440, 0));
+        queue.FlushAsync((_, _) => throw new GlobeApiException("refused")).GetAwaiter().GetResult();
+        Check.Equal(0, queue.Count);
+
+        // The file keeps the newest when it is full.
+        for (var i = 0; i < GlobeListenQueueService.MaximumQueued + 5; i++)
+        {
+            queue.Enqueue(new GlobeListen("Artist", $"Many {i}", "", 1706704440 + i, 0));
+        }
+
+        Check.Equal(GlobeListenQueueService.MaximumQueued, queue.Count);
     }
 }
 

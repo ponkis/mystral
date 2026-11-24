@@ -18,6 +18,7 @@ namespace Mystral.Services;
 public sealed class GlobeApiClient : IDisposable
 {
     private const int MaximumCoverBytes = 5 * 1024 * 1024;
+    internal const int MaximumListensPerRequest = 500;
     private const int MaximumUsernameLength = 80;
     private const int MaximumDisplayNameLength = 160;
     private const int MaximumAvatarUrlLength = 2048;
@@ -324,6 +325,75 @@ public sealed class GlobeApiClient : IDisposable
             collectionEntryId,
             "The burned CD was shared to globe.",
             TryReadBoolean(root, "created", out var created) && created);
+    }
+
+    /// <summary>
+    /// Sends finished plays to globe's listening history; returns how many
+    /// globe did not have yet. At most <see cref="MaximumListensPerRequest"/>.
+    /// </summary>
+    internal async Task<int> SubmitListensAsync(
+        string token,
+        IReadOnlyList<GlobeListen> listens,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(listens);
+        if (listens.Count is 0 or > MaximumListensPerRequest)
+        {
+            throw new ArgumentOutOfRangeException(nameof(listens), $"Send 1 to {MaximumListensPerRequest} plays at a time.");
+        }
+
+        using var request = CreateJsonRequest(
+            HttpMethod.Post,
+            "api/mystral/listens",
+            new ListensPayload
+            {
+                Listens = listens.Select(listen => new ListenPayload
+                {
+                    Artist = listen.Artist,
+                    Track = listen.Track,
+                    Album = string.IsNullOrWhiteSpace(listen.Album) ? null : listen.Album,
+                    ListenedAt = listen.ListenedAt,
+                    DurationMs = listen.DurationSeconds > 0 ? listen.DurationSeconds * 1000L : null
+                }).ToList()
+            });
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeToken(token));
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        ThrowIfAuthenticationRejected(response);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException(response, body, "globe could not save your plays.");
+        }
+
+        using var document = ParseJson(body, "globe returned an invalid listening response.");
+        var root = UnwrapData(document.RootElement);
+        return root.TryGetProperty("added", out var added) && added.TryGetInt32(out var count) ? count : 0;
+    }
+
+    /// <summary>Tells globe what is playing now; null when playback stopped.</summary>
+    internal async Task SetNowPlayingAsync(
+        string token,
+        GlobeNowPlaying? track,
+        CancellationToken cancellationToken = default)
+    {
+        object payload = track is null
+            ? new StoppedPayload()
+            : new NowPlayingPayload
+            {
+                Artist = track.Artist,
+                Track = track.Track,
+                Album = string.IsNullOrWhiteSpace(track.Album) ? null : track.Album,
+                DurationMs = track.DurationSeconds > 0 ? track.DurationSeconds * 1000L : null
+            };
+        using var request = CreateJsonRequest(HttpMethod.Post, "api/mystral/now-playing", payload);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", NormalizeToken(token));
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        ThrowIfAuthenticationRejected(response);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException(response, body, "globe could not show what you're playing.");
+        }
     }
 
     public void Dispose()
@@ -674,6 +744,55 @@ public sealed class GlobeApiClient : IDisposable
         [JsonPropertyName("code_verifier")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? CodeVerifier { get; init; }
+    }
+
+    private sealed class ListensPayload
+    {
+        [JsonPropertyName("listens")]
+        public required List<ListenPayload> Listens { get; init; }
+    }
+
+    private sealed class ListenPayload
+    {
+        [JsonPropertyName("artist")]
+        public required string Artist { get; init; }
+
+        [JsonPropertyName("track")]
+        public required string Track { get; init; }
+
+        [JsonPropertyName("album")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Album { get; init; }
+
+        [JsonPropertyName("listened_at")]
+        public long ListenedAt { get; init; }
+
+        [JsonPropertyName("duration_ms")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? DurationMs { get; init; }
+    }
+
+    private sealed class NowPlayingPayload
+    {
+        [JsonPropertyName("artist")]
+        public required string Artist { get; init; }
+
+        [JsonPropertyName("track")]
+        public required string Track { get; init; }
+
+        [JsonPropertyName("album")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Album { get; init; }
+
+        [JsonPropertyName("duration_ms")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public long? DurationMs { get; init; }
+    }
+
+    private sealed class StoppedPayload
+    {
+        [JsonPropertyName("playing")]
+        public bool Playing { get; init; }
     }
 
     private sealed class BurnPayload

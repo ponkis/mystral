@@ -151,4 +151,10 @@ public sealed record class SocialSettings
     public bool IsAccountLinked { get; set; }
 
     public bool AutomaticallyShareBurns { get; set; }
+
+    /// <summary>
+    /// Send finished plays and the song playing now to globe's listening
+    /// history while linked. On unless the member turns it off.
+    /// </summary>
+    public bool SendPlaysToGlobe { get; set; } = true;
 }
