@@ -316,6 +316,21 @@
                               Content="Automatically share burned CDs to globe"
                               Click="SettingsControl_Changed" />
 
+                    <CheckBox x:Name="SendPlaysToGlobeCheckBox"
+                              Margin="0,6,0,0"
+                              Content="Send what I play to globe"
+                              ToolTip="Your plays go to your listening history on globe, with or without Last.fm."
+                              Click="SettingsControl_Changed" />
+
+                    <Button x:Name="SendHistoryToGlobeButton"
+                            Margin="0,6,0,0"
+                            HorizontalAlignment="Left"
+                            MinWidth="150"
+                            Height="23"
+                            Content="Send my play history to globe"
+                            ToolTip="Sends the plays Mystral has kept on this computer. Plays globe already has are skipped."
+                            Click="SendHistoryToGlobeButton_Click" />
+
                     <Grid Height="112"
                           Margin="0,8,0,0">
                         <Grid x:Name="SocialProfileContent">

@@ -739,6 +739,88 @@ public sealed class GlobeConnectionService : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Sends finished plays to globe's listening history, in requests of up to
+    /// 500; returns how many globe did not have yet. Throws
+    /// <see cref="GlobeNotLinkedException"/> or
+    /// <see cref="GlobeUnavailableException"/> so the caller can keep them for
+    /// later; sending the same plays again is safe.
+    /// </summary>
+    public async Task<int> SubmitListensAsync(
+        IReadOnlyList<GlobeListen> listens,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(listens);
+        var added = 0;
+        for (var start = 0; start < listens.Count; start += GlobeApiClient.MaximumListensPerRequest)
+        {
+            var batch = listens
+                .Skip(start)
+                .Take(GlobeApiClient.MaximumListensPerRequest)
+                .ToList();
+            added += await SendListeningAsync(
+                (token, ct) => _apiClient.SubmitListensAsync(token, batch, ct),
+                cancellationToken);
+        }
+
+        return added;
+    }
+
+    /// <summary>Shows what is playing now on globe; null when playback stopped.</summary>
+    public Task SetNowPlayingAsync(
+        GlobeNowPlaying? track,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return SendListeningAsync(
+            async (token, ct) =>
+            {
+                await _apiClient.SetNowPlayingAsync(token, track, ct);
+                return 0;
+            },
+            cancellationToken);
+    }
+
+    private async Task<int> SendListeningAsync(
+        Func<string, CancellationToken, Task<int>> send,
+        CancellationToken cancellationToken)
+    {
+        var token = GetToken();
+        var state = State;
+        if (token is null || !state.IsLinked)
+        {
+            throw new GlobeNotLinkedException();
+        }
+
+        if (!state.CanShare)
+        {
+            throw new GlobeUnavailableException(OfflineMessage);
+        }
+
+        try
+        {
+            return await send(token, cancellationToken);
+        }
+        catch (GlobeAuthenticationException ex)
+        {
+            ClearLocalLink(
+                GlobeLinkRevocationSource.ListeningRequest,
+                ex.Message,
+                notifyRevoked: true);
+            throw new GlobeNotLinkedException();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsServerUnavailable(ex))
+        {
+            MarkServerUnavailable(State.Profile, notifyUser: false);
+            throw new GlobeUnavailableException(OfflineMessage, ex);
+        }
+    }
+
     private async Task TryReconcileProfileAfterDuplicateShareAsync(
         string token,
         CancellationToken cancellationToken)

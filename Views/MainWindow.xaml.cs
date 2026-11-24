@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private readonly MusicBrainzService _musicBrainzService;
     private readonly ArtistArtworkService _artistArtworkService;
     private readonly GlobeConnectionService _globeConnectionService;
+    private readonly GlobeListenQueueService _globeListenQueue = new();
     private readonly AppSettingsService _settingsService;
     private readonly DispatcherTimer _mediaPollTimer;
     private readonly DispatcherTimer _loadingIconTimer;
@@ -6324,26 +6325,31 @@ public partial class MainWindow : Window
         }
     }
 
+    // A play goes to every target that is on: globe's listening history
+    // (linked, and "Send what I play to globe" on) and Last.fm (its own
+    // scrobbling, a working key, and only songs Last.fm knows). The song's
+    // names are Last.fm's corrected ones when it has them, the player's own
+    // otherwise, so globe never waits on Last.fm.
+    private bool IsLastFmScrobblingOn =>
+        _settingsService.Settings.LastFm.ScrobblingEnabled
+        && _lastFmService.IsScrobblingEnabled
+        && !_lastFmService.IsKeyRefused;
+
+    private bool IsGlobeListeningOn =>
+        _settingsService.Settings.Social.SendPlaysToGlobe
+        && _globeConnectionService.State.IsLinked;
+
     private void UpdateScrobblingForSnapshot(MediaSnapshot snapshot, bool force = false)
     {
-        if (!_settingsService.Settings.LastFm.ScrobblingEnabled)
+        MaybeFlushGlobeListens();
+        var lastFmOn = IsLastFmScrobblingOn;
+        var globeOn = IsGlobeListeningOn;
+        if (!lastFmOn && !globeOn)
         {
             ResetScrobblingState();
-            SetScrobblingStatus("Scrobbling: off");
-            return;
-        }
-
-        if (!_lastFmService.IsScrobblingEnabled)
-        {
-            ResetScrobblingState();
-            SetScrobblingStatus("Scrobbling: disabled");
-            return;
-        }
-
-        if (_lastFmService.IsKeyRefused)
-        {
-            ResetScrobblingState();
-            SetScrobblingStatus($"Scrobbling: {LastFmService.KeyRefusedMessage}");
+            SetScrobblingStatus(_lastFmService.IsKeyRefused
+                ? $"Scrobbling: {LastFmService.KeyRefusedMessage}"
+                : "Scrobbling: off");
             return;
         }
 
@@ -6368,16 +6374,21 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (CurrentLastFmInfo is null)
+        // Wait for Last.fm's answer while it is still looking the song up, so
+        // the play is not counted twice under two spellings.
+        var lastFmLookupPending = _lastFmService.IsConfigured
+            && !_lastFmService.IsKeyRefused
+            && _lastFmLookupCompletedKey != lookupKey;
+        if (CurrentLastFmInfo is null && lastFmLookupPending)
         {
             PauseScrobblingState();
-            SetScrobblingStatus(_lastFmLookupCompletedKey == lookupKey
-                ? "Scrobbling: skipped (not found on Last.fm)"
-                : "Scrobbling: checking track");
+            SetScrobblingStatus("Scrobbling: checking track");
             return;
         }
 
-        var duration = GetScrobbleDuration(CurrentLastFmInfo, snapshot);
+        var lastFmKnowsTrack = CurrentLastFmInfo is not null;
+        var track = CurrentLastFmInfo ?? CreatePlayerTrack(query, snapshot);
+        var duration = GetScrobbleDuration(track, snapshot);
         if (duration < TimeSpan.FromSeconds(30))
         {
             ResetScrobblingState();
@@ -6385,37 +6396,62 @@ public partial class MainWindow : Window
             return;
         }
 
-        var key = CreateScrobbleKey(CurrentLastFmInfo);
+        var key = CreateScrobbleKey(track);
         var now = DateTimeOffset.Now;
         if (_scrobbleState is null || _scrobbleState.Key != key)
         {
-            _scrobbleState = new ScrobblePlaybackState(lookupKey, key, CurrentLastFmInfo, EstimateTrackStartedAt(snapshot, duration, now), duration);
+            _scrobbleState = new ScrobblePlaybackState(lookupKey, key, track, EstimateTrackStartedAt(snapshot, duration, now), duration);
         }
         _trayNowPlayingTrackName = _scrobbleState.Track.TrackName;
 
         AccumulateScrobblePlayTime(_scrobbleState, snapshot, now);
 
-        if (!_scrobbleState.NowPlayingSubmitted)
+        var sendToLastFm = lastFmOn && lastFmKnowsTrack;
+        if (sendToLastFm && !_scrobbleState.LastFmNowPlayingSent)
         {
-            _scrobbleState.NowPlayingSubmitted = true;
+            _scrobbleState.LastFmNowPlayingSent = true;
             SendNowPlayingAsync(_scrobbleState);
         }
 
-        if (_scrobbleState.ScrobbleSubmitted)
+        if (globeOn && !_scrobbleState.GlobeNowPlayingSent)
         {
-            SetScrobblingStatus($"Scrobbled: {_scrobbleState.Track.TrackName}");
-            return;
+            _scrobbleState.GlobeNowPlayingSent = true;
+            SendGlobeNowPlaying(_scrobbleState);
         }
 
         var threshold = GetScrobbleThreshold(_scrobbleState.Duration);
-        if (_scrobbleState.ObservedPlayTime >= threshold)
+        if (_scrobbleState.ObservedPlayTime < threshold)
+        {
+            var remaining = threshold - _scrobbleState.ObservedPlayTime;
+            SetScrobblingStatus($"Scrobbling: {FormatTime(remaining)} left");
+            return;
+        }
+
+        if (globeOn && !_scrobbleState.GlobeQueued)
+        {
+            _scrobbleState.GlobeQueued = true;
+            QueueGlobeListen(_scrobbleState);
+            RecordLocalHistory(_scrobbleState);
+        }
+
+        if (sendToLastFm && !_scrobbleState.ScrobbleSubmitStarted)
         {
             SubmitScrobbleAsync(_scrobbleState);
             return;
         }
 
-        var remaining = threshold - _scrobbleState.ObservedPlayTime;
-        SetScrobblingStatus($"Scrobbling: {FormatTime(remaining)} left");
+        SetScrobblingStatus($"Scrobbled: {_scrobbleState.Track.TrackName}");
+    }
+
+    /// <summary>The song as the player names it, for when Last.fm does not know it or is not used.</summary>
+    private static LastFmTrackInfo CreatePlayerTrack(LastFmTrackQuery query, MediaSnapshot snapshot)
+    {
+        return new LastFmTrackInfo(
+            TrackName: query.TrackName.Trim(),
+            ArtistName: query.ArtistName.Trim(),
+            Url: string.Empty,
+            AlbumName: query.AlbumName.Trim(),
+            Duration: snapshot.Duration);
     }
 
     private void SendNowPlayingAsync(ScrobblePlaybackState state)
@@ -6470,14 +6506,7 @@ public partial class MainWindow : Window
                     state.ScrobbleSubmitted = result.IsSuccess;
                     if (result.IsSuccess)
                     {
-                        LocalScrobbleCacheService.Instance.AddRecord(new ScrobbleRecord
-                        {
-                            Title = state.Track.TrackName,
-                            Artist = state.Track.ArtistName,
-                            Album = state.Track.AlbumName,
-                            Timestamp = state.StartedAt.ToUnixTimeSeconds(),
-                            Duration = (int)state.Duration.TotalSeconds
-                        });
+                        RecordLocalHistory(state);
                     }
 
                     SetScrobblingStatus(result.IsSuccess
@@ -6491,6 +6520,93 @@ public partial class MainWindow : Window
         }, cts.Token);
     }
 
+    /// <summary>The play in Mystral's own history, once, whichever target took it first.</summary>
+    private static void RecordLocalHistory(ScrobblePlaybackState state)
+    {
+        if (state.HistoryRecorded)
+        {
+            return;
+        }
+
+        state.HistoryRecorded = true;
+        LocalScrobbleCacheService.Instance.AddRecord(new ScrobbleRecord
+        {
+            Title = state.Track.TrackName,
+            Artist = state.Track.ArtistName,
+            Album = state.Track.AlbumName,
+            Timestamp = state.StartedAt.ToUnixTimeSeconds(),
+            Duration = (int)state.Duration.TotalSeconds
+        });
+    }
+
+    // ───── globe's listening history ─────
+
+    private static readonly TimeSpan GlobeListenFlushInterval = TimeSpan.FromMinutes(5);
+    private DateTimeOffset _lastGlobeListenFlushAt = DateTimeOffset.MinValue;
+
+    private void QueueGlobeListen(ScrobblePlaybackState state)
+    {
+        _globeListenQueue.Enqueue(new GlobeListen(
+            state.Track.ArtistName,
+            state.Track.TrackName,
+            state.Track.AlbumName ?? string.Empty,
+            state.StartedAt.ToUnixTimeSeconds(),
+            (int)Math.Round(state.Duration.TotalSeconds)));
+        FlushGlobeListens();
+    }
+
+    /// <summary>Plays still waiting (globe was unreachable) go again every few minutes.</summary>
+    private void MaybeFlushGlobeListens()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastGlobeListenFlushAt < GlobeListenFlushInterval || !_globeConnectionService.State.IsLinked)
+        {
+            return;
+        }
+
+        FlushGlobeListens();
+    }
+
+    private void FlushGlobeListens()
+    {
+        _lastGlobeListenFlushAt = DateTimeOffset.UtcNow;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _globeListenQueue.FlushAsync(
+                    async (batch, ct) => await _globeConnectionService.SubmitListensAsync(batch, ct));
+            }
+            catch (Exception)
+            {
+                // The queue keeps whatever was not sent for the next try.
+            }
+        });
+    }
+
+    /// <summary>Shows the song on globe while it plays; null clears it.</summary>
+    private void SendGlobeNowPlaying(ScrobblePlaybackState? state)
+    {
+        var track = state is null
+            ? null
+            : new GlobeNowPlaying(
+                state.Track.ArtistName,
+                state.Track.TrackName,
+                state.Track.AlbumName ?? string.Empty,
+                (int)Math.Round(state.Duration.TotalSeconds));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _globeConnectionService.SetNowPlayingAsync(track);
+            }
+            catch (Exception)
+            {
+                // Now playing is a nicety: it lapses on its own on globe.
+            }
+        });
+    }
+
     private CancellationTokenSource ResetLastFmScrobbleCancellation()
     {
         _lastFmScrobbleCts?.Cancel();
@@ -6501,6 +6617,12 @@ public partial class MainWindow : Window
 
     private void ResetScrobblingState()
     {
+        // A song left before it counted no longer shows as playing on globe.
+        if (_scrobbleState is { GlobeNowPlayingSent: true, GlobeQueued: false })
+        {
+            SendGlobeNowPlaying(null);
+        }
+
         _scrobbleState = null;
         _trayNowPlayingTrackName = string.Empty;
         _lastFmScrobbleCts?.Cancel();
@@ -6511,6 +6633,12 @@ public partial class MainWindow : Window
         if (_scrobbleState is not null)
         {
             _scrobbleState.LastObservedAt = null;
+            if (_scrobbleState.GlobeNowPlayingSent)
+            {
+                // Shown again when playback resumes.
+                _scrobbleState.GlobeNowPlayingSent = false;
+                SendGlobeNowPlaying(null);
+            }
         }
     }
 
@@ -6580,7 +6708,10 @@ public partial class MainWindow : Window
         public TimeSpan ObservedPlayTime { get; set; }
         public TimeSpan LastPosition { get; set; }
         public DateTimeOffset? LastObservedAt { get; set; }
-        public bool NowPlayingSubmitted { get; set; }
+        public bool LastFmNowPlayingSent { get; set; }
+        public bool GlobeNowPlayingSent { get; set; }
+        public bool GlobeQueued { get; set; }
+        public bool HistoryRecorded { get; set; }
         public bool ScrobbleSubmitStarted { get; set; }
         public bool ScrobbleSubmitted { get; set; }
     }

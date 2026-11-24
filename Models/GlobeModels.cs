@@ -64,7 +64,8 @@ public sealed class GlobeServerUnavailableEventArgs(string message) : EventArgs
 public enum GlobeLinkRevocationSource
 {
     StatusCheck,
-    BurnRequest
+    BurnRequest,
+    ListeningRequest
 }
 
 public sealed class GlobeLinkRevokedEventArgs(
@@ -178,3 +179,22 @@ internal sealed record GlobeLinkClaimResult(
     string Token = "",
     GlobeProfile? Profile = null,
     string Message = "");
+
+/// <summary>
+/// A finished play for globe's listening history: when it started (Unix
+/// seconds) and how long the song is, 0 when unknown. globe keeps one play per
+/// moment, artist and song, so sending the same one again is safe.
+/// </summary>
+public sealed record class GlobeListen(
+    string Artist,
+    string Track,
+    string Album,
+    long ListenedAt,
+    int DurationSeconds);
+
+/// <summary>The song playing now, as globe shows it until it ends.</summary>
+public sealed record class GlobeNowPlaying(
+    string Artist,
+    string Track,
+    string Album,
+    int DurationSeconds);

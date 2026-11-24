@@ -206,6 +206,7 @@ The test suite covers the vital headless app logic:
 
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, scrobbling paths, and rejected API keys
+- sending plays to a linked globe account, and keeping them for later when it can't be reached
 - LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
@@ -242,7 +243,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.3.6</VersionPrefix>
+<VersionPrefix>2.3.7</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

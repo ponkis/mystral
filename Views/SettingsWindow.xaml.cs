@@ -163,6 +163,7 @@ public partial class SettingsWindow : Window
         _socialProfile = globeState.Profile;
         _socialProfileImage = TryLoadCachedSocialAvatar(_socialProfile);
         AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
+        SendPlaysToGlobeCheckBox.IsChecked = settings.Social.SendPlaysToGlobe;
         UpdateSocialPanel(animate: false);
         if (_socialProfile is not null)
         {
@@ -462,9 +463,65 @@ public partial class SettingsWindow : Window
             {
                 IsAccountLinked = _isSocialAccountLinked,
                 AutomaticallyShareBurns = _isSocialAccountLinked
-                    && AutomaticallyShareBurnsCheckBox.IsChecked == true
+                    && AutomaticallyShareBurnsCheckBox.IsChecked == true,
+                // A choice that outlasts the link: it applies again on relinking.
+                SendPlaysToGlobe = SendPlaysToGlobeCheckBox.IsChecked == true
             }
         };
+    }
+
+    private bool _isSendingHistoryToGlobe;
+
+    /// <summary>
+    /// Sends the plays Mystral kept on this computer to globe's listening
+    /// history, once; globe skips the ones it already has.
+    /// </summary>
+    private async void SendHistoryToGlobeButton_Click(object sender, RoutedEventArgs e)
+    {
+        var records = LocalScrobbleCacheService.Instance.LoadAllRecords();
+        var listens = records
+            .Where(record => !string.IsNullOrWhiteSpace(record.Artist)
+                && !string.IsNullOrWhiteSpace(record.Title)
+                && record.Timestamp > 0)
+            .Select(record => new GlobeListen(
+                record.Artist.Trim(),
+                record.Title.Trim(),
+                record.Album?.Trim() ?? string.Empty,
+                record.Timestamp,
+                Math.Max(0, record.Duration)))
+            .OrderBy(listen => listen.ListenedAt)
+            .ToList();
+        if (listens.Count == 0)
+        {
+            AppDialogWindow.ShowWarning(this, "Nothing to send", "Mystral hasn't kept any plays on this computer yet.");
+            return;
+        }
+
+        _isSendingHistoryToGlobe = true;
+        SendHistoryToGlobeButton.IsEnabled = false;
+        try
+        {
+            var added = await _globeConnectionService.SubmitListensAsync(listens);
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Sent to globe",
+                added == 0
+                    ? "globe already had all of your plays."
+                    : $"{added:N0} of your {listens.Count:N0} plays are now on globe.");
+        }
+        catch (GlobeNotLinkedException)
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't send your plays", "Link your globe account first.");
+        }
+        catch (GlobeApiException ex)
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't send your plays", ex.Message);
+        }
+        finally
+        {
+            _isSendingHistoryToGlobe = false;
+            UpdateSocialPanel(animate: false);
+        }
     }
 
     private void SocialAd_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -685,6 +742,11 @@ public partial class SettingsWindow : Window
         AutomaticallyShareBurnsCheckBox.IsEnabled = !isSigningIn
             && _isSocialAccountLinked
             && _isSocialSharingAvailable;
+        SendPlaysToGlobeCheckBox.IsEnabled = !isSigningIn && _isSocialAccountLinked;
+        SendHistoryToGlobeButton.IsEnabled = !isSigningIn
+            && _isSocialAccountLinked
+            && _isSocialSharingAvailable
+            && !_isSendingHistoryToGlobe;
 
         if (isSigningIn)
         {
@@ -1033,6 +1095,11 @@ public partial class SettingsWindow : Window
         AutomaticallyShareBurnsCheckBox.IsEnabled = _isSocialAccountLinked
             && _isSocialSharingAvailable
             && !_isSocialSigningIn;
+        SendPlaysToGlobeCheckBox.IsEnabled = _isSocialAccountLinked && !_isSocialSigningIn;
+        SendHistoryToGlobeButton.IsEnabled = _isSocialAccountLinked
+            && _isSocialSharingAvailable
+            && !_isSocialSigningIn
+            && !_isSendingHistoryToGlobe;
         AutomaticallyShareBurnsCheckBox.ToolTip = _isSocialAccountLinked && !_isSocialSharingAvailable
             ? "Sharing will be available when globe reconnects."
             : null;
