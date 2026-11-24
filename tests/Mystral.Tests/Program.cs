@@ -43,6 +43,9 @@ internal static class Program
             ("Last.fm service stops asking once Last.fm rejects the API key", LastFmServiceTests.StopsWhenKeyIsRefused),
             ("globe client sends plays and now playing", GlobeListeningTests.SendsPlaysAndNowPlaying),
             ("globe listen queue keeps plays until globe takes them", GlobeListeningTests.QueueKeepsPlaysUntilGlobeTakesThem),
+            ("ListenBrainz client reads server addresses and speaks the API", ListenBrainzTests.ClientSpeaksListenBrainz),
+            ("ListenBrainz queue keeps plays until the server takes them", ListenBrainzTests.QueueKeepsPlaysUntilTheServerTakesThem),
+            ("ListenBrainz connection connects, sends, and disconnects on a refused token", ListenBrainzTests.ConnectsSendsAndDisconnects),
             ("models expose expected defaults and computed properties", ModelTests.DefaultsAndComputedPropertiesAreStable),
             ("artwork tint clamps colors and extracts usable dominant tints", ArtworkTintTests.ColorHelpersAreStable),
             ("CD artwork compositor masks and blends the Photoshop layer stack", CdArtworkComposerTests.ComposesMaskedLayerStack),
@@ -2192,6 +2195,261 @@ static class GlobeListeningTests
         }
 
         Check.Equal(GlobeListenQueueService.MaximumQueued, queue.Count);
+    }
+}
+
+static class ListenBrainzTests
+{
+    private const string Token = "ps_0123456789ab_00000000000000000000000000000000000000000000000000000000000000aa";
+
+    private static HttpResponseMessage Status(HttpStatusCode status, string json = "{}")
+    {
+        return new HttpResponseMessage(status) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+    }
+
+    public static void ClientSpeaksListenBrainz()
+    {
+        // What people type or paste becomes the API root.
+        Uri server;
+        string error;
+        Check.True(ListenBrainzClient.TryNormalizeServer("https://example.com/listenbrainz/", out server, out _));
+        Check.Equal("https://example.com/listenbrainz/", server.ToString());
+        Check.True(ListenBrainzClient.TryNormalizeServer("https://example.com/listenbrainz/1/submit-listens", out server, out _));
+        Check.Equal("https://example.com/listenbrainz/", server.ToString());
+        Check.True(ListenBrainzClient.TryNormalizeServer("listenbrainz.org", out server, out _));
+        Check.Equal("https://api.listenbrainz.org/", server.ToString());
+        Check.True(ListenBrainzClient.TryNormalizeServer("http://localhost:3007/listenbrainz", out server, out _));
+        Check.Equal("http://localhost:3007/listenbrainz/", server.ToString());
+        Check.False(ListenBrainzClient.TryNormalizeServer("http://example.com/", out _, out error));
+        Check.Contains("https://", error);
+        Check.False(ListenBrainzClient.TryNormalizeServer("https://user:pass@example.com/", out _, out _));
+        Check.False(ListenBrainzClient.TryNormalizeServer("https://example.com/?token=x", out _, out _));
+        Check.False(ListenBrainzClient.TryNormalizeServer("ftp://example.com/", out _, out _));
+        Check.False(ListenBrainzClient.TryNormalizeServer("  ", out _, out _));
+
+        var root = new Uri("https://example.com/listenbrainz/");
+        var requests = new List<(string Path, string Auth, string Body)>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            var body = request.Content is null ? "" : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            requests.Add((request.RequestUri!.AbsolutePath, request.Headers.Authorization?.ToString() ?? "", body));
+            return request.RequestUri.AbsolutePath switch
+            {
+                "/listenbrainz/1/validate-token" => JsonText("{\"code\":200,\"valid\":true,\"user_name\":\"ponkis\",\"site_name\":\"example.com\",\"avatar_url\":\"https://example.com/avatar\"}"),
+                "/listenbrainz/1/submit-listens" => JsonText("{\"status\":\"ok\"}"),
+                _ => throw new InvalidOperationException("Unexpected request: " + request.RequestUri)
+            };
+        });
+        using var httpClient = new HttpClient(handler);
+        using var client = new ListenBrainzClient(httpClient);
+
+        var account = client.ValidateTokenAsync(root, Token).GetAwaiter().GetResult();
+        Check.Equal("ponkis", account.UserName);
+        Check.Equal("example.com", account.SiteName);
+        Check.Equal("https://example.com/avatar", account.AvatarUri?.ToString());
+        Check.Equal("Token " + Token, requests[0].Auth);
+
+        client.SubmitListensAsync(root, Token, new[] { new ListenBrainzListen("Burial", "Archangel", "Untrue", 1706704440, 240) }).GetAwaiter().GetResult();
+        using (var document = JsonDocument.Parse(requests[1].Body))
+        {
+            Check.Equal("single", document.RootElement.GetProperty("listen_type").GetString());
+            var listen = document.RootElement.GetProperty("payload")[0];
+            Check.Equal(1706704440L, listen.GetProperty("listened_at").GetInt64());
+            var metadata = listen.GetProperty("track_metadata");
+            Check.Equal("Burial", metadata.GetProperty("artist_name").GetString());
+            Check.Equal("Archangel", metadata.GetProperty("track_name").GetString());
+            Check.Equal("Untrue", metadata.GetProperty("release_name").GetString());
+            Check.Equal(240000L, metadata.GetProperty("additional_info").GetProperty("duration_ms").GetInt64());
+            Check.Equal("Mystral", metadata.GetProperty("additional_info").GetProperty("submission_client").GetString());
+        }
+
+        client.SubmitListensAsync(root, Token, new[]
+        {
+            new ListenBrainzListen("A", "One", "", 1706704440, 0),
+            new ListenBrainzListen("A", "Two", "", 1706704740, 0)
+        }).GetAwaiter().GetResult();
+        Check.Contains("\"listen_type\":\"import\"", requests[2].Body);
+        Check.False(requests[2].Body.Contains("release_name", StringComparison.Ordinal));
+        Check.False(requests[2].Body.Contains("duration_ms", StringComparison.Ordinal));
+
+        client.SetPlayingNowAsync(root, Token, new ListenBrainzNowPlaying("Burial", "Near Dark", "", 200)).GetAwaiter().GetResult();
+        Check.Contains("\"listen_type\":\"playing_now\"", requests[3].Body);
+        Check.False(requests[3].Body.Contains("listened_at", StringComparison.Ordinal));
+
+        // The picture comes from the same server, with the token (globe serves
+        // an uploaded picture only to its owner).
+        var pictureRequests = new List<string>();
+        var pictureHandler = new FakeHttpMessageHandler(request =>
+        {
+            pictureRequests.Add(request.Headers.Authorization?.ToString() ?? "");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1, 2, 3 }) { Headers = { ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png") } } };
+        });
+        using (var pictureHttp = new HttpClient(pictureHandler))
+        using (var pictureClient = new ListenBrainzClient(pictureHttp))
+        {
+            var bytes = pictureClient.DownloadAvatarAsync(new Uri("https://example.com/api/listenbrainz/1/picture"), root, Token).GetAwaiter().GetResult();
+            Check.Equal(3, bytes?.Length ?? 0);
+            Check.Equal("Token " + Token, pictureRequests[0]);
+            Check.Equal(null, pictureClient.DownloadAvatarAsync(new Uri("https://elsewhere.example/a.png"), root, Token).GetAwaiter().GetResult());
+            Check.Equal(1, pictureRequests.Count);
+        }
+
+        // A picture from another host is never loaded.
+        var foreign = new FakeHttpMessageHandler(_ => JsonText("{\"code\":200,\"valid\":true,\"user_name\":\"x\",\"avatar_url\":\"https://elsewhere.example/a.png\"}"));
+        using (var foreignHttp = new HttpClient(foreign))
+        using (var foreignClient = new ListenBrainzClient(foreignHttp))
+        {
+            Check.Equal(null, foreignClient.ValidateTokenAsync(root, Token).GetAwaiter().GetResult().AvatarUri);
+        }
+
+        // Each answer means something different to the caller.
+        void Expect<TException>(HttpResponseMessage response) where TException : Exception
+        {
+            using var http = new HttpClient(new FakeHttpMessageHandler(_ => response));
+            using var answering = new ListenBrainzClient(http);
+            Check.Throws<TException>(() => answering.SubmitListensAsync(root, Token, new[] { new ListenBrainzListen("a", "b", "", 1706704440, 0) }).GetAwaiter().GetResult());
+        }
+
+        Expect<ListenBrainzUnauthorizedException>(Status(HttpStatusCode.Unauthorized, "{\"code\":401,\"error\":\"Invalid authorization token.\"}"));
+        Expect<ListenBrainzUnavailableException>(Status(HttpStatusCode.InternalServerError));
+        Expect<ListenBrainzUnavailableException>(Status((HttpStatusCode)429));
+        Expect<ListenBrainzRefusedException>(Status(HttpStatusCode.BadRequest, "{\"code\":400,\"error\":\"bad listen\"}"));
+        Expect<ListenBrainzRefusedException>(Status(HttpStatusCode.Found));
+
+        using (var invalidHttp = new HttpClient(new FakeHttpMessageHandler(_ => JsonText("{\"code\":200,\"valid\":false,\"message\":\"Token invalid.\"}"))))
+        using (var invalidClient = new ListenBrainzClient(invalidHttp))
+        {
+            Check.Throws<ListenBrainzUnauthorizedException>(() => invalidClient.ValidateTokenAsync(root, Token).GetAwaiter().GetResult());
+        }
+    }
+
+    public static void QueueKeepsPlaysUntilTheServerTakesThem()
+    {
+        using var temp = TempDir.Create();
+        var path = Path.Combine(temp.Path, "listenbrainz-listens.json");
+        var queue = new ListenBrainzQueueService(path);
+        for (var i = 0; i < 150; i++)
+        {
+            queue.Enqueue(new ListenBrainzListen("Artist", $"Song {i}", "", 1706704440 + i, 200));
+        }
+
+        // The server unreachable, or the token refused: nothing is lost.
+        Check.Equal(0, queue.FlushAsync((_, _) => throw new ListenBrainzUnavailableException("offline")).GetAwaiter().GetResult());
+        Check.Equal(0, queue.FlushAsync((_, _) => throw new ListenBrainzUnauthorizedException("refused")).GetAwaiter().GetResult());
+        Check.Equal(150, new ListenBrainzQueueService(path).Count);
+
+        // Back: everything goes, oldest first, in batches.
+        var batches = new List<IReadOnlyList<ListenBrainzListen>>();
+        Check.Equal(150, queue.FlushAsync((batch, _) =>
+        {
+            batches.Add(batch);
+            return Task.CompletedTask;
+        }).GetAwaiter().GetResult());
+        Check.Equal(2, batches.Count);
+        Check.Equal("Song 0", batches[0][0].Track);
+        Check.Equal(0, queue.Count);
+
+        // A play the server refuses outright is dropped rather than retried forever.
+        queue.Enqueue(new ListenBrainzListen("Artist", "Refused", "", 1706704440, 0));
+        queue.FlushAsync((_, _) => throw new ListenBrainzRefusedException("bad")).GetAwaiter().GetResult();
+        Check.Equal(0, queue.Count);
+
+        for (var i = 0; i < ListenBrainzQueueService.MaximumQueued + 5; i++)
+        {
+            queue.Enqueue(new ListenBrainzListen("Artist", $"Many {i}", "", 1706704440 + i, 0));
+        }
+
+        Check.Equal(ListenBrainzQueueService.MaximumQueued, queue.Count);
+        queue.Clear();
+        Check.Equal(0, queue.Count);
+    }
+
+    public static void ConnectsSendsAndDisconnects()
+    {
+        using var temp = TempDir.Create();
+        var store = new MemorySecureCredentialStore();
+        var connectionPath = Path.Combine(temp.Path, "listenbrainz-connection.json");
+        var queuePath = Path.Combine(temp.Path, "listenbrainz-listens.json");
+        var refuse = false;
+        var submitted = 0;
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            if (refuse)
+            {
+                return Status(HttpStatusCode.Unauthorized, "{\"code\":401,\"error\":\"Invalid authorization token.\"}");
+            }
+
+            if (request.RequestUri!.AbsolutePath.EndsWith("/1/validate-token", StringComparison.Ordinal))
+            {
+                return request.Headers.Authorization?.Parameter == Token
+                    ? JsonText("{\"code\":200,\"valid\":true,\"user_name\":\"ponkis\"}")
+                    : JsonText("{\"code\":200,\"valid\":false}");
+            }
+
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var document = JsonDocument.Parse(body);
+            submitted += document.RootElement.GetProperty("listen_type").GetString() == "playing_now"
+                ? 0
+                : document.RootElement.GetProperty("payload").GetArrayLength();
+            return JsonText("{\"status\":\"ok\"}");
+        });
+
+        ListenBrainzConnectionService Create(HttpClient http) =>
+            new(store, new ListenBrainzClient(http), new ListenBrainzQueueService(queuePath), connectionPath);
+
+        using var httpClient = new HttpClient(handler);
+        var service = Create(httpClient);
+        Check.False(service.IsConnected);
+
+        // A wrong token is refused and nothing is kept.
+        Check.Throws<ListenBrainzUnauthorizedException>(() => service.ConnectAsync("https://example.com/listenbrainz/", "ps_wrong").GetAwaiter().GetResult());
+        Check.False(service.IsConnected);
+        Check.Equal(null, store.Read(ListenBrainzConnectionService.TokenCredentialKey));
+
+        var states = new List<ListenBrainzConnectionStatus>();
+        service.StateChanged += (_, _) => states.Add(service.State.Status);
+        service.ConnectAsync("https://example.com/listenbrainz/1/submit-listens", Token).GetAwaiter().GetResult();
+        Check.True(service.IsConnected);
+        Check.Equal("ponkis", service.State.UserName);
+        Check.Equal("example.com", service.State.Host);
+        Check.Equal(ListenBrainzConnectionStatus.Connecting, states[0]);
+        Check.Equal(Token, store.Read(ListenBrainzConnectionService.TokenCredentialKey));
+        Check.False(File.ReadAllText(connectionPath).Contains(Token, StringComparison.Ordinal));
+
+        // Plays wait in the queue until the server has them.
+        service.Enqueue(new ListenBrainzListen("Burial", "Archangel", "Untrue", 1706704440, 240));
+        service.Enqueue(new ListenBrainzListen("Burial", "Near Dark", "Untrue", 1706704740, 240));
+        Check.Equal(2, service.FlushAsync().GetAwaiter().GetResult());
+        Check.Equal(2, submitted);
+        Check.Equal(2, service.PlaysSent);
+        service.SetPlayingNowAsync(new ListenBrainzNowPlaying("Burial", "Ghost Hardware", "", 300)).GetAwaiter().GetResult();
+
+        // Restarting Mystral keeps the connection without asking the server.
+        var requestsBefore = handler.Count;
+        var restarted = Create(httpClient);
+        Check.True(restarted.IsConnected);
+        Check.Equal("ponkis", restarted.State.UserName);
+        Check.Equal(2, restarted.PlaysSent);
+        Check.Equal(requestsBefore, handler.Count);
+
+        // A token the server stops taking disconnects, says so, and forgets the token.
+        refuse = true;
+        restarted.Enqueue(new ListenBrainzListen("Burial", "Shell of Light", "", 1706705040, 240));
+        Check.Equal(0, restarted.FlushAsync().GetAwaiter().GetResult());
+        Check.False(restarted.IsConnected);
+        Check.Equal(ListenBrainzConnectionService.RefusedTokenMessage, restarted.State.Message);
+        Check.Equal(null, store.Read(ListenBrainzConnectionService.TokenCredentialKey));
+        Check.Equal(0, restarted.WaitingCount);
+        Check.Equal("https://example.com/listenbrainz/", restarted.LastServerText);
+
+        // Disconnecting by hand does the same, quietly.
+        refuse = false;
+        restarted.ConnectAsync("https://example.com/listenbrainz/", Token).GetAwaiter().GetResult();
+        restarted.Disconnect();
+        Check.False(restarted.IsConnected);
+        Check.Equal(string.Empty, restarted.State.Message);
+        Check.Equal(null, store.Read(ListenBrainzConnectionService.TokenCredentialKey));
+        Check.False(Create(httpClient).IsConnected);
     }
 }
 

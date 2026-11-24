@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private readonly MusicBrainzService _musicBrainzService;
     private readonly ArtistArtworkService _artistArtworkService;
     private readonly GlobeConnectionService _globeConnectionService;
+    private readonly ListenBrainzConnectionService _listenBrainzService;
     private readonly GlobeListenQueueService _globeListenQueue = new();
     private readonly AppSettingsService _settingsService;
     private readonly DispatcherTimer _mediaPollTimer;
@@ -307,6 +308,7 @@ public partial class MainWindow : Window
         _musicBrainzService = new MusicBrainzService();
         _artistArtworkService = new ArtistArtworkService();
         _globeConnectionService = new GlobeConnectionService(_settingsService);
+        _listenBrainzService = new ListenBrainzConnectionService(_settingsService);
         MusicInfoPanel.Initialize(_musicBrainzService, _artistArtworkService);
         _mediaService.OnlineCoverArtProvider = (snapshot, cancellationToken) =>
             _musicBrainzService.FetchTrackCoverArtworkAsync(
@@ -6326,10 +6328,11 @@ public partial class MainWindow : Window
     }
 
     // A play goes to every target that is on: globe's listening history
-    // (linked, and "Send what I play to globe" on) and Last.fm (its own
-    // scrobbling, a working key, and only songs Last.fm knows). The song's
-    // names are Last.fm's corrected ones when it has them, the player's own
-    // otherwise, so globe never waits on Last.fm.
+    // (linked, and "Send what I play to globe" on), a ListenBrainz-compatible
+    // server (connected in Settings → Scrobbling, and "Send what I play" on)
+    // and Last.fm (its own scrobbling, a working key, and only songs Last.fm
+    // knows). The song's names are Last.fm's corrected ones when it has them,
+    // the player's own otherwise, so the others never wait on Last.fm.
     private bool IsLastFmScrobblingOn =>
         _settingsService.Settings.LastFm.ScrobblingEnabled
         && _lastFmService.IsScrobblingEnabled
@@ -6339,12 +6342,18 @@ public partial class MainWindow : Window
         _settingsService.Settings.Social.SendPlaysToGlobe
         && _globeConnectionService.State.IsLinked;
 
+    private bool IsListenBrainzOn =>
+        _settingsService.Settings.ListenBrainz.SendPlays
+        && _listenBrainzService.IsConnected;
+
     private void UpdateScrobblingForSnapshot(MediaSnapshot snapshot, bool force = false)
     {
         MaybeFlushGlobeListens();
+        MaybeFlushListenBrainzListens();
         var lastFmOn = IsLastFmScrobblingOn;
         var globeOn = IsGlobeListeningOn;
-        if (!lastFmOn && !globeOn)
+        var listenBrainzOn = IsListenBrainzOn;
+        if (!lastFmOn && !globeOn && !listenBrainzOn)
         {
             ResetScrobblingState();
             SetScrobblingStatus(_lastFmService.IsKeyRefused
@@ -6419,6 +6428,12 @@ public partial class MainWindow : Window
             SendGlobeNowPlaying(_scrobbleState);
         }
 
+        if (listenBrainzOn && !_scrobbleState.ListenBrainzNowPlayingSent)
+        {
+            _scrobbleState.ListenBrainzNowPlayingSent = true;
+            SendListenBrainzNowPlaying(_scrobbleState);
+        }
+
         var threshold = GetScrobbleThreshold(_scrobbleState.Duration);
         if (_scrobbleState.ObservedPlayTime < threshold)
         {
@@ -6431,6 +6446,13 @@ public partial class MainWindow : Window
         {
             _scrobbleState.GlobeQueued = true;
             QueueGlobeListen(_scrobbleState);
+            RecordLocalHistory(_scrobbleState);
+        }
+
+        if (listenBrainzOn && !_scrobbleState.ListenBrainzQueued)
+        {
+            _scrobbleState.ListenBrainzQueued = true;
+            QueueListenBrainzListen(_scrobbleState);
             RecordLocalHistory(_scrobbleState);
         }
 
@@ -6607,6 +6629,61 @@ public partial class MainWindow : Window
         });
     }
 
+    // ───── ListenBrainz-compatible server (Settings → Scrobbling) ─────
+
+    private static readonly TimeSpan ListenBrainzFlushInterval = TimeSpan.FromMinutes(5);
+    private DateTimeOffset _lastListenBrainzFlushAt = DateTimeOffset.MinValue;
+
+    private void QueueListenBrainzListen(ScrobblePlaybackState state)
+    {
+        _listenBrainzService.Enqueue(new ListenBrainzListen(
+            state.Track.ArtistName,
+            state.Track.TrackName,
+            state.Track.AlbumName ?? string.Empty,
+            state.StartedAt.ToUnixTimeSeconds(),
+            (int)Math.Round(state.Duration.TotalSeconds)));
+        FlushListenBrainzListens();
+    }
+
+    /// <summary>Plays still waiting (the server was unreachable) go again every few minutes.</summary>
+    private void MaybeFlushListenBrainzListens()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastListenBrainzFlushAt < ListenBrainzFlushInterval || !_listenBrainzService.IsConnected)
+        {
+            return;
+        }
+
+        FlushListenBrainzListens();
+    }
+
+    private void FlushListenBrainzListens()
+    {
+        _lastListenBrainzFlushAt = DateTimeOffset.UtcNow;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _listenBrainzService.FlushAsync();
+            }
+            catch (Exception)
+            {
+                // The queue keeps whatever was not sent for the next try.
+            }
+        });
+    }
+
+    /// <summary>Shows the song on the server while it plays (ListenBrainz has no way to clear it; it lapses there).</summary>
+    private void SendListenBrainzNowPlaying(ScrobblePlaybackState state)
+    {
+        var track = new ListenBrainzNowPlaying(
+            state.Track.ArtistName,
+            state.Track.TrackName,
+            state.Track.AlbumName ?? string.Empty,
+            (int)Math.Round(state.Duration.TotalSeconds));
+        _ = Task.Run(() => _listenBrainzService.SetPlayingNowAsync(track));
+    }
+
     private CancellationTokenSource ResetLastFmScrobbleCancellation()
     {
         _lastFmScrobbleCts?.Cancel();
@@ -6711,6 +6788,8 @@ public partial class MainWindow : Window
         public bool LastFmNowPlayingSent { get; set; }
         public bool GlobeNowPlayingSent { get; set; }
         public bool GlobeQueued { get; set; }
+        public bool ListenBrainzNowPlayingSent { get; set; }
+        public bool ListenBrainzQueued { get; set; }
         public bool HistoryRecorded { get; set; }
         public bool ScrobbleSubmitStarted { get; set; }
         public bool ScrobbleSubmitted { get; set; }
@@ -7319,7 +7398,8 @@ public partial class MainWindow : Window
         var settingsWindow = new SettingsWindow(
             _settingsService,
             _lastFmService,
-            _globeConnectionService)
+            _globeConnectionService,
+            _listenBrainzService)
         {
             WindowStartupLocation = IsVisible ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen
         };
@@ -7921,6 +8001,7 @@ public partial class MainWindow : Window
         _musicBrainzService.Dispose();
         _artistArtworkService.Dispose();
         _globeConnectionService.Dispose();
+        _listenBrainzService.Dispose();
         _lyricsService.Dispose();
         _animatedArtworkService.Dispose();
         _mediaService.Dispose();

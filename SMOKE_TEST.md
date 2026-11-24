@@ -138,6 +138,17 @@ For packaged development builds:
 - With scrobbling checked but no API secret or password, confirm Save is blocked with a readable status and the tray's `Enable Scrobbling` toggle refuses to turn on and points to Settings.
 - Fill every Last.fm field but use a wrong password or secret, then enable scrobbling from the tray; confirm Mystral checks the account first and reports the failure instead of turning scrobbling on.
 - With settings open, toggle scrobbling from the tray menu and confirm the settings checkbox updates immediately without reopening the window.
+- Open every category, Social and Scrobbling included, and confirm nothing is cut off: a section taller than the window scrolls, and the Save and Close buttons stay in place.
+
+## Scrobbling
+
+- Open Settings → Scrobbling, type a wrong address (`http://example.com`) and confirm Connect explains that it needs https.
+- Paste a wrong token and confirm Connect says the server refused it and nothing is kept.
+- Connect with a real token (listenbrainz.org's from its settings, or one a ListenBrainz-compatible server made): confirm the connecting animation, then the account name, the server's host and `0 plays sent`; a server that sends a picture shows it in the frame.
+- Play a song past half its length (or 4 minutes) with Last.fm off: confirm the server shows it playing, then has the play, and the count goes up.
+- Stop the server (or go offline), play a song, confirm the count shows it waiting; bring the server back and confirm it's sent within five minutes.
+- Turn off or delete the token on the server, play a song, and confirm Settings → Scrobbling says `Disconnected: the server refused the token.`
+- `Send my play history` reports how many plays went; `disconnect` asks first and returns to the address and token boxes.
 
 ## Burn Editor
 

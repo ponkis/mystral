@@ -42,6 +42,18 @@ If Last.fm rejects the API key, Mystral stops using Last.fm and says so in the
 tray menu and in the `Last.fm` settings; everything else keeps working. It tries
 the key again after settings are saved or the app restarts.
 
+5. Optionally, scrobble to a ListenBrainz-compatible server under `Scrobbling`:
+   [ListenBrainz](https://listenbrainz.org) itself, or any server that speaks
+   its API (a personal website, Maloja, Koito and others). Type the server's
+   address (`listenbrainz.org`, or the address the server's settings show) and
+   paste the token it gave you, then `Connect`. Mystral checks the token with
+   the server (`1/validate-token`) and, while `Send what I play` is on, sends
+   the song playing now and every finished play (`1/submit-listens`), whether
+   or not Last.fm is set up. Plays it can't send right now wait and go later.
+   `Send my play history` sends the plays Mystral kept on this computer once,
+   and `disconnect` forgets the token. A token the server stops accepting
+   disconnects Mystral and says so in the same section.
+
 `Prefer online cover art` (under `Behavior`, on by default) shows the
 track's cover from MusicBrainz and the Cover Art Archive instead of the one
 the media app provides. The cover is used only when it belongs to the same
@@ -207,6 +219,7 @@ The test suite covers the vital headless app logic:
 - LRC parsing and lyric result handling
 - Last.fm metadata cleanup, filtering, API requests, signatures, caching, scrobbling paths, and rejected API keys
 - sending plays to a linked globe account, and keeping them for later when it can't be reached
+- ListenBrainz-compatible scrobbling: server addresses, the API's requests and answers, keeping plays for later, connecting, and disconnecting on a refused token
 - LRCLIB exact lookup, Apple Music metadata normalization, fallback search ranking, parsing, and caching
 - settings persistence, player-theme and burn-lyrics defaults, and corrupt JSON fallback
 - local scrobble history add, remove, clear, corrupt file, and 10,000 item cap
@@ -232,8 +245,8 @@ Release builds store settings in:
 %LOCALAPPDATA%\Mystral\settings.json
 ```
 
-Last.fm credentials and the globe bearer token are never written to
-`settings.json`. They are stored in the environment-specific `credentials`
+Last.fm credentials, the globe bearer token and the scrobbling server's token
+are never written to `settings.json`. They are stored in the environment-specific `credentials`
 directory and encrypted for the current Windows user with DPAPI. Existing
 plaintext Last.fm fields are migrated to that protected store the next time
 settings are loaded successfully.
@@ -243,7 +256,7 @@ settings are loaded successfully.
 The project version is centralized in `Directory.Build.props`:
 
 ```xml
-<VersionPrefix>2.3.7</VersionPrefix>
+<VersionPrefix>2.3.8</VersionPrefix>
 ```
 
 To bump the app version, edit `VersionPrefix`. Debug builds automatically use a `-dev` suffix. Release builds use the plain version.

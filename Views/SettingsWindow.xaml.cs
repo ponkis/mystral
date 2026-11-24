@@ -25,6 +25,7 @@ public partial class SettingsWindow : Window
     private readonly AppSettingsService _settingsService;
     private readonly LastFmService _lastFmService;
     private readonly GlobeConnectionService _globeConnectionService;
+    private readonly ListenBrainzConnectionService _listenBrainzService;
     private bool _isLoadingSettings;
     private bool _isUpdatingThemeControls;
     private bool _hasUnsavedChanges;
@@ -51,11 +52,13 @@ public partial class SettingsWindow : Window
     public SettingsWindow(
         AppSettingsService settingsService,
         LastFmService lastFmService,
-        GlobeConnectionService globeConnectionService)
+        GlobeConnectionService globeConnectionService,
+        ListenBrainzConnectionService listenBrainzService)
     {
         _settingsService = settingsService;
         _lastFmService = lastFmService;
         _globeConnectionService = globeConnectionService;
+        _listenBrainzService = listenBrainzService;
 
         InitializeComponent();
 #if DEBUG
@@ -66,6 +69,7 @@ public partial class SettingsWindow : Window
         SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/settings.ico", 16);
         StatusIcon.Source = IconImageSource.LoadBestFitFrame("Resources/Images/info.ico", 16);
         _globeConnectionService.StateChanged += GlobeConnectionService_StateChanged;
+        _listenBrainzService.StateChanged += ListenBrainzService_StateChanged;
         _settingsService.SettingsChanged += SettingsService_SettingsChanged;
         LoadSettings();
         CategoriesListBox.SelectedItem = LastFmCategoryItem;
@@ -77,6 +81,8 @@ public partial class SettingsWindow : Window
             _pendingThemePreviewColor = null;
             ApplyPlayerThemePreview(null);
             _globeConnectionService.StateChanged -= GlobeConnectionService_StateChanged;
+            _listenBrainzService.StateChanged -= ListenBrainzService_StateChanged;
+            StopScrobblingConnectingAnimation();
             _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
             LocalScrobbleCacheService.Instance.ScrobbleAdded -= LocalScrobbleCache_ScrobbleAdded;
         };
@@ -165,6 +171,10 @@ public partial class SettingsWindow : Window
         AutomaticallyShareBurnsCheckBox.IsChecked = settings.Social.AutomaticallyShareBurns;
         SendPlaysToGlobeCheckBox.IsChecked = settings.Social.SendPlaysToGlobe;
         UpdateSocialPanel(animate: false);
+        SendPlaysToServerCheckBox.IsChecked = settings.ListenBrainz.SendPlays;
+        ScrobblingServerBox.Text = _listenBrainzService.LastServerText;
+        UpdateScrobblingPanel(animate: false);
+        _ = LoadScrobblingAvatarAsync();
         if (_socialProfile is not null)
         {
             _ = RefreshSocialAvatarAsync(_socialProfile, animate: false);
@@ -192,15 +202,23 @@ public partial class SettingsWindow : Window
         var selectedItem = CategoriesListBox.SelectedItem;
         
         LastFmPanel.Visibility = selectedItem == LastFmCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        ScrobblingPanel.Visibility = selectedItem == ScrobblingCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         BehaviorPanel.Visibility = selectedItem == BehaviorCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = selectedItem == AppearanceCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         SocialPanel.Visibility = selectedItem == SocialCategoryItem ? Visibility.Visible : Visibility.Collapsed;
         HistoryPanel.Visibility = selectedItem == HistoryCategoryItem ? Visibility.Visible : Visibility.Collapsed;
+        // Each section starts at its top, whatever the last one was scrolled to.
+        SectionScrollViewer.ScrollToTop();
 
         if (selectedItem == LastFmCategoryItem)
         {
             SettingsTitleText.Text = "Last.fm";
             SettingsHeaderIcon.Source = IconImageSource.LoadSiteImage("Resources/Images/lastfm.png");
+        }
+        else if (selectedItem == ScrobblingCategoryItem)
+        {
+            SettingsTitleText.Text = "Scrobbling";
+            SettingsHeaderIcon.Source = IconImageSource.LoadBestFitFrame("Resources/instrumental.ico", 16);
         }
         else if (selectedItem == BehaviorCategoryItem)
         {
@@ -466,8 +484,287 @@ public partial class SettingsWindow : Window
                     && AutomaticallyShareBurnsCheckBox.IsChecked == true,
                 // A choice that outlasts the link: it applies again on relinking.
                 SendPlaysToGlobe = SendPlaysToGlobeCheckBox.IsChecked == true
+            },
+            ListenBrainz = new ListenBrainzSettings
+            {
+                // Like globe's, a choice that outlasts the connection.
+                SendPlays = SendPlaysToServerCheckBox.IsChecked == true
             }
         };
+    }
+
+    // ───── Scrobbling: a ListenBrainz-compatible server ─────
+
+    private const int ScrobblingPictureSourceLimit = 8192;
+    private const long ScrobblingPicturePixelLimit = 32L * 1024 * 1024;
+    private const int ScrobblingPictureDecodeSize = 256;
+    private bool _isScrobblingConnecting;
+    private bool _isSendingHistoryToServer;
+    private ImageSource? _scrobblingPicture;
+    private Uri? _scrobblingPictureFor;
+
+    private void ListenBrainzService_StateChanged(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => ListenBrainzService_StateChanged(sender, e));
+            return;
+        }
+
+        UpdateScrobblingPanel(animate: true);
+        _ = LoadScrobblingAvatarAsync();
+    }
+
+    private void UpdateScrobblingPanel(bool animate)
+    {
+        var state = _listenBrainzService.State;
+        var connecting = _isScrobblingConnecting || state.Status == ListenBrainzConnectionStatus.Connecting;
+        var connected = state.IsConnected && !connecting;
+
+        ScrobblingProfileContent.Visibility = connecting ? Visibility.Collapsed : Visibility.Visible;
+        ScrobblingConnectingPanel.Visibility = connecting ? Visibility.Visible : Visibility.Collapsed;
+        if (connecting)
+        {
+            StartScrobblingConnectingAnimation();
+        }
+        else
+        {
+            StopScrobblingConnectingAnimation();
+        }
+
+        ConnectedScrobblingPanel.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectedScrobblingPanel.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        ScrobblingConnectForm.Visibility = connected ? Visibility.Collapsed : Visibility.Visible;
+        ScrobblingConnectedOptions.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+        ConnectScrobblingButton.IsEnabled = !connecting;
+        ScrobblingServerBox.IsEnabled = !connecting;
+        ScrobblingTokenBox.IsEnabled = !connecting;
+        SendHistoryToServerButton.IsEnabled = connected && !_isSendingHistoryToServer;
+
+        if (connected)
+        {
+            ScrobblingHostText.Text = state.Host;
+            ScrobblingUserText.Text = state.UserName;
+            var sent = _listenBrainzService.PlaysSent;
+            var waiting = _listenBrainzService.WaitingCount;
+            ScrobblingCountText.Text = $"{sent:N0} play{(sent == 1 ? "" : "s")} sent"
+                + (waiting > 0 ? $", {waiting:N0} waiting" : string.Empty);
+        }
+        else
+        {
+            ScrobblingMessageText.Text = string.IsNullOrWhiteSpace(state.Message) ? "No server connected" : state.Message;
+        }
+
+        var picture = connected && _scrobblingPicture is not null && _scrobblingPictureFor == state.AvatarUri
+            ? _scrobblingPicture
+            : IconImageSource.LoadSiteImage("Resources/Images/placeholder_pfp.png");
+        ScrobblingProfileFrame.SetProfile(connected, picture, animate);
+    }
+
+    private async void ConnectScrobbling_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isScrobblingConnecting)
+        {
+            return;
+        }
+
+        if (!ListenBrainzClient.TryNormalizeServer(ScrobblingServerBox.Text, out _, out var serverError))
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't connect", serverError);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ScrobblingTokenBox.Password))
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't connect", "Paste the token the server gave you.");
+            return;
+        }
+
+        _isScrobblingConnecting = true;
+        UpdateScrobblingPanel(animate: false);
+        try
+        {
+            await _listenBrainzService.ConnectAsync(ScrobblingServerBox.Text, ScrobblingTokenBox.Password);
+            ScrobblingTokenBox.Clear();
+            ScrobblingServerBox.Text = _listenBrainzService.LastServerText;
+        }
+        catch (Exception ex) when (ex is ListenBrainzUnavailableException or ListenBrainzUnauthorizedException or ListenBrainzRefusedException)
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't connect", ex.Message);
+        }
+        catch (Exception ex)
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't connect", "Mystral couldn't keep the token: " + ex.Message);
+        }
+        finally
+        {
+            _isScrobblingConnecting = false;
+            UpdateScrobblingPanel(animate: true);
+        }
+    }
+
+    private void DisconnectScrobbling_Click(object sender, RoutedEventArgs e)
+    {
+        var state = _listenBrainzService.State;
+        var waiting = _listenBrainzService.WaitingCount;
+        var question = $"Stop sending your plays to {state.Host}?"
+            + (waiting > 0 ? $" The {waiting:N0} play{(waiting == 1 ? "" : "s")} still waiting to be sent will be dropped." : string.Empty);
+        if (AppDialogWindow.ShowQuestion(this, "Disconnect", question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _listenBrainzService.Disconnect();
+        _scrobblingPicture = null;
+        _scrobblingPictureFor = null;
+        UpdateScrobblingPanel(animate: true);
+    }
+
+    /// <summary>
+    /// Sends the plays Mystral kept on this computer to the server, once;
+    /// servers skip the ones they already have.
+    /// </summary>
+    private async void SendHistoryToServerButton_Click(object sender, RoutedEventArgs e)
+    {
+        var listens = LocalScrobbleCacheService.Instance.LoadAllRecords()
+            .Where(record => !string.IsNullOrWhiteSpace(record.Artist)
+                && !string.IsNullOrWhiteSpace(record.Title)
+                && record.Timestamp > 0)
+            .Select(record => new ListenBrainzListen(
+                record.Artist.Trim(),
+                record.Title.Trim(),
+                record.Album?.Trim() ?? string.Empty,
+                record.Timestamp,
+                Math.Max(0, record.Duration)))
+            .OrderBy(listen => listen.ListenedAt)
+            .ToList();
+        if (listens.Count == 0)
+        {
+            AppDialogWindow.ShowWarning(this, "Nothing to send", "Mystral hasn't kept any plays on this computer yet.");
+            return;
+        }
+
+        var host = _listenBrainzService.State.Host;
+        _isSendingHistoryToServer = true;
+        SendHistoryToServerButton.IsEnabled = false;
+        try
+        {
+            var sent = await _listenBrainzService.SubmitHistoryAsync(listens);
+            AppDialogWindow.ShowConfirmation(
+                this,
+                "Sent",
+                $"{sent:N0} play{(sent == 1 ? "" : "s")} sent to {host}. Plays it already had were skipped there.");
+        }
+        catch (Exception ex) when (ex is ListenBrainzUnavailableException or ListenBrainzUnauthorizedException or ListenBrainzRefusedException)
+        {
+            AppDialogWindow.ShowWarning(this, "Couldn't send your plays", ex.Message);
+        }
+        finally
+        {
+            _isSendingHistoryToServer = false;
+            UpdateScrobblingPanel(animate: false);
+        }
+    }
+
+    /// <summary>The account's picture, if the server sent one (listenbrainz.org doesn't).</summary>
+    private async Task LoadScrobblingAvatarAsync()
+    {
+        var state = _listenBrainzService.State;
+        if (!state.IsConnected || state.AvatarUri is null || state.AvatarUri == _scrobblingPictureFor)
+        {
+            return;
+        }
+
+        var avatar = state.AvatarUri;
+        var bytes = await _listenBrainzService.DownloadAvatarAsync();
+        if (bytes is null || _listenBrainzService.State.AvatarUri != avatar)
+        {
+            return;
+        }
+
+        try
+        {
+            _scrobblingPicture = DecodeScrobblingPicture(bytes);
+            _scrobblingPictureFor = avatar;
+            UpdateScrobblingPanel(animate: true);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or IOException or ArgumentException or System.Runtime.InteropServices.COMException or FileFormatException)
+        {
+            // A picture that can't be shown keeps the placeholder.
+        }
+    }
+
+    /// <summary>Decodes a server's picture small, refusing images too large to decode safely.</summary>
+    private static ImageSource DecodeScrobblingPicture(byte[] bytes)
+    {
+        using var metadataStream = new MemoryStream(bytes, writable: false);
+        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(
+            metadataStream,
+            System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation,
+            System.Windows.Media.Imaging.BitmapCacheOption.None);
+        if (decoder.Frames.Count == 0)
+        {
+            throw new InvalidDataException("The picture is empty.");
+        }
+
+        var width = decoder.Frames[0].PixelWidth;
+        var height = decoder.Frames[0].PixelHeight;
+        if (width <= 0 || height <= 0
+            || Math.Max(width, height) > ScrobblingPictureSourceLimit
+            || (long)width * height > ScrobblingPicturePixelLimit)
+        {
+            throw new InvalidDataException("The picture is too large.");
+        }
+
+        using var stream = new MemoryStream(bytes, writable: false);
+        var image = new System.Windows.Media.Imaging.BitmapImage();
+        image.BeginInit();
+        image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+        if (width >= height)
+        {
+            image.DecodePixelWidth = ScrobblingPictureDecodeSize;
+        }
+        else
+        {
+            image.DecodePixelHeight = ScrobblingPictureDecodeSize;
+        }
+
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
+    private void StartScrobblingConnectingAnimation()
+    {
+        const int frameCount = 32;
+        const int frameWidth = 48;
+        const int frameDurationMilliseconds = 58;
+
+        if (ScrobblingConnectingSpriteTranslate.HasAnimatedProperties)
+        {
+            return;
+        }
+
+        var spriteAnimation = new DoubleAnimationUsingKeyFrames
+        {
+            Duration = TimeSpan.FromMilliseconds(frameCount * frameDurationMilliseconds),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        for (var frame = 0; frame < frameCount; frame++)
+        {
+            spriteAnimation.KeyFrames.Add(new DiscreteDoubleKeyFrame(
+                -frame * frameWidth,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(frame * frameDurationMilliseconds))));
+        }
+
+        ScrobblingConnectingSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, spriteAnimation);
+    }
+
+    private void StopScrobblingConnectingAnimation()
+    {
+        ScrobblingConnectingSpriteTranslate.BeginAnimation(TranslateTransform.XProperty, null);
+        ScrobblingConnectingSpriteTranslate.X = 0;
     }
 
     private bool _isSendingHistoryToGlobe;

@@ -9,6 +9,7 @@ public sealed record class AppSettings
     public BehaviorSettings Behavior { get; set; } = new();
     public AppearanceSettings Appearance { get; set; } = new();
     public SocialSettings Social { get; set; } = new();
+    public ListenBrainzSettings ListenBrainz { get; set; } = new();
 }
 
 public sealed record class LastFmCredentials
@@ -157,4 +158,17 @@ public sealed record class SocialSettings
     /// history while linked. On unless the member turns it off.
     /// </summary>
     public bool SendPlaysToGlobe { get; set; } = true;
+}
+
+/// <summary>
+/// Scrobbling to a ListenBrainz-compatible server: listenbrainz.org, or any
+/// server that speaks its API (Settings → Scrobbling). Only the choice lives
+/// here; the connection (server, account, token) is kept by
+/// <see cref="Services.ListenBrainzConnectionService"/>, the token only in the
+/// DPAPI store.
+/// </summary>
+public sealed record class ListenBrainzSettings
+{
+    /// <summary>Send finished plays and the song playing now while connected.</summary>
+    public bool SendPlays { get; set; } = true;
 }
