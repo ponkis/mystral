@@ -107,6 +107,7 @@
                  ItemContainerStyle="{StaticResource CategoryListBoxItemStyle}"
                  SelectionChanged="CategoriesListBox_SelectionChanged">
             <ListBoxItem x:Name="LastFmCategoryItem" Height="28" Content="Last.fm" />
+            <ListBoxItem x:Name="ScrobblingCategoryItem" Height="28" Content="Scrobbling" />
             <ListBoxItem x:Name="BehaviorCategoryItem" Height="28" Content="Behavior" />
             <ListBoxItem x:Name="AppearanceCategoryItem" Height="28" Content="Appearance" />
             <ListBoxItem x:Name="SocialCategoryItem" Height="28" Content="Social" />
@@ -135,7 +136,13 @@
                            Text="Settings" />
             </StackPanel>
 
-            <Grid Grid.Row="1">
+            <!-- The sections scroll when they're taller than the window. -->
+            <ScrollViewer x:Name="SectionScrollViewer"
+                          Grid.Row="1"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Focusable="False">
+            <Grid Margin="0,0,4,0">
                 <StackPanel x:Name="LastFmPanel">
                     <TextBlock FontWeight="Bold" Text="Last.fm" />
                     <TextBlock Margin="0,5,0,12"
@@ -479,7 +486,132 @@
                             IsEnabled="False"
                             Click="ExportHistoryButton_Click" />
                 </StackPanel>
+
+                <StackPanel x:Name="ScrobblingPanel"
+                            Visibility="Collapsed">
+                    <TextBlock FontWeight="Bold"
+                               Text="Scrobble to a server" />
+                    <TextBlock Margin="0,5,0,10"
+                               Foreground="#555555"
+                               TextWrapping="Wrap"
+                               Text="Send what you play to ListenBrainz, or to any server that speaks its language (your own website, for example). Paste the server's address and a token it gave you." />
+
+                    <Grid Height="112">
+                        <Grid x:Name="ScrobblingProfileContent">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Viewbox Width="112"
+                                     Height="112"
+                                     HorizontalAlignment="Left"
+                                     VerticalAlignment="Top"
+                                     Stretch="Uniform">
+                                <controls:SocialProfileFrame x:Name="ScrobblingProfileFrame" />
+                            </Viewbox>
+
+                            <Grid Grid.Column="1"
+                                  Margin="12,0,0,0"
+                                  VerticalAlignment="Center">
+                                <StackPanel x:Name="DisconnectedScrobblingPanel">
+                                    <TextBlock FontSize="18"
+                                               FontWeight="SemiBold"
+                                               Foreground="#111111"
+                                               Text="Not connected" />
+                                    <TextBlock x:Name="ScrobblingMessageText"
+                                               Margin="0,1,0,0"
+                                               Foreground="#666666"
+                                               TextWrapping="Wrap"
+                                               Text="No server connected" />
+                                </StackPanel>
+
+                                <StackPanel x:Name="ConnectedScrobblingPanel"
+                                            Visibility="Collapsed">
+                                    <TextBlock x:Name="ScrobblingHostText"
+                                               Foreground="#666666"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="ScrobblingUserText"
+                                               Margin="0,0,0,1"
+                                               FontSize="20"
+                                               Foreground="#111111"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock x:Name="ScrobblingCountText"
+                                               Foreground="#666666"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Margin="0,10,0,0">
+                                        <Hyperlink Click="DisconnectScrobbling_Click">disconnect</Hyperlink>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+
+                        <StackPanel x:Name="ScrobblingConnectingPanel"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="Collapsed">
+                            <TextBlock HorizontalAlignment="Center"
+                                       FontSize="18"
+                                       Foreground="#777777"
+                                       Text="Connecting..." />
+                            <Canvas Width="48"
+                                    Height="36"
+                                    Margin="0,12,0,0"
+                                    HorizontalAlignment="Center"
+                                    ClipToBounds="True">
+                                <Image Width="1536"
+                                       Height="36"
+                                       Source="pack://siteoforigin:,,,/Resources/Images/Speen.png"
+                                       Stretch="None"
+                                       SnapsToDevicePixels="True">
+                                    <Image.RenderTransform>
+                                        <TranslateTransform x:Name="ScrobblingConnectingSpriteTranslate" />
+                                    </Image.RenderTransform>
+                                </Image>
+                            </Canvas>
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel x:Name="ScrobblingConnectForm"
+                                Margin="0,10,0,0">
+                        <TextBlock Text="Server address" />
+                        <TextBox x:Name="ScrobblingServerBox"
+                                 Height="23"
+                                 Margin="0,4,0,0"
+                                 VerticalContentAlignment="Center" />
+                        <TextBlock Margin="0,8,0,0"
+                                   Text="Token" />
+                        <PasswordBox x:Name="ScrobblingTokenBox"
+                                     Height="23"
+                                     Margin="0,4,0,0"
+                                     VerticalContentAlignment="Center" />
+                        <Button x:Name="ConnectScrobblingButton"
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Left"
+                                MinWidth="90"
+                                Height="23"
+                                Content="Connect"
+                                Click="ConnectScrobbling_Click" />
+                    </StackPanel>
+
+                    <StackPanel x:Name="ScrobblingConnectedOptions"
+                                Margin="0,8,0,0"
+                                Visibility="Collapsed">
+                        <CheckBox x:Name="SendPlaysToServerCheckBox"
+                                  Content="Send what I play"
+                                  Click="SettingsControl_Changed" />
+                        <Button x:Name="SendHistoryToServerButton"
+                                Margin="0,6,0,0"
+                                HorizontalAlignment="Left"
+                                MinWidth="150"
+                                Height="23"
+                                Content="Send my play history"
+                                ToolTip="Sends the plays Mystral has kept on this computer. Plays the server already has are skipped."
+                                Click="SendHistoryToServerButton_Click" />
+                    </StackPanel>
+                </StackPanel>
             </Grid>
+            </ScrollViewer>
 
             <Grid Grid.Row="2"
                   Margin="0,12,0,0">

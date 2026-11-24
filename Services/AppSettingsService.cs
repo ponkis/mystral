@@ -284,6 +284,7 @@ public sealed class AppSettingsService
         settings.Behavior ??= new BehaviorSettings();
         settings.Appearance ??= new AppearanceSettings();
         settings.Social ??= new SocialSettings();
+        settings.ListenBrainz ??= new ListenBrainzSettings();
         settings.LastFm.ApiKey = settings.LastFm.ApiKey.Trim();
         settings.LastFm.ApiSecret = settings.LastFm.ApiSecret.Trim();
         settings.LastFm.Username = settings.LastFm.Username.Trim();
